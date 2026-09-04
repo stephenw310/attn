@@ -89,7 +89,7 @@ describe('mailbox triage projection', () => {
   it('shares Spam and Trash queue operations with Move and restores direct-action pre-state exactly', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       const insertThread = db.prepare(
         'INSERT INTO threads (account_id, id, subject, last_msg_at) VALUES (?, ?, ?, 1)'
       )
@@ -191,7 +191,7 @@ describe('mailbox triage projection', () => {
   it('moves mixed pre-states, cancels pending snoozes, and undoes both exactly', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       const insertLabel = db.prepare('INSERT INTO labels (account_id, id, name, type) VALUES (?, ?, ?, ?)')
       insertLabel.run(ACCOUNT, 'Label_Source', 'Source', 'user')
       insertLabel.run(ACCOUNT, 'Label_Destination', 'Destination', 'user')
@@ -278,7 +278,7 @@ describe('mailbox triage projection', () => {
   it('queues Gmail deltas for Trash, Important, and Other and undoes the system labels exactly', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       const insertThread = db.prepare(
         'INSERT INTO threads (account_id, id, subject, last_msg_at) VALUES (?, ?, ?, 1)'
       )
@@ -356,7 +356,7 @@ describe('mailbox triage projection', () => {
   it('does not queue or record a Move that changes no label or reminder', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       db.prepare(
         "INSERT INTO labels (account_id, id, name, type) VALUES (?, 'Label_Destination', 'Destination', 'user')"
       ).run(ACCOUNT)
@@ -390,7 +390,7 @@ describe('mailbox triage projection', () => {
   it('applies a partial destination to every message and reverses the thread mutation on undo', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       db.prepare(
         "INSERT INTO labels (account_id, id, name, type) VALUES (?, 'Label_Destination', 'Destination', 'user')"
       ).run(ACCOUNT)
@@ -447,7 +447,7 @@ describe('mailbox triage projection', () => {
   it('counts only changed targets in mixed bulk Move copy', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       db.prepare(
         "INSERT INTO labels (account_id, id, name, type) VALUES (?, 'Label_Destination', 'Destination', 'user')"
       ).run(ACCOUNT)
@@ -485,7 +485,7 @@ describe('mailbox triage projection', () => {
     // the target can already be out of the inbox. Undoing must not file it.
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       db.prepare("INSERT INTO threads (account_id, id, subject) VALUES (?, 'filed', 'Filed')").run(ACCOUNT)
       db.prepare(
         `INSERT INTO messages (account_id, id, thread_id, labels_json)
@@ -513,7 +513,7 @@ describe('mailbox triage projection', () => {
   it('links a label undo to the queue row it reverts so a rejected action can drop it', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       db.prepare("INSERT INTO threads (account_id, id, subject) VALUES (?, 'thread', 'Roadmap')").run(ACCOUNT)
       db.prepare(
         `INSERT INTO messages (account_id, id, thread_id, labels_json)
@@ -542,7 +542,7 @@ describe('mailbox triage projection', () => {
   it('rejects missing, system, and identical Move labels before writing', () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
       db.prepare(
         "INSERT INTO labels (account_id, id, name, type) VALUES (?, 'Label_User', 'User', 'user')"
       ).run(ACCOUNT)
@@ -608,7 +608,7 @@ describe('outbox undo stack', () => {
 describe('follow-up triage matrix (T35/F9)', () => {
   function followUpDb(state: 'pending' | 'returned', dueAt: number, threadId = 't-f'): Db {
     const db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
     db.prepare('INSERT INTO threads (account_id, id) VALUES (?, ?)').run(ACCOUNT, threadId)
     db.prepare('INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, ?)').run(
       ACCOUNT,
@@ -718,7 +718,7 @@ describe('follow-up triage matrix (T35/F9)', () => {
 
   it('undoing an older move preserves a follow-up created by a later send', () => {
     const db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)').run(ACCOUNT, ACCOUNT)
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
     db.prepare(
       "INSERT INTO threads (account_id, id, is_inbox_visible) VALUES (?, 't-later-follow-up', 1)"
     ).run(ACCOUNT)

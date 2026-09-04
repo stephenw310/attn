@@ -263,9 +263,7 @@ describe('candidatesFor', () => {
 
 function mailDb(inboxMessages: readonly { messageId: string; threadId: string; important?: boolean }[]): Db {
   const db = openDatabase(':memory:')
-  db.prepare(
-    "INSERT INTO accounts (id, email, created_at) VALUES ('user@attn.test', 'user@attn.test', 0)"
-  ).run()
+  db.prepare("INSERT INTO accounts (id, email) VALUES ('user@attn.test', 'user@attn.test')").run()
   const insertThread = db.prepare(
     `INSERT INTO threads
      (account_id, id, subject, snippet, last_msg_at, from_display, is_unread, is_inbox_visible)

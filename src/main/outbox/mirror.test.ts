@@ -324,10 +324,7 @@ describe('draft mirror selection', () => {
     // composer's own IPC gate refuses it; this selection must refuse it too.
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 1)').run(
-        'user@example.com',
-        'user@example.com'
-      )
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('user@example.com', 'user@example.com')
       const planned = {
         ...emptyDraftInput(),
         kind: 'reply' as const,
@@ -361,10 +358,7 @@ describe('draft mirror selection', () => {
     // has nowhere to land and the draft must not be left for sync to import.
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 1)').run(
-        'user@example.com',
-        'user@example.com'
-      )
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('user@example.com', 'user@example.com')
       const id = saveDraft(
         db,
         'user@example.com',

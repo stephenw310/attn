@@ -24,9 +24,7 @@ export const GMAIL_QUOTA_UNITS = {
   'settings.sendAs.get': 1,
   'threads.get': 40,
   'threads.list': 10,
-  'threads.modify': 10,
-  'threads.trash': 20,
-  'threads.untrash': 10
+  'threads.modify': 10
 } as const
 
 export type GmailQuotaMethod = keyof typeof GMAIL_QUOTA_UNITS
@@ -297,8 +295,6 @@ export function quotaMethod(method: string, path: string): GmailQuotaMethod {
   if (/^\/settings\/sendAs\/[^/]+$/.test(path)) return 'settings.sendAs.get'
   if (path === '/threads') return 'threads.list'
   if (/^\/threads\/[^/]+\/modify$/.test(path)) return 'threads.modify'
-  if (/^\/threads\/[^/]+\/trash$/.test(path)) return 'threads.trash'
-  if (/^\/threads\/[^/]+\/untrash$/.test(path)) return 'threads.untrash'
   if (/^\/threads\/[^/]+$/.test(path)) return 'threads.get'
   throw new Error(`Missing Gmail quota cost for ${method} ${path}`)
 }

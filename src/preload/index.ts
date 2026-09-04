@@ -5,6 +5,7 @@ import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from 
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { CommandUsage } from '../shared/commandUsage'
 import type { ContactSearchResult } from '../shared/contacts'
+import type { UpdateState } from '../shared/distribution'
 import type {
   Draft,
   DraftAttachmentMutationResult,
@@ -50,7 +51,6 @@ import type {
   SplitThreadLocation
 } from '../shared/splits'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
-import type { UpdateState } from '../shared/update'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
 /** Open composers awaiting a pre-quit checkpoint request (B28). */

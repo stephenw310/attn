@@ -1,11 +1,11 @@
 # T40 evidence — M4 exit and v1 sign-off
 
-State of the [M4-PLAN T40 exit checklist](M4-PLAN.md#t40-m4-exit-and-v1-sign-off) as of **2026-08-31**,
+State of the [M4-PLAN T40 exit checklist](M4-PLAN.md#t40-m4-exit-and-v1-sign-off) as of **2026-09-03**,
 following the T20-EVIDENCE convention: each box is ticked with its evidence, or held open with what it
 still needs. Engineering evidence below comes from the M4 branch (`claude/m4-implementation-6j6of2`,
 head `8ace1ab`) in the Claude Code cloud container (Linux 6.18, Node 22.22, Electron 43.3, Xvfb,
-hidden windows); items needing real hardware, real Gmail, a real LLM provider, or operator credentials
-are **open** and say so.
+hidden windows). A 2026-09-03 rerun on an Apple Silicon Mac supplied the real-vsync performance evidence;
+items needing real Gmail, a real LLM provider, or operator credentials are **open** and say so.
 
 ## Feature evidence (this milestone)
 
@@ -65,9 +65,9 @@ are **open** and say so.
 ## Bookkeeping
 
 - [x] SPEC §8 status paragraph updated with the M4 entry; the M4 bullet carries its shipped/open note.
-- [x] KNOWN-ISSUES re-verified 2026-08-31: every entry re-stamped with corrected anchors (GAP-2
-  through GAP-6, REF-1/3/4) or newly recorded (GAP-7); none closed silently.
-- [~] **Perf suites, recorded run (2026-08-31, cloud container above):**
+- [x] KNOWN-ISSUES re-verified 2026-09-03: auth-refresh and real-vsync perf gaps closed by evidence;
+  REF-1 now names Inbox as the remaining oversized component.
+- [x] **Perf suites, recorded runs (2026-08-31 cloud container; 2026-09-03 Apple Silicon Mac):**
   - `npm run e2e:perf:scale` (40k-thread bounded reads): **passed**.
   - `npm run e2e:perf` (10k + 1k two-account profile): **14 of 18 passed.** Every non-paint budget
     holds with all M4 features enabled — warm account switch p95 **42ms** (F18 budget 100ms), warm
@@ -76,8 +76,11 @@ are **open** and say so.
     memory-adjacent reads green. The four failures are exclusively frame-timed metrics
     (scroll-frame pacing, search-keystroke-to-results at a constant ~1,013ms, one split-switch p95
     outlier, composer paint-delta): this container paints hidden windows at ~1Hz, reproduced
-    unchanged at the pre-AI T35 commit — KNOWN-ISSUES **GAP-7**. The green-on-release-build,
-    frame-timed half of this box needs a machine with real vsync (operator).
+    unchanged at the pre-AI T35 commit.
+  - `npm run e2e:perf` on the Mac: **18 of 18 passed**. Frame-timed p95 values were scroll frame
+    **9ms**, search keystroke-to-results **41ms**, composer keystroke paint **9ms**, and paint delta
+    **6ms**. The previously suspect warm split switch measured **3ms p95** (cold **30ms**), and the
+    two-account split switches measured **33ms** and **33ms p95**, all inside their existing ceilings.
 
 ## Done when
 

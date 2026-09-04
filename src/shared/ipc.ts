@@ -4,6 +4,7 @@ import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from 
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from './auth'
 import type { CommandUsage } from './commandUsage'
 import type { ContactSearchResult } from './contacts'
+import type { UpdateState } from './distribution'
 import type {
   Draft,
   DraftAttachmentMutationResult,
@@ -39,7 +40,6 @@ import type {
   SplitThreadLocation
 } from './splits'
 import type { ThemePreference } from './theme'
-import type { UpdateState } from './update'
 
 export const IPC_CHANNELS = {
   authGetStatus: 'auth:getStatus',

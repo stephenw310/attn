@@ -21,8 +21,9 @@ import { countSystemMailboxes, listMailboxThreads } from '../db/queries'
 import { searchThreads } from '../db/search'
 import { loadSeed, readSeedThread, readSeedThreadAccount } from '../dev/seed'
 import { settleFollowUpCandidates } from '../followUps'
-import { GmailApiError } from '../gmail/client'
+import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
+import { GmailMailProvider } from '../gmail/provider'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
 import { cachePrimarySendAs } from '../outbox/sendAs'
 import { writeSetting } from '../settings'
@@ -211,7 +212,10 @@ export class TestOperations implements TestHooks {
       return undefined
     }
     if (channel === TEST_CHANNELS.failNextAction || channel === TEST_CHANNELS.failNextActionAuth) {
-      this.installActionFailure(args[0], channel === TEST_CHANNELS.failNextAction ? 400 : 401)
+      this.installActionFailure(
+        args[0],
+        channel === TEST_CHANNELS.failNextAction ? 'permanent' : 'auth-refresh'
+      )
       return undefined
     }
     if (channel === TEST_CHANNELS.setUndoSendDelay) {
@@ -471,23 +475,48 @@ export class TestOperations implements TestHooks {
     this.host.broadcastMailChanged(accountId)
   }
 
-  private installActionFailure(threadId: unknown, status: 400 | 401): void {
+  private installActionFailure(threadId: unknown, kind: 'permanent' | 'auth-refresh'): void {
     const seedPath = this.host.testSeed
     if (!seedPath || typeof threadId !== 'string') return
     // The failure arms the thread's *owning* account, active or not — a
     // background account's auth pause must be reproducible too (F18/A5).
     const owner = readSeedThreadAccount(seedPath, threadId)
     if (!owner || !readSeedThread(seedPath, threadId)) return
+    const authProvider =
+      kind === 'auth-refresh'
+        ? new GmailMailProvider(
+            new GmailClient(
+              { client_id: 'attn-e2e', client_secret: 'attn-e2e' },
+              {
+                access_token: 'expired',
+                refresh_token: 'revoked',
+                expires_at: 0,
+                email: owner
+              },
+              () => {},
+              {
+                fetch: async (input) => {
+                  const url = String(input)
+                  if (!url.includes('oauth2.googleapis.com/token')) {
+                    throw new Error(`unexpected auth-failure request: ${url}`)
+                  }
+                  console.log(`[test] token refresh returned invalid_grant for ${owner}`)
+                  return new Response('{"error":"invalid_grant"}', { status: 400 })
+                }
+              }
+            )
+          )
+        : null
     let rejectTarget = true
-    const mutate = async (requestedThreadId: string): Promise<void> => {
+    const mutate = async (requestedThreadId: string, add: string[], remove: string[]): Promise<void> => {
       if (requestedThreadId !== threadId) return
       if (!rejectTarget) {
-        if (status === 401) this.actionProviders.delete(owner)
+        if (kind === 'auth-refresh') this.actionProviders.delete(owner)
         return
       }
       rejectTarget = false
-      const reason = status === 401 ? 'authentication e2e failure' : 'permanent e2e failure'
-      throw new GmailApiError(status, `gmail /threads/${threadId}/modify failed (${status}): ${reason}`)
+      if (authProvider) return authProvider.modifyThread(requestedThreadId, add, remove)
+      throw new GmailApiError(400, `gmail /threads/${threadId}/modify failed (400): permanent e2e failure`)
     }
     this.actionProviders.set(owner, {
       modifyThread: mutate,

@@ -38,11 +38,7 @@ describe('thread list queries', () => {
 
   beforeEach(() => {
     db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-      'account',
-      'test@example.com',
-      0
-    )
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('account', 'test@example.com')
     const insertThread = db.prepare(
       `INSERT INTO threads
        (account_id, id, subject, last_msg_at, from_display, is_unread, is_starred, has_attachment)
@@ -476,11 +472,7 @@ describe('thread list queries', () => {
   })
 
   it('keeps All Mail scoped to its account when another account needs the slow path', () => {
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-      'other-account',
-      'other@example.com',
-      0
-    )
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('other-account', 'other@example.com')
     db.prepare(
       `INSERT INTO threads (account_id, id, subject, last_msg_at)
        VALUES ('other-account', 'other-mixed', 'Other account', 1000)`
@@ -573,11 +565,7 @@ describe('display conversation queries', () => {
 
   beforeEach(() => {
     db = openDatabase(':memory:')
-    db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-      'account',
-      'test@example.com',
-      0
-    )
+    db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('account', 'test@example.com')
     db.prepare(
       `INSERT INTO threads (account_id, id, subject, last_msg_at)
        VALUES ('account', 'thread-1', 'Roadmap', 100)`

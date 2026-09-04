@@ -38,11 +38,7 @@ async function testStore(): Promise<{
   const root = await mkdtemp(join(tmpdir(), 'attn-spool-'))
   roots.push(root)
   const db = openDatabase(join(root, 'attn.db'))
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-    'me@example.com',
-    'me@example.com',
-    1
-  )
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('me@example.com', 'me@example.com')
   const draftId = saveDraft(db, 'me@example.com', emptyDraftInput(), 10)
   return { root, db, draftId }
 }

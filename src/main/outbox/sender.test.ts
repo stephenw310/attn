@@ -317,11 +317,7 @@ describe('OutboxSender effect layer', () => {
   it('sends from the cached send-as name without a Gmail round trip', async () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-        'me@example.com',
-        'me@example.com',
-        NOW
-      )
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('me@example.com', 'me@example.com')
       db.prepare('INSERT INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(
         'me@example.com',
         'sendAsDisplayName',
@@ -371,11 +367,7 @@ describe('OutboxSender effect layer', () => {
     const db = openDatabase(':memory:')
     const mailChanged = vi.fn()
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-        'me@example.com',
-        'me@example.com',
-        NOW
-      )
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('me@example.com', 'me@example.com')
       db.prepare(
         `INSERT INTO messages
            (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
@@ -917,11 +909,7 @@ describe('OutboxSender effect layer', () => {
   it('prunes sent follow-up origins after their creation order is persisted on the reminder', async () => {
     const db = openDatabase(':memory:')
     try {
-      db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(
-        'me@example.com',
-        'me@example.com',
-        NOW
-      )
+      db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run('me@example.com', 'me@example.com')
       const insert = db.prepare(
         `INSERT INTO outbox (id, account_id, state, thread_id, rfc_message_id, created_at, updated_at)
          VALUES (?, 'me@example.com', 'sent', 't-1', ?, ?, ?)`

@@ -8,11 +8,11 @@ import {
 } from 'electron'
 import type { AiSettings } from '../shared/ai'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
+import type { UpdateState } from '../shared/distribution'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { PendingFocusTarget } from '../shared/notifications'
 import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
-import type { UpdateState } from '../shared/update'
 import type { ServiceSupervisor } from './service/supervisor'
 
 type Handler<K extends InvokeChannel> = (

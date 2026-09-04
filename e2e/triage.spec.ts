@@ -43,7 +43,7 @@ test('self-heals a permanently rejected archive and invalidates its undo', async
   await expect(page.getByTestId('pending-count')).toHaveCount(0)
 })
 
-test('makes an auth-paused action visibly reconnectable', async ({ app, page }, testInfo) => {
+test('makes a failed token refresh visibly reconnectable', async ({ app, page, mainLog }, testInfo) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await app.evaluate(({ ipcMain }, input) => ipcMain.emit(input.channel, {}, input.threadId), {
     channel: TEST_CHANNELS.failNextActionAuth,
@@ -52,6 +52,7 @@ test('makes an auth-paused action visibly reconnectable', async ({ app, page }, 
 
   await page.keyboard.press('e')
 
+  await expect.poll(mainLog).toContain('token refresh returned invalid_grant for seed@attn.test')
   await expect(page.getByTestId('action-reconnect')).toContainText('1 paused · Reconnect Google')
   await expect(page.getByTestId('paused-count')).toContainText('1 paused')
   // The pending readout still counts the row: a paused action is queued work,

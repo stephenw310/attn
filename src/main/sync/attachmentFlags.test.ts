@@ -16,7 +16,7 @@ interface StoredThread {
 
 function store(threads: StoredThread[], cursor: string | null = null): Db {
   const db = openDatabase(':memory:')
-  db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, ?)').run(ACCOUNT, ACCOUNT, 1)
+  db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)
   db.prepare('INSERT INTO sync_state (account_id, attachment_cursor) VALUES (?, ?)').run(ACCOUNT, cursor)
   const insert = db.prepare(
     'INSERT INTO threads (account_id, id, last_msg_at, has_attachment) VALUES (?, ?, ?, ?)'

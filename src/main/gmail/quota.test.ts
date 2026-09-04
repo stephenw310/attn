@@ -46,8 +46,6 @@ describe('Gmail weighted quota scheduling', () => {
       ['GET', '/threads', 'threads.list', 10],
       ['GET', '/threads/t1', 'threads.get', 40],
       ['POST', '/threads/t1/modify', 'threads.modify', 10],
-      ['POST', '/threads/t1/trash', 'threads.trash', 20],
-      ['POST', '/threads/t1/untrash', 'threads.untrash', 10],
       ['GET', '/messages', 'messages.list', 5],
       ['GET', '/messages/m1', 'messages.get', 20],
       ['GET', '/messages/m1/attachments/a1', 'messages.attachments.get', 20],

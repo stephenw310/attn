@@ -61,7 +61,7 @@ const ACCOUNT_A = 'a@attn.test'
 const ACCOUNT_B = 'b@attn.test'
 
 function seedAccounts(db: Db): void {
-  const insert = db.prepare('INSERT INTO accounts (id, email, created_at) VALUES (?, ?, 0)')
+  const insert = db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)')
   insert.run(ACCOUNT_A, ACCOUNT_A)
   insert.run(ACCOUNT_B, ACCOUNT_B)
 }
