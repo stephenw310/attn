@@ -126,7 +126,7 @@ test.describe('seeded inbox smoke coverage', () => {
       'Last 7 days',
       oldestGroup
     ])
-    await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
+    await expect(page.getByTestId('queue-readout')).toHaveCount(0)
     await expect(page.getByTestId('pending-count')).toHaveCount(0)
     await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knavigate')
     await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
@@ -165,7 +165,7 @@ test.describe('seeded inbox smoke coverage', () => {
     const rows = page.getByTestId('thread-row')
     await expect(rows).toHaveCount(seedThreadCount)
     await expect(rows.first()).toHaveAttribute('data-unread', 'true')
-    await expect(page.getByTestId('queue-readout')).toHaveText(`${initialUnread} to zero`)
+    await expect(page.getByTestId('queue-readout')).toHaveCount(0)
 
     await page.keyboard.press('j')
     await page.keyboard.press('j')
@@ -206,10 +206,8 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('message-card')).toHaveCount(2)
     await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
     await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
-    // Scoped to the count itself: the readout also carries the pending-action
-    // suffix once opening a thread queues its mark-read, and a substring match on
-    // "3 to zero" would happily match "13 to zero".
-    await expect(page.getByTestId('queue-unread')).toHaveText(String(initialUnread - 1))
+    // Opening the reader still marks mail read, even without a title-bar meter.
+    await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(initialUnread - 1)
     await expect(page.getByTestId('pending-count')).toContainText('1 pending')
 
     await page
@@ -235,13 +233,13 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(rows.nth(2)).toHaveAttribute('data-unread', 'true')
     await page.keyboard.press('j')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
-    await expect(page.getByTestId('queue-unread')).toHaveText(String(initialUnread - 1))
+    await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(initialUnread - 1)
     await page.keyboard.press('j')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
     await expect(page.getByTestId('conversation-position')).toHaveText(`3 of ${seedThreadCount}`)
     await expect.poll(() => selectedIndex(page)).toBe(2)
     await expect(rows.nth(2)).not.toHaveAttribute('data-unread', 'true')
-    await expect(page.getByTestId('queue-unread')).toHaveText(String(initialUnread - 2))
+    await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(initialUnread - 2)
 
     await page.keyboard.press('ArrowUp')
     await expect(page.getByTestId('conversation-position')).toHaveText(`3 of ${seedThreadCount}`)

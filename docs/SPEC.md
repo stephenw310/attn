@@ -73,7 +73,7 @@ A 216-pixel sidebar contains mailboxes and user labels. A persistent control and
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
-The top bar contains the queue count and leaves native window controls unobstructed. Inbox splits appear above the list. Settings are available from the account menu and command palette.
+The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. Inbox splits appear above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette.
 
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
 
@@ -191,8 +191,8 @@ After interactive readiness, the footer reports **Live · indexing older mail** 
 unique local thread count and Y is the current profile thread total. The ETA estimates time to the local
 sweep limit or the account total, whichever is smaller; disabling the limit uses the account total. No ETA
 is shown once that target is reached or when the account total is unknown. The footer also exposes an
-explicit quota-wait state instead of appearing stuck during backoff. The top-bar “N to zero” value is the
-total unread Inbox count, not sync progress, and may exceed the current rendered-list window.
+explicit quota-wait state instead of appearing stuck during backoff. Split badges and OS badges retain
+their unread counts; the top bar has no unread-progress meter.
 
 **Incremental:** poll `history.list` from the last stored `historyId` (15s foreground / 60s background). Each cycle also refreshes the label catalog (`labels.list`, 1 unit): history reports label *applications*, never label create/rename/delete, so the catalog would otherwise go stale. On `historyId` expiry (HTTP 404), fall back to a delta re-list; once non-Inbox mail is cached, that recovery must also reconcile every cached system label and tombstone threads purged server-side while the app was away. Spam/Trash auto-purge otherwise leaves ghost rows. The completed account listing identifies candidates, but only a direct per-thread 404 authorizes deletion because threads can move between sequential listing scopes. All writes funnel through a single reducer so server-originated and locally-originated changes apply identically.
 
@@ -203,7 +203,7 @@ total unread Inbox count, not sync progress, and may exceed the current rendered
 
 Conflict rule: server state wins, except locally-pending actions replay on top of it.
 
-**Sync visibility:** local-first hides the network, so the app must say what the network is doing. The footer carries a persistent sync status — **Live**, **Checking**, **Syncing** (with backfill stage progress), **Offline**, or **Error** — distinguishing "network down, local mail fully usable" from "sync is failing". The error state opens details with **Retry now** and **Copy details** actions (both also registered commands); offline failures retry automatically when connectivity returns. The top-bar queue readout appends "· N pending" whenever local actions await server replay.
+**Sync visibility:** local-first hides the network, so the app must say what the network is doing. The footer carries a persistent sync status — **Live**, **Checking**, **Syncing** (with backfill stage progress), **Offline**, or **Error** — distinguishing "network down, local mail fully usable" from "sync is failing". The error state opens details with **Retry now** and **Copy details** actions (both also registered commands); offline failures retry automatically when connectivity returns. The top bar shows "N pending" whenever local actions await server replay.
 
 **Acceptance criteria**
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.
@@ -218,7 +218,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 
 **List ⇄ focused conversation**: the list owns the content region while deciding. Opening a conversation replaces the list with one dedicated reading surface while the navigation sidebar stays put. Closing restores the list at the same selection and scroll position.
 
-**Mailbox and label navigation:** everything this section describes — mailboxes, counts, user labels, splits, the list, and the reader — belongs to the active account (F18); switching accounts swaps it all at once. A left sidebar, expanded by default and completely removable with the persistent top-bar toggle, groups Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash, Outbox, and the account's user labels. Every system row keeps its `G` chord visible beside an exact local conversation total, including zero; large totals use a compact visual label while exposing the exact value. The top-bar queue readout remains the unread Inbox total. The active destination has one stable highlight. System mailboxes remain reachable from the command palette (`Go to …`) and their `G` chords. Label chips and label rows open the same local list view. Important/Other and user-defined splits are queues inside Inbox, not mailbox destinations, so a compact split strip appears above the Inbox list only when splits exist. The ordinary list begins directly below the top bar.
+**Mailbox and label navigation:** everything this section describes — mailboxes, counts, user labels, splits, the list, and the reader — belongs to the active account (F18); switching accounts swaps it all at once. A left sidebar, expanded by default and completely removable with the persistent top-bar toggle, groups Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash, Outbox, and the account's user labels. Every system row keeps its `G` chord visible beside an exact local conversation total, including zero; large totals use a compact visual label while exposing the exact value. Sidebar count slots keep a fixed width across total changes. The active destination has one stable highlight. System mailboxes remain reachable from the command palette (`Go to …`) and their `G` chords. Label chips and label rows open the same local list view. Important/Other and user-defined splits are queues inside Inbox, not mailbox destinations, so a compact split strip appears above the Inbox list only when splits exist. The ordinary list begins directly below the top bar.
 
 - Inbox = `INBOX`; Sent = `SENT`; Drafts = `DRAFT`; Starred = `STARRED`; Spam = `SPAM`; Trash = `TRASH`; Snoozed is the local reminders view from F4. Spam and Trash include a thread when any message carries the matching label. All Mail includes a thread when any message is outside `SPAM` and `TRASH`, including archived mail. A partially trashed thread therefore appears in both All Mail and Trash. Normal and All Mail readers hide spammed messages. They keep each trashed message's chronological position as a compact `This message was moved to Trash. Show message.` marker. `Show message` reveals that message only in the current reader and does not restore it or change its Gmail labels. Spam and Trash readers show only messages from the active mailbox. Draft and legacy `CHAT` messages never render as sent mail.
 - Mailbox and user-label queries run entirely against the local store. Metadata sync extends beyond the current Inbox window so lifetime system and user-label membership is cached; switching a cached destination never waits on Gmail. Bodies still follow F2's on-demand policy.
@@ -237,6 +237,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 
 **Acceptance criteria**
 - 60fps scroll while progressively loading through the 10,000-thread performance profile; initial mailbox reads return no more than 100 rows.
+- Unloaded mailboxes show a loading state rather than an empty state. Spam and Trash paging reads matching mailbox metadata without scanning all account messages or materializing message bodies.
 - Opening a cached conversation renders in < 50ms; `Esc` returns instantly with scroll + selection intact.
 - Auto-advance never lands on a stale (just-triaged) row.
 - Every message's full recipient set is inspectable in two interactions or fewer; attachments download to the OS Downloads folder and are revealed on completion.
@@ -307,6 +308,8 @@ thread-label delta.
 
 Bare-letter shortcuts do not also accept their shifted variants: `Shift+letter` is reserved for explicit
 combinations such as `Shift+J/K`. Printable symbols that require Shift, including `#` and `!`, are unaffected.
+
+The Done action confirmation says `Marked done`.
 
 **Acceptance criteria**
 - Any triage action gives visual feedback in < 16ms (optimistic), including on selections of 100+ conversations.
@@ -534,7 +537,7 @@ The inbox is divided into **splits** — tabs above the list, each an independen
 
 ### F12 — Notifications & badging
 
-- Native OS notifications (macOS Notification Center / Windows toast) for new mail in notification-enabled splits: sender + subject + snippet; click opens the thread.
+- Native OS notifications (macOS Notification Center / Windows toast) for new mail in notification-enabled splits: sender + subject, without a message-body preview. Click opens the thread in its current mailbox, including All Mail after archive and Spam or Trash after a move. If the thread is no longer stored, the click leaves the Inbox list open.
 - **Batching:** a poll cycle delivering more than 3 new conversations collapses into one summary notification ("7 new conversations") instead of a burst of toasts. A summary names no single thread, so clicking it raises the window on the inbox rather than opening a conversation — only per-message notifications carry a thread target. Notifications are suppressed entirely while a window is focused.
 - Unread badge: native numeric macOS Dock badge; a large red numeric Windows taskbar overlay that shows
   `1`–`9` and then `9+`, while its accessible description carries the exact count. The underlying count
@@ -581,7 +584,7 @@ Settings and the palette expose:
 - Notifications: one app-wide pause/resume deadline and an app-wide unread-badge toggle for the macOS
   Dock / Windows taskbar. Per-account split notification controls live in the Inbox header's split-rule
   manager.
-- Snippet manager and theme. The split-rule manager opens from its dedicated Inbox-header gear.
+- Snippet manager and theme. The split-rule manager opens from its columns icon beside the Inbox splits.
 - Background behavior: launch at login and the optional macOS menu-bar icon (F16).
 - AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
 - Keyboard cheat sheet (`Mod+/`).
@@ -590,7 +593,7 @@ Label account-specific controls with the owning email; other preferences apply a
 the existing default constants and typed APIs. Internal polling, quota, paging, retry, search-window, and
 editor-timing constants remain development tuning rather than user controls.
 
-**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Sign out. Split-rule configuration opens from the Inbox strip's dedicated gear; its ellipsis appears only to navigate genuinely hidden splits. No hamburger icon; every item is also a palette command.
+**Entry point (D6):** the account chip in the top bar is the menu — the signed-in accounts with the active one marked (F18), Add account…, Settings (`Mod+,`), Keyboard shortcuts (`Mod+/`), Sign out. Split-rule configuration opens from the columns icon immediately after the Inbox splits; its ellipsis appears only to navigate genuinely hidden splits. No hamburger icon; every item is also a palette command.
 
 ### F16 — Background & tray behavior
 
@@ -763,6 +766,7 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 **Acceptance criteria**
 - Warm account switch (cached mail) < 100ms, restoring that account's selection and scroll; nothing from the
   previous account — rows, counts, labels, chips, drafts — survives the swap.
+- Sidebar totals refresh independently of list and label responses after an account switch. Paginated Spam selections restore like other cached mailboxes.
 - Adding a second account leaves the first account's sync cursors, splits, and reminders untouched, and both
   accounts' pollers run afterward.
 - Airplane mode: triage on account A, switch to B, quit, relaunch online → A's queued actions drain without

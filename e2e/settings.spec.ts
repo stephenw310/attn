@@ -178,7 +178,7 @@ test.describe('settings surface', () => {
     await expect(row(page, 'Your receipt')).toHaveAttribute('data-selected', 'true')
     await page.keyboard.press('e')
     await expect(row(page, 'Q3 roadmap review')).toHaveAttribute('data-selected', 'true')
-    await expect(page.getByTestId('toast')).toHaveText('Archived')
+    await expect(page.getByTestId('toast')).toHaveText('Marked done')
 
     // 'Back to list' closes the reader after triage instead of advancing.
     await page.keyboard.press('ControlOrMeta+,')

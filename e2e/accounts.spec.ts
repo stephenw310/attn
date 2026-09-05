@@ -48,7 +48,7 @@ async function emitNotificationClick(
 test('menu switch swaps the entire surface and survives relaunch', async ({ page, boot }) => {
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha roadmap review' })).toBeVisible()
-  await expect(page.getByTestId('queue-unread')).toHaveText('1')
+  await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(1)
   await expect(page.getByTestId('sidebar-label').filter({ hasText: 'receipts' })).toBeVisible()
 
   await page.getByTestId('account-menu').getByRole('button').first().click()
@@ -62,7 +62,7 @@ test('menu switch swaps the entire surface and survives relaunch', async ({ page
   await menuRows.filter({ hasText: SECOND }).click()
   await expect(page.getByTestId('account-menu')).toContainText(SECOND)
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Beta launch checklist' })).toBeVisible()
-  await expect(page.getByTestId('queue-unread')).toHaveText('2')
+  await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(2)
   // Isolation: no row, label, or count from the primary account survives.
   await expect(page.getByTestId('thread-subject').filter({ hasText: 'Alpha' })).toHaveCount(0)
   await expect(page.getByTestId('sidebar-label').filter({ hasText: 'receipts' })).toHaveCount(0)
@@ -311,6 +311,23 @@ test('account rows render before delayed sidebar totals and ignore totals from t
   await expect(inboxCount).toHaveAttribute('data-count', '1')
   await release()
   await expect(inboxCount).toHaveAttribute('data-count', '1')
+})
+
+test('account sidebar totals arrive while the thread page response is held', async ({ app, page }) => {
+  const inboxCount = page
+    .getByTestId('sidebar-mailbox')
+    .filter({ hasText: /^Inbox/ })
+    .getByTestId('sidebar-count')
+  await expect(inboxCount).toHaveAttribute('data-count', '2')
+  const release = await holdNextResponse(app, IPC_CHANNELS.mailListThreads)
+  await page.keyboard.press('ControlOrMeta+2')
+  await expectResponseHeld(app)
+  try {
+    await expect(page.getByTestId('account-menu')).toContainText(SECOND)
+    await expect(inboxCount).toHaveAttribute('data-count', '2')
+  } finally {
+    await release()
+  }
 })
 
 test('account removal blocks shortcuts and composer opens until the response settles', async ({

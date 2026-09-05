@@ -337,7 +337,7 @@ test('a triage verb removes a row only from views it no longer matches', async (
 
   // Archiving in All Mail removes nothing: membership ignores INBOX.
   await page.keyboard.press('e')
-  await expect(page.getByTestId('toast')).toContainText('Archived')
+  await expect(page.getByTestId('toast')).toContainText('Marked done')
   await expect(rows).toHaveCount(10)
   await expect(rows.first()).toHaveAttribute('data-unread', 'true')
   await expect(rows.first().getByTestId('thread-done-indicator')).toBeVisible()

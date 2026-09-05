@@ -556,6 +556,13 @@ describe('thread list queries', () => {
       const details = explain(mailbox)
       expect(details.some((detail) => detail.includes('idx_thread_labels_label'))).toBe(true)
       expect(details.some((detail) => detail.includes('idx_messages_thread'))).toBe(true)
+      if (mailbox === 'spam' || mailbox === 'trash') {
+        const labelRead = details.findIndex((detail) => detail.startsWith('SEARCH mailbox '))
+        const messageRead = details.findIndex((detail) => detail.startsWith('SEARCH m '))
+        expect(labelRead).toBeGreaterThanOrEqual(0)
+        expect(messageRead).toBeGreaterThan(labelRead)
+        expect(details[messageRead]).toContain('idx_messages_thread (account_id=? AND thread_id=?)')
+      }
     }
   })
 })

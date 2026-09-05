@@ -171,17 +171,27 @@ export function listMailboxThreads(
         limit
       ) as MailboxThreadQueryRow[]
   } else if (view === 'spam' || view === 'trash') {
+    // These window functions materialize candidate rows. Keep bodies and raw
+    // attachments out: copying large HTML through each stage dominates a page.
+    // CROSS JOIN keeps the sparse label set outermost. Otherwise SQLite can
+    // walk every account message to satisfy the window's ordering, checking
+    // every Spam/Trash label row for each message despite both named indexes.
     const sortExpression = 'summary.mailbox_last_msg_at'
     rows = db
       .prepare(
         `WITH candidate AS (
-           SELECT m.*,
+           SELECT m.account_id, m.thread_id, m.id, m.internal_date,
+                  m.labels_json, m.from_name, m.from_email, m.snippet,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM json_each(COALESCE(m.attachments_json, '[]')) attachment
+                    WHERE COALESCE(json_extract(attachment.value, '$.inline'), 0) <> 1
+                  ) THEN 1 ELSE 0 END AS has_attachment,
                   CASE WHEN m.labels_json IS NULL OR EXISTS (
                     SELECT 1 FROM json_each(m.labels_json) stored
                     WHERE stored.value = mailbox.label_id
                   ) THEN 1 ELSE 0 END AS matches_mailbox
            FROM thread_labels mailbox INDEXED BY idx_thread_labels_label
-           JOIN messages m INDEXED BY idx_messages_thread
+           CROSS JOIN messages m INDEXED BY idx_messages_thread
              ON m.account_id = mailbox.account_id AND m.thread_id = mailbox.thread_id
            WHERE mailbox.account_id = ? AND mailbox.label_id = ?
              ${threadId ? 'AND m.thread_id = ?' : ''}
@@ -214,10 +224,7 @@ export function listMailboxThreads(
                   MAX(CASE WHEN labels_json IS NOT NULL AND EXISTS (
                     SELECT 1 FROM json_each(labels_json) stored WHERE stored.value = 'STARRED'
                   ) THEN 1 ELSE 0 END) AS is_starred,
-                  MAX(CASE WHEN EXISTS (
-                    SELECT 1 FROM json_each(COALESCE(attachments_json, '[]')) attachment
-                    WHERE COALESCE(json_extract(attachment.value, '$.inline'), 0) <> 1
-                  ) THEN 1 ELSE 0 END) AS has_attachment
+                  MAX(has_attachment) AS has_attachment
            FROM matching
            GROUP BY account_id, thread_id
          ),

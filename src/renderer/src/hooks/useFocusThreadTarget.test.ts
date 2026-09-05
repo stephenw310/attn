@@ -23,6 +23,7 @@ async function mount(options: {
   splitsReady?: boolean
   location?: { splitId: string; revision: number } | null
   focusIndex?: number | null
+  mailbox?: string
 }) {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
@@ -39,6 +40,10 @@ async function mount(options: {
             deliver = null
           }
         },
+        findThreadInView: async ({ view }: { view: string }) => ({
+          rows: view === (options.mailbox ?? 'inbox') ? [{ id: 'thread-9' }] : [],
+          nextCursor: null
+        }),
         acknowledgeFocusThread: acknowledge
       },
       splits: { getThreadLocation }
@@ -55,6 +60,7 @@ async function mount(options: {
       splitsReady: options.splitsReady ?? true,
       setActiveSplitId,
       focusInboxThread,
+      focusMailboxThread: async () => options.focusIndex ?? null,
       switchView: (view, afterSwitch) => {
         calls.push(`switchView:${view}`)
         afterSwitch?.()
@@ -161,6 +167,33 @@ test('a targeted read that finds nothing leaves the request pending', async () =
     expect(harness.acknowledge).not.toHaveBeenCalled()
     // It retries once with a fresh split id and revision before giving up.
     expect(harness.getThreadLocation).toHaveBeenCalledTimes(2)
+  } finally {
+    await harness.unmount()
+  }
+})
+
+for (const mailbox of ['allMail', 'spam', 'trash']) {
+  test(`a notification for mail moved to ${mailbox} opens its current mailbox`, async () => {
+    const harness = await mount({ mailbox, focusIndex: 2 })
+    try {
+      await harness.deliver({ id: 'moved', kind: 'focus', accountId: 'one@attn.test', threadId: 'thread-9' })
+      expect(harness.calls).toContain(`switchView:${mailbox}`)
+      expect(harness.calls).toContain('index:2')
+      expect(harness.calls).toContain('reader:true')
+      expect(harness.focusInboxThread).not.toHaveBeenCalled()
+      expect(harness.acknowledge).toHaveBeenCalledWith('moved')
+    } finally {
+      await harness.unmount()
+    }
+  })
+}
+
+test('a deleted notification target stays on the list and consumes the obsolete request', async () => {
+  const harness = await mount({ mailbox: 'missing' })
+  try {
+    await harness.deliver({ id: 'deleted', kind: 'focus', accountId: 'one@attn.test', threadId: 'thread-9' })
+    expect(harness.calls).not.toContain('reader:true')
+    expect(harness.acknowledge).toHaveBeenCalledWith('deleted')
   } finally {
     await harness.unmount()
   }

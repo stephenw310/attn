@@ -26,7 +26,7 @@ function mail(threadId: string, overrides: Partial<NotificationCandidate> = {}):
 }
 
 describe('planNotifications', () => {
-  it('creates one sender, subject, and snippet notification for up to three threads', () => {
+  it('creates one sender and subject notification without message text for up to three threads', () => {
     expect(
       planNotifications([mail('one'), mail('two'), mail('three')], {
         focused: false,
@@ -36,17 +36,17 @@ describe('planNotifications', () => {
       {
         threadId: 'one',
         title: 'Sender one · Subject one',
-        body: 'Snippet one'
+        body: ''
       },
       {
         threadId: 'two',
         title: 'Sender two · Subject two',
-        body: 'Snippet two'
+        body: ''
       },
       {
         threadId: 'three',
         title: 'Sender three · Subject three',
-        body: 'Snippet three'
+        body: ''
       }
     ])
   })
@@ -59,7 +59,7 @@ describe('planNotifications', () => {
 
   it('falls back to placeholders when a message has no sender or subject', () => {
     expect(planNotifications([mail('one', { sender: '', subject: '' })], { focused: false })).toEqual([
-      { threadId: 'one', title: 'New message · (no subject)', body: 'Snippet one' }
+      { threadId: 'one', title: 'New message · (no subject)', body: '' }
     ])
   })
 
@@ -75,7 +75,7 @@ describe('planNotifications', () => {
     // With several accounts signed in, the title answers "which inbox?" before
     // the click switches there (F12/F18); with one account it stays quiet.
     expect(planNotifications([mail('one')], { focused: false, accountLabel: 'b@attn.test' })).toEqual([
-      { threadId: 'one', title: 'Sender one · Subject one · b@attn.test', body: 'Snippet one' }
+      { threadId: 'one', title: 'Sender one · Subject one · b@attn.test', body: '' }
     ])
     expect(
       planNotifications([mail('one'), mail('two'), mail('three'), mail('four')], {
@@ -84,7 +84,7 @@ describe('planNotifications', () => {
       })
     ).toEqual([{ title: 'Attn · b@attn.test', body: '4 new conversations' }])
     expect(planNotifications([mail('one')], { focused: false, accountLabel: null })).toEqual([
-      { threadId: 'one', title: 'Sender one · Subject one', body: 'Snippet one' }
+      { threadId: 'one', title: 'Sender one · Subject one', body: '' }
     ])
   })
 })
@@ -248,7 +248,7 @@ describe('candidatesFor', () => {
       {
         threadId: 'eligible',
         title: 'Sender eligible · Subject eligible',
-        body: 'Snippet eligible'
+        body: ''
       }
     ])
   })

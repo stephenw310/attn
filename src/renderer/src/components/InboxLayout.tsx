@@ -25,7 +25,6 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
   return (
     <div className="flex h-full flex-col">
       <MailHeader
-        unreadCount={c.realUnreadTotal}
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
         outboxCount={c.realOutbox.length}
@@ -223,8 +222,9 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
           loadingMore={!c.searchOpen && (c.activePageState?.loadingMore ?? false)}
           loadingInitial={
             !c.searchOpen &&
-            c.view === 'inbox' &&
-            (!c.activeInboxRowsResolved || c.inboxBackfillReady !== true)
+            (c.view === 'inbox'
+              ? !c.activeInboxRowsResolved || c.inboxBackfillReady !== true
+              : !c.viewRowsLoaded)
           }
           syncing={!c.searchOpen && c.sync.phase === 'syncing'}
           readerOpen={c.readerOpen}

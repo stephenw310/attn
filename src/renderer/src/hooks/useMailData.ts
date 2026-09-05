@@ -128,6 +128,7 @@ interface MailDataState {
     splitId?: string | null,
     splitRevision?: number
   ) => Promise<number | null>
+  focusMailboxThread: (threadId: string, view: 'allMail' | 'spam' | 'trash') => Promise<number | null>
   realDrafts: Draft[]
   realOutbox: OutboxItem[]
   outboxFailure: Extract<OutboxChanged, { kind: 'failed' }> | null
@@ -136,7 +137,6 @@ interface MailDataState {
   refreshDrafts: () => Promise<void>
   refreshMailRows: () => Promise<void>
   realMailboxCounts: SystemMailboxCounts | null
-  realUnreadTotal: number | null
   labels: MailLabel[]
   pendingActionCount: number
   pausedActionCount: number
@@ -171,7 +171,6 @@ export function useMailData(
   const [outboxFailure, setOutboxFailure] = useState<Extract<OutboxChanged, { kind: 'failed' }> | null>(null)
   const [outboxProgress, setOutboxProgress] = useState<OutboxProgress | null>(null)
   const [realMailboxCounts, setRealMailboxCounts] = useState<SystemMailboxCounts | null>(null)
-  const [realUnreadTotal, setRealUnreadTotal] = useState<number | null>(null)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [pendingActionCount, setPendingActionCount] = useState(0)
   const [pausedActionCount, setPausedActionCount] = useState(0)
@@ -374,10 +373,8 @@ export function useMailData(
       if (extraView && extraViewVersion !== null) {
         mailboxRefreshVersionRef.current[extraView] = extraViewVersion
       }
-      // Two waves, not one batch. The utility process answers reads one at a
-      // time on a synchronous SQLite connection, so a full mailbox count must
-      // not keep the visible rows, account restore target, or cached reader
-      // behind an aggregate scan.
+      // Queue visible rows before aggregate counts on the utility process's
+      // synchronous SQLite connection. Each result paints independently.
       const [inboxPage, snoozedPage, drafts, outbox, extraPage] = await Promise.all([
         listThreadSnapshot('inbox', loadedRowCountsRef.current.inbox ?? 0, {
           splitId: options.splitId ?? undefined,
@@ -494,7 +491,6 @@ export function useMailData(
       setOutboxFailure(null)
       setOutboxProgress(null)
       setRealMailboxCounts(null)
-      setRealUnreadTotal(null)
       setInboxBackfillReady(null)
       setLabels([])
       setPendingActionCount(0)
@@ -552,23 +548,24 @@ export function useMailData(
         pendingMailChangeSource = undefined
         setMailRevision((revision) => revision + 1)
       }
-      void runRefresh({
+      const refreshingRows = runRefresh({
         isStale: () => cancelled,
         pruneCachedViews: true,
         splitId: activeSplitId ?? null,
         splitRevision: splitRevisionValue
       })
+      // Queue counts after the visible reads, but do not wait for their IPC
+      // responses or unrelated labels/drafts before showing the new totals.
+      refreshMailboxCounts()
+      void refreshingRows
         .then(async () => {
           if (cancelled) return
-          const [nextLabels, unread, actionStatus] = await Promise.all([
+          const [nextLabels, actionStatus] = await Promise.all([
             bridge.mail.listLabels(),
-            bridge.mail.getUnreadCount(),
             bridge.mail.getActionQueueStatus()
           ])
           if (cancelled) return
           setLabels((current) => reuseLabels(current, nextLabels))
-          refreshMailboxCounts()
-          setRealUnreadTotal(unread)
           setPendingActionCount(actionStatus.pending)
           setPausedActionCount(actionStatus.paused)
         })
@@ -790,6 +787,27 @@ export function useMailData(
     []
   )
 
+  const focusMailboxThread = useCallback(
+    async (threadId: string, view: 'allMail' | 'spam' | 'trash'): Promise<number | null> => {
+      const account = activeAccountRef.current
+      if (!window.attn || !account) return null
+      mailboxRefreshVersionRef.current[view] = (mailboxRefreshVersionRef.current[view] ?? 0) + 1
+      const page = await listThreadSnapshot(view, loadedRowCountsRef.current[view] ?? 0, {
+        targetThreadId: threadId
+      })
+      if (activeAccountRef.current !== account || activeViewRef.current !== view) return null
+      const index = page.rows.findIndex((row) => row.id === threadId)
+      if (index < 0) return null
+      setMailboxRows((current) => ({ ...current, [view]: reuseThreadRows(current[view] ?? null, page.rows) }))
+      setThreadPagination((current) => ({
+        ...current,
+        [view]: { nextCursor: page.nextCursor, loadingMore: false }
+      }))
+      return index
+    },
+    [activeViewRef]
+  )
+
   return {
     sync,
     inboxBackfillReady,
@@ -808,6 +826,7 @@ export function useMailData(
     threadPagination,
     loadMoreThreads,
     focusInboxThread,
+    focusMailboxThread,
     realDrafts,
     realOutbox,
     outboxFailure,
@@ -816,7 +835,6 @@ export function useMailData(
     refreshDrafts,
     refreshMailRows,
     realMailboxCounts,
-    realUnreadTotal,
     labels,
     pendingActionCount,
     pausedActionCount,

@@ -11,6 +11,7 @@ interface Options {
     splitId?: string | null,
     splitRevision?: number
   ) => Promise<number | null>
+  focusMailboxThread: (threadId: string, view: 'allMail' | 'spam' | 'trash') => Promise<number | null>
   switchView: (view: NavigableMailView, afterSwitch?: () => void) => void
   switchAccount: (accountId: string) => void
   clearSelection: () => void
@@ -35,7 +36,11 @@ export function useFocusThreadTarget(options: Options): void {
   useEffect(() => {
     const bridge = window.attn
     if (!bridge || !account || !splitsReady) return
-    return bridge.mail.onFocusThread((target) => {
+    let cancelled = false
+    let request = 0
+    const unsubscribe = bridge.mail.onFocusThread((target) => {
+      const currentRequest = ++request
+      const stale = (): boolean => cancelled || currentRequest !== request
       const handlers = latest.current
       // A notification for an inactive account switches there first (F12/F18).
       // The switch runs the guarded path — a live composer blocks it with the
@@ -67,6 +72,7 @@ export function useFocusThreadTarget(options: Options): void {
         latest.current.clearSelection()
         void (async () => {
           const openTarget = (nextIndex: number): void => {
+            if (stale()) return
             const current = latest.current
             // The notification target owns the selection: cancel any saved
             // record the switch queued so it cannot override this focus.
@@ -80,11 +86,37 @@ export function useFocusThreadTarget(options: Options): void {
             // newly mounted tree can still pull and finish the request.
             void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
           }
+          // Banners outlive Inbox membership. Check one thread before walking
+          // pages, then open the mailbox whose reader can display it.
+          const inbox = await bridge.mail.findThreadInView({ view: 'inbox' }, threadId)
+          if (stale()) return
+          if (inbox.rows.length === 0) {
+            for (const view of ['allMail', 'spam', 'trash'] as const) {
+              const page = await bridge.mail.findThreadInView({ view }, threadId)
+              if (stale()) return
+              if (page.rows.length === 0) continue
+              latest.current.switchView(view, () => {
+                if (stale()) return
+                void latest.current
+                  .focusMailboxThread(threadId, view)
+                  .then((index) => {
+                    if (index !== null) openTarget(index)
+                  })
+                  .catch(() => {})
+              })
+              return
+            }
+            // Deleted mail has no conversation to open. Keep the list usable
+            // and consume the obsolete banner instead of retrying every mount.
+            void bridge.mail.acknowledgeFocusThread(target.id).catch(() => {})
+            return
+          }
           // A rule edit can land between location lookup and page fetch. Retry
           // once with a fresh atomic split id + revision instead of dropping the
           // native notification click.
           for (let attempt = 0; attempt < 2; attempt += 1) {
             const location = await bridge.splits.getThreadLocation(threadId)
+            if (stale()) return
             if (!location) {
               // The deterministic legacy test profile intentionally has no
               // split setup. Preserve its whole-Inbox notification path.
@@ -103,5 +135,9 @@ export function useFocusThreadTarget(options: Options): void {
         })().catch(() => {})
       })
     })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [account, splitsReady])
 }

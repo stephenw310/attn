@@ -524,9 +524,9 @@ describe('mailbox triage projection', () => {
       ).run(ACCOUNT)
 
       expect(performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['thread'] })).toEqual({
-        label: 'Archived'
+        label: 'Marked done'
       })
-      expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid archived' })
+      expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid marked done' })
       const payloads = (
         db.prepare('SELECT payload FROM action_queue ORDER BY id').all() as Array<{ payload: string }>
       ).map((row) => JSON.parse(row.payload) as Record<string, unknown>)
@@ -773,7 +773,7 @@ describe('follow-up triage matrix (T35/F9)', () => {
     ).run(ACCOUNT)
 
     expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Already sent' })
-    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid archived' })
+    expect(undoLast(db, ACCOUNT)).toEqual({ label: 'Undid marked done' })
     expect(
       db
         .prepare(
