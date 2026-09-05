@@ -66,3 +66,28 @@ test('focus-thread safely leaves an open Snoozed conversation before opening Inb
     .poll(() => page.evaluate(() => window.attn.mail.getActionQueueStatus().then((status) => status.pending)))
     .toBe(pendingBefore)
 })
+
+for (const destination of [
+  { key: 'e', view: 'All Mail', name: 'archived' },
+  { key: '!', view: 'Spam', name: 'spammed' },
+  { key: '#', view: 'Trash', name: 'trashed' }
+]) {
+  test(`a notification opens an already ${destination.name} conversation`, async ({ app, page }) => {
+    await expect(page.getByTestId('thread-row')).toHaveCount(8)
+    await page.getByTestId('thread-row').filter({ hasText: 'August budget' }).click()
+    await expect(page.getByTestId('conversation-subject')).toHaveText('August budget')
+    await page.keyboard.press(destination.key)
+    await expect(page.getByTestId('thread-row').filter({ hasText: 'August budget' })).toHaveCount(0)
+    await emitFocusThread(app, 't-budget')
+    await expect(page.getByTestId('conversation-subject')).toHaveText('August budget')
+    await expect(page.getByTestId('sidebar-mailbox').filter({ hasText: destination.view })).toHaveAttribute(
+      'data-active',
+      'true'
+    )
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('thread-row').filter({ hasText: 'August budget' })).toHaveAttribute(
+      'data-selected',
+      'true'
+    )
+  })
+}

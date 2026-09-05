@@ -3,9 +3,9 @@ import { join } from 'node:path'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import type { ThreadListRequest } from '../src/shared/mail'
 import { expect, test } from './electron'
-import { emitSeam, observeInvokes } from './seams'
+import { emitSeam, expectResponseHeld, holdNextResponse, observeInvokes } from './seams'
 
-for (const view of ['inbox', 'split', 'all'] as const) {
+for (const view of ['inbox', 'split', 'all', 'spam'] as const) {
   test.describe(`account restoration in ${view}`, () => {
     // A generated 250-thread seed, not a test artifact: `.artifacts/` is
     // uploaded wholesale by CI, `.generated/` is gitignored and stays local.
@@ -21,7 +21,7 @@ for (const view of ['inbox', 'split', 'all'] as const) {
           messages: [
             {
               id: `m-restore-${index}`,
-              labelIds: ['INBOX'],
+              labelIds: [view === 'spam' ? 'SPAM' : 'INBOX'],
               receivedDaysAgo: index + 2,
               receivedAt: '12:00',
               from: 'Sender <sender@example.test>',
@@ -40,10 +40,10 @@ for (const view of ['inbox', 'split', 'all'] as const) {
       await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
       const split = page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]')
       if (view === 'split') await split.click()
-      if (view === 'all') {
+      if (view === 'all' || view === 'spam') {
         await page.keyboard.press('g')
-        await page.keyboard.press('a')
-        await expect(page.getByTestId('mailbox-title')).toHaveText('All Mail')
+        await page.keyboard.press(view === 'spam' ? 'p' : 'a')
+        await expect(page.getByTestId('mailbox-title')).toHaveText(view === 'spam' ? 'Spam' : 'All Mail')
       }
       const list = page.getByTestId('thread-list')
       await expect(list).toHaveAttribute('data-thread-count', '100')
@@ -66,8 +66,36 @@ for (const view of ['inbox', 'split', 'all'] as const) {
       await expect(selected).toHaveAttribute('data-thread-id', id)
       await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(scrollTop)
       if (view === 'split') await expect(split).toHaveAttribute('data-active', 'true')
-      if (view === 'all') await expect(page.getByTestId('mailbox-title')).toHaveText('All Mail')
+      if (view === 'all' || view === 'spam')
+        await expect(page.getByTestId('mailbox-title')).toHaveText(view === 'spam' ? 'Spam' : 'All Mail')
     })
+
+    if (view === 'spam') {
+      test('shows loading while restoring Spam after an account switch', async ({ app, page }) => {
+        await expect(page.getByTestId('thread-row')).toHaveCount(2)
+        await page.keyboard.press('g')
+        await page.keyboard.press('p')
+        await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '100')
+        await page.keyboard.press('ControlOrMeta+2')
+        await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
+        await expect(page.getByTestId('thread-row')).toHaveCount(2)
+        const release = await holdNextResponse(app, IPC_CHANNELS.mailListThreads)
+        await page.keyboard.press('ControlOrMeta+1')
+        await expectResponseHeld(app)
+        try {
+          await expect(page.getByTestId('mailbox-title')).toHaveText('Spam')
+          await expect(page.getByTestId('thread-list-loading-initial')).toBeVisible()
+          await expect(page.getByText('Spam is empty', { exact: true })).toHaveCount(0)
+          mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+          await page.screenshot({ path: join(__dirname, '.artifacts/spam-loading.png') })
+        } finally {
+          await release()
+        }
+        await expect(page.getByTestId('thread-list')).toHaveAttribute('data-thread-count', '100')
+        await expect(page.getByTestId('thread-list-loading-initial')).toHaveCount(0)
+        await page.screenshot({ path: join(__dirname, '.artifacts/spam.png') })
+      })
+    }
 
     for (const change of ['new mail', 'removed thread'] as const) {
       test(`restores after ${change} while the account is in the background`, async ({ app, page }) => {
@@ -75,10 +103,10 @@ for (const view of ['inbox', 'split', 'all'] as const) {
         if (view === 'split') {
           await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
         }
-        if (view === 'all') {
+        if (view === 'all' || view === 'spam') {
           await page.keyboard.press('g')
-          await page.keyboard.press('a')
-          await expect(page.getByTestId('mailbox-title')).toHaveText('All Mail')
+          await page.keyboard.press(view === 'spam' ? 'p' : 'a')
+          await expect(page.getByTestId('mailbox-title')).toHaveText(view === 'spam' ? 'Spam' : 'All Mail')
         }
         const list = page.getByTestId('thread-list')
         await expect(list).toHaveAttribute('data-thread-count', '100')
@@ -103,7 +131,7 @@ for (const view of ['inbox', 'split', 'all'] as const) {
               messages: [
                 {
                   id: `m-new-${index}`,
-                  labelIds: ['INBOX'],
+                  labelIds: [view === 'spam' ? 'SPAM' : 'INBOX'],
                   receivedDaysAgo: 0,
                   receivedAt: '10:00',
                   from: 'Sender <sender@example.test>',

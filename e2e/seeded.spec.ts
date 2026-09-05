@@ -8,7 +8,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
   await expect(rows.first()).toContainText('Maya Lin')
-  await expect(page.getByTestId('queue-readout')).toHaveText('4 to zero')
+  await expect(page.getByTestId('queue-readout')).toHaveCount(0)
   await expect(page.getByTestId('account-menu')).toContainText('seed@attn.test')
   await expect(page.getByTestId('status-note')).toContainText('Live')
   await expect(page.getByTestId('status-note')).toHaveAttribute('data-status', 'live')

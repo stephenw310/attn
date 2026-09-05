@@ -49,7 +49,7 @@ export function actionLabel(action: TriageAction, count = action.threadIds.lengt
   const plural = (one: string, many: string): string => (count === 1 ? one : `${count} ${many}`)
   switch (action.kind) {
     case 'archive':
-      return plural('Archived', 'archived')
+      return plural('Marked done', 'marked done')
     case 'restoreInbox':
       return plural('Restored', 'restored')
     case 'unsnooze':

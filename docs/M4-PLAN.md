@@ -135,7 +135,7 @@ those controls a home and connects them to the existing account and notification
 - **Notification pause:** expose the existing one-hour, until-tomorrow, and resume actions on both OSes,
   with the paused-until time visible. Reuse `notificationsPausedUntil`, `notificationQueries.ts`, and the
   existing deadline helpers; the pause spans every account while split `notify` flags remain per-account.
-  The Inbox split-strip gear opens `SplitRuleManager.tsx` for those flags; Settings does not duplicate it.
+  The columns icon beside the Inbox splits opens `SplitRuleManager.tsx` for those flags; Settings does not duplicate it.
   Do not add separate per-account pause state or a second notification scheduler.
 - **Pending notification delivery must survive composer close and account switch.** Resolve the
   intermittent failure recorded below while integrating account and notification settings. Preserve a

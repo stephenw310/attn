@@ -125,7 +125,7 @@ export function planNotifications(
   return newMail.map((mail) => ({
     threadId: mail.threadId,
     title: `${mail.sender || 'New message'} · ${mail.subject || '(no subject)'}${suffix}`,
-    body: mail.snippet
+    body: ''
   }))
 }
 

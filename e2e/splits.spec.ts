@@ -45,7 +45,7 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(tabs).toHaveText([/Calendar1/, /GitHub1/, /Newsletters1/, /Important1/, /Other1/])
   // Rules have one visible home in the Inbox header. The ellipsis appears
   // only when there are genuinely hidden splits to navigate to.
-  await expect(page.getByTestId('split-rules-settings')).toHaveAttribute('title', 'Split Inbox settings')
+  await expect(page.getByTestId('split-rules-settings')).toHaveAttribute('title', 'Manage Inbox splits')
   await expect(page.getByTestId('split-strip-overflow')).toHaveCount(0)
 
   await expect(page.locator('[data-testid="split-tab"][data-split-id="base:important"]')).toHaveAttribute(
@@ -392,3 +392,54 @@ test('notification focus owns selection over a queued split restore', async ({ a
     'true'
   )
 })
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`split header stays fixed across selection and unread changes in ${theme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: theme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme-appearance', theme)
+    await expect(page.getByTestId('split-tab')).toHaveCount(5)
+    await page.evaluate(() => document.fonts.ready)
+    const tabs = page.getByTestId('split-tab')
+    const manager = page.getByTestId('split-rules-settings')
+    const geometry = () =>
+      tabs.evaluateAll((elements) =>
+        elements.map((element) => {
+          const { x, y, width, height } = element.getBoundingClientRect()
+          return { x, y, width, height }
+        })
+      )
+    const baseline = await geometry()
+    const managerBox = await manager.boundingBox()
+    const last = baseline.at(-1)
+    if (!managerBox || !last) throw new Error('Split header geometry is unavailable')
+    expect(managerBox.x - last.x - last.width).toBeGreaterThanOrEqual(0)
+    expect(managerBox.x - last.x - last.width).toBeLessThan(12)
+    for (let index = 0; index < 5; index++) {
+      await tabs.nth(index).click()
+      await expect(tabs.nth(index)).toHaveAttribute('data-active', 'true')
+      expect(await geometry()).toEqual(baseline)
+    }
+    await tabs.first().click()
+    await expect(tabs.first().getByTestId('split-unread-count')).toHaveAttribute('data-count', '1')
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('conversation-view')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(tabs.first().getByTestId('split-unread-count')).toHaveCount(0)
+    expect(await geometry()).toEqual(baseline)
+    await expect(page.getByTestId('queue-readout')).toHaveCount(0)
+    const headerBox = await page.getByTestId('mail-header').boundingBox()
+    const accountBox = await page.getByTestId('account-menu').boundingBox()
+    for (const key of ['p', 'a', 'i']) {
+      await page.keyboard.press('g')
+      await page.keyboard.press(key)
+      expect(await page.getByTestId('mail-header').boundingBox()).toEqual(headerBox)
+      expect(await page.getByTestId('account-menu').boundingBox()).toEqual(accountBox)
+    }
+    mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+    await page.screenshot({
+      path: join(__dirname, `.artifacts/split-inbox${theme === 'light' ? '-light' : ''}.png`)
+    })
+    await manager.click()
+    await expect(page.getByTestId('split-rules')).toBeVisible()
+  })
+}

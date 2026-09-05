@@ -466,7 +466,7 @@ Lifecycle e2e green on Linux; manual win/mac checklist in the PR; fixture teardo
 
 ### Design (decided)
 
-- Subscribe to T7's `newMail` emitter. Per poll cycle: ≤ 3 new threads → one notification each (sender · subject · snippet); > 3 → one summary ("7 new conversations"). **Suppress entirely while a window is focused** (you're already looking at the inbox).
+- Subscribe to T7's `newMail` emitter. Per poll cycle: ≤ 3 new threads → one notification each (sender · subject, with no message-body preview); > 3 → one summary ("7 new conversations"). **Suppress entirely while a window is focused** (you're already looking at the inbox).
 - Notification click → store a short-lived pending thread target, call `showMainWindow()` (T8), then notify the sandboxed renderer to consume it through the typed preload bridge. The renderer switches to Inbox, selects the row, and opens the full-window conversation. Targets expire after 60s and clear on account changes so a stale click cannot redirect a later session.
 - **Badge:** after every `mail:changed`, macOS `app.setBadgeCount(unreadInboxCount)`. Windows: static-dot `setOverlayIcon` + tooltip count — the numeric-count overlay bitmap is M4 polish (packaging milestone), noted as an accepted deviation. Guard platforms (Linux `setBadgeCount` returns false; ignore).
 - Splits don't exist until M3, so M1 notifies for **all** INBOX new mail; per-split filtering arrives with F11.

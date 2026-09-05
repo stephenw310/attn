@@ -57,14 +57,18 @@ function NavButton({
       }`}
     >
       <span className="min-w-0 flex-1 truncate">{title}</span>
-      {count !== undefined && count !== null && (
-        <span
-          data-testid="sidebar-count"
-          data-count={count}
-          title={count.toLocaleString()}
-          className={`text-[11px] font-semibold tabular-nums ${count > 0 ? 'text-accent' : 'text-ink-faint'}`}
-        >
-          {compactCount(count)}
+      {(shortcut || count != null) && (
+        <span className="w-10 flex-none text-right text-[11px] font-semibold tabular-nums">
+          {count !== undefined && count !== null && (
+            <span
+              data-testid="sidebar-count"
+              data-count={count}
+              title={count.toLocaleString()}
+              className={count > 0 ? 'text-accent' : 'text-ink-faint'}
+            >
+              {compactCount(count)}
+            </span>
+          )}
         </span>
       )}
       {shortcut && <Kbd>{formatShortcut(shortcut)}</Kbd>}

@@ -9,46 +9,26 @@ import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
 
 const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
-const QUEUE_METER_STEPS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
 
-function QueueReadout({
-  unread,
+function MailActivity({
   pendingActions,
   pausedActions,
   outbox,
   onReconnect,
   onOpenOutbox
 }: {
-  unread: number | null
   pendingActions: number
   pausedActions: number
   outbox: number
   onReconnect: () => void
   onOpenOutbox?: () => void
-}): React.JSX.Element {
-  const lit = Math.min(unread ?? 0, 10)
+}): React.JSX.Element | null {
+  if (pendingActions === 0 && pausedActions === 0 && outbox === 0) return null
   return (
-    <div data-testid="queue-readout" className="flex items-center gap-3 text-xs text-ink-faint">
-      <span className="flex items-center gap-[3px]" aria-hidden>
-        {QUEUE_METER_STEPS.map((step, index) => (
-          <i key={step} className={`size-[5px] rounded-full ${index < lit ? 'bg-accent' : 'bg-edge'}`} />
-        ))}
-      </span>
-      {unread === null ? (
-        <span className="font-medium">counting…</span>
-      ) : unread > 0 ? (
-        <span className="font-medium text-ink-dim tabular-nums">
-          <b data-testid="queue-unread" className="font-semibold text-accent">
-            {unread}
-          </b>{' '}
-          to zero
-        </span>
-      ) : (
-        <span className="font-medium">at zero</span>
-      )}
+    <div data-testid="mail-activity" className="flex items-center gap-3 text-xs text-ink-faint">
       {pendingActions > 0 && (
         <span data-testid="pending-count" className="font-medium tabular-nums">
-          · {pendingActions} pending
+          {pendingActions} pending
         </span>
       )}
       {outbox > 0 && (
@@ -59,7 +39,7 @@ function QueueReadout({
           className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
           onClick={onOpenOutbox}
         >
-          · {outbox} in Outbox
+          {outbox} in Outbox
         </button>
       )}
       {/* Paused rows are a subset of `pendingActions` — the rest of the queue is
@@ -73,7 +53,7 @@ function QueueReadout({
           title="Google authorization expired; reconnect to retry paused changes"
           className="cursor-pointer font-medium text-accent hover:underline"
         >
-          <span data-testid="paused-count">· {pausedActions} paused</span> · Reconnect Google
+          <span data-testid="paused-count">{pausedActions} paused</span> · Reconnect Google
         </button>
       )}
     </div>
@@ -278,7 +258,6 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
-  unreadCount: number | null
   pendingActionCount: number
   pausedActionCount: number
   outboxCount: number
@@ -300,7 +279,6 @@ interface MailHeaderProps {
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   const {
-    unreadCount,
     pendingActionCount,
     pausedActionCount,
     outboxCount,
@@ -355,8 +333,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
             {selectionCount} selected
           </span>
         )}
-        <QueueReadout
-          unread={unreadCount}
+        <MailActivity
           pendingActions={pendingActionCount}
           pausedActions={pausedActionCount}
           outbox={outboxCount}

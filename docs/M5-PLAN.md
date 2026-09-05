@@ -268,6 +268,26 @@ only).
 
 ### A3 — Active-account switching: IPC tagging, renderer shell, switcher UI
 
+2026-09-05 Spam loading follow-up: account switches remount the renderer and clear mailbox row caches.
+A read-only measurement of a local profile with 242 Spam threads and 247 matching-thread messages found
+that the page query still took 4.3 seconds after excluding body columns. SQLite chose messages as the
+outer join and checked the sparse Spam label set for every message in the account. `CROSS JOIN` now
+starts with the label set and seeks messages by both account and thread; the same profile read took 9 ms.
+The query-plan regression requires both lookup keys and the label-first join order for Spam and Trash.
+The generated body-heavy benchmark also checks that SQLite does not read body columns.
+
+Unloaded mailboxes show a loading status until their first rows arrive. The account restoration suite
+covers Spam selection and scroll across account switches, background arrivals/removals, and a held page
+response that must show loading rather than `Spam is empty`. Screenshots are `spam-loading.png` and
+`spam.png`. These changes do not retain stale mail rows across accounts or change the database schema.
+
+
+2026-09-05 follow-up: sidebar totals are requested alongside visible-row reads instead of after the
+list, draft, outbox, label, unread, and queue responses settle. The account-switch e2e holds a thread
+page response and checks that the destination account's totals still render. Existing coverage checks
+that delayed counts from a previous account cannot overwrite the active account's totals.
+
+
 **Status: done, 2026-08-30** — with events filtered active-only instead of tagged (deviations note above).
 The 2026-08-30 slice closed the remainder: per-account last-view/selection/scroll restore rides the
 existing pending-restore machinery — the guarded switch snapshots the leaving account's view records
@@ -332,6 +352,13 @@ here); selection/scroll restore per account; zero cross-account rows/labels/coun
 persisted active account; new visual artifacts (e.g. `account-menu.png`, listed in AGENTS.md) inspected.
 
 ### A4 — Notifications, badge, and focus routing across accounts
+
+2026-09-05 follow-up: detail banners show sender and subject without message text. Click routing
+checks current membership before paging and opens All Mail for archived mail or the matching Spam/Trash
+reader for moved mail. Missing targets consume the obsolete request and leave the list open. Unit tests
+cover each destination and missing targets; Electron regressions archive, spam, or trash a thread before
+clicking its notification and verify both the conversation and the return selection.
+
 
 **Status: done, 2026-08-30.** Spec F12, F18, §9 #21(e). As shipped: every signed-in account's poll
 cycles surface candidates (the runtime's active-account gate is gone); `MailNotifier` holds the roster

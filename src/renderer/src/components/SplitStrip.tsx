@@ -51,7 +51,7 @@ export function SplitStrip({
       data-testid="split-strip"
       className="flex h-10 flex-none items-stretch border-b border-edge bg-raised/25 pl-[45px]"
     >
-      <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 flex-1 overflow-x-auto">
+      <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 overflow-x-auto">
         {visibleSplits.map((split) => {
           const active = split.id === activeSplitId
           return (
@@ -64,10 +64,10 @@ export function SplitStrip({
               data-active={active || undefined}
               aria-selected={active}
               title={`${split.total.toLocaleString()} conversations`}
-              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-3 text-xs transition-colors ${
+              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-3 text-xs font-semibold transition-colors ${
                 active
-                  ? 'border-accent font-semibold text-ink'
-                  : 'border-transparent font-medium text-ink-dim hover:bg-active/60 hover:text-ink'
+                  ? 'border-accent text-ink'
+                  : 'border-transparent text-ink-dim hover:bg-active/60 hover:text-ink'
               }`}
               onClick={(event) => {
                 onSelect(split.id)
@@ -75,15 +75,17 @@ export function SplitStrip({
               }}
             >
               <span>{split.name}</span>
-              {split.unread > 0 && (
-                <span
-                  data-testid="split-unread-count"
-                  data-count={split.unread}
-                  className="rounded-full bg-active px-1.5 py-0.5 text-[10px] leading-none font-semibold tabular-nums text-accent"
-                >
-                  {split.unread > 999 ? '999+' : split.unread}
-                </span>
-              )}
+              <span className="w-10 flex-none text-center">
+                {split.unread > 0 && (
+                  <span
+                    data-testid="split-unread-count"
+                    data-count={split.unread}
+                    className="inline-block min-w-5 rounded-full bg-active px-1.5 py-0.5 text-[10px] leading-none font-semibold tabular-nums text-accent"
+                  >
+                    {split.unread > 999 ? '999+' : split.unread}
+                  </span>
+                )}
+              </span>
             </button>
           )
         })}
@@ -131,10 +133,10 @@ export function SplitStrip({
       <button
         type="button"
         data-testid="split-rules-settings"
-        aria-label="Split Inbox settings"
-        title="Split Inbox settings"
+        aria-label="Manage Inbox splits"
+        title="Manage Inbox splits"
         onClick={onManage}
-        className="app-no-drag flex h-full w-11 flex-none cursor-pointer items-center justify-center border-l border-edge text-ink-faint hover:bg-active hover:text-ink"
+        className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center rounded-md text-ink-faint hover:bg-active hover:text-ink"
       >
         <svg
           aria-hidden
@@ -144,9 +146,9 @@ export function SplitStrip({
           strokeLinecap="round"
           strokeLinejoin="round"
         >
-          <title>Split Inbox settings</title>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.1 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.3V9.55h.09A1.7 1.7 0 0 0 4.1 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.56 3.7l.06.06A1.7 1.7 0 0 0 8.5 4.1a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.3h4.05v.09A1.7 1.7 0 0 0 15 4.1a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.5a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.09v4.05h-.09A1.7 1.7 0 0 0 19.4 15Z" />
+          <title>Manage Inbox splits</title>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16M15 4v16" />
         </svg>
       </button>
     </div>

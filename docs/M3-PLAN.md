@@ -1,5 +1,12 @@
 # M3 Implementation Plan: Find and Focus
 
+2026-09-05 UI follow-up: split management is a columns icon immediately after the visible tabs.
+Selection changes only the tab color and underline; labels keep their font weight, and unread counts
+have reserved slots even at zero. Sidebar totals also reserve their width. The top bar no longer shows
+an unread-progress meter. `e2e/splits.spec.ts` checks unchanged tab bounds across selection and unread
+changes in both themes, manager placement, and stable title-bar/account controls across mailbox switches.
+
+
 **Audience:** the engineers building M3. Same contract as [M1-PLAN.md](M1-PLAN.md) and [M2-PLAN.md](M2-PLAN.md).
 Every task is one PR, nothing is done until `npm run verify` is green, and "spec F2" means a section of
 [SPEC.md](SPEC.md) (v0.16). Read the section before starting the task.
