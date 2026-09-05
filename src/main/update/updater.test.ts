@@ -224,7 +224,7 @@ describe('migration compatibility', () => {
     expect(h.updater.state().phase).toBe('idle')
   })
 
-  it('invalid declared migration metadata rejects instead of using legacy compatibility', async () => {
+  it('rejects invalid migration metadata', async () => {
     const h = harness({
       check: async () => ({
         version: '1.1.0',
@@ -264,28 +264,17 @@ describe('migration compatibility', () => {
     expect(h.calls.download).toBe(0)
   })
 
-  it('treats old feed metadata without a minimum as exact-schema compatibility', async () => {
-    const same = harness({
+  it('rejects feed metadata without a minimum schema', async () => {
+    const h = harness({
       check: async () => ({
         version: '1.1.0',
         requiredSchemaVersion: 24,
-        minimumSchemaVersion: undefined
+        minimumSchemaVersion: null
       })
     })
-    same.updater.start()
+    h.updater.start()
     await settle()
-    expect(same.calls.download).toBe(1)
-
-    const newer = harness({
-      check: async () => ({
-        version: '1.1.0',
-        requiredSchemaVersion: 25,
-        minimumSchemaVersion: undefined
-      })
-    })
-    newer.updater.start()
-    await settle()
-    expect(newer.calls.download).toBe(0)
+    expect(h.calls.download).toBe(0)
   })
 
   it('a local database that disagrees rejects even a matching build', async () => {

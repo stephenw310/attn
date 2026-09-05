@@ -51,7 +51,6 @@ jobs:
       schema: ${{ steps.meta.outputs.schema }}
       minimum_schema: ${{ steps.meta.outputs.minimum_schema }}
       feed_tag: ${{ steps.meta.outputs.feed_tag }}
-      legacy_feed_tag: ${{ steps.meta.outputs.legacy_feed_tag }}
       same_repo: ${{ steps.meta.outputs.same_repo }}
     steps:
       - name: Check out repository
@@ -94,7 +93,6 @@ jobs:
             echo "schema=$schema"
             echo "minimum_schema=$minimum_schema"
             echo "feed_tag=update-feed"
-            echo "legacy_feed_tag=feed-schema-$schema"
             echo "same_repo=$same_repo"
           } >> "$GITHUB_OUTPUT"
           echo "Releasing Attn $version (migrates schema v$minimum_schema..v$schema) to $FEED as $tag" >> "$GITHUB_STEP_SUMMARY"
@@ -294,7 +292,6 @@ jobs:
       FEED: ${{ needs.prepare.outputs.feed }}
       TAG: ${{ needs.prepare.outputs.tag }}
       FEED_TAG: ${{ needs.prepare.outputs.feed_tag }}
-      LEGACY_FEED_TAG: ${{ needs.prepare.outputs.legacy_feed_tag }}
       VERSION: ${{ needs.prepare.outputs.version }}
       SCHEMA: ${{ needs.prepare.outputs.schema }}
       MINIMUM_SCHEMA: ${{ needs.prepare.outputs.minimum_schema }}
@@ -320,15 +317,11 @@ jobs:
       # newer than the rolling feed.
       - name: Stamp the feed files
         run: |
-          mkdir -p current/update current/legacy
+          mkdir -p current
           current_args=()
           if gh release view "$FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
-            gh release download "$FEED_TAG" --repo "$FEED" --dir current/update --pattern 'latest*.yml'
-            current_args+=(--current current/update)
-          fi
-          if gh release view "$LEGACY_FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
-            gh release download "$LEGACY_FEED_TAG" --repo "$FEED" --dir current/legacy --pattern 'latest*.yml'
-            current_args+=(--current current/legacy)
+            gh release download "$FEED_TAG" --repo "$FEED" --dir current --pattern 'latest*.yml'
+            current_args=(--current current)
           fi
           node scripts/stamp-update-feed.mjs release \
             --assets-base "https://github.com/$FEED/releases/download/$TAG" \
@@ -359,19 +352,11 @@ jobs:
           echo "Published https://github.com/$FEED/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
 
       # update-feed is a rolling prerelease whose only assets are feed files.
-      # The legacy same-schema feed lets older exact-schema clients install
-      # this migration-capable bridge and move to update-feed.
-      - name: Point the update feeds at the new release
+      - name: Point the update feed at the new release
         run: |
           if ! gh release view "$FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
             gh release create "$FEED_TAG" --repo "$FEED" --prerelease --title "Attn update feed" \
               --notes "Rolling update feed for Attn. Not an installer; download a versioned release instead."
           fi
           gh release upload "$FEED_TAG" --repo "$FEED" --clobber release/latest*.yml
-          if ! gh release view "$LEGACY_FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
-            gh release create "$LEGACY_FEED_TAG" --repo "$FEED" --prerelease \
-              --title "Legacy update feed for database schema v$SCHEMA" \
-              --notes "Compatibility bridge to Attn's migration-capable update feed. Not an installer."
-          fi
-          gh release upload "$LEGACY_FEED_TAG" --repo "$FEED" --clobber release/latest*.yml
-          echo "Feeds $FEED_TAG and $LEGACY_FEED_TAG now offer $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "Feed $FEED_TAG now offers $VERSION" >> "$GITHUB_STEP_SUMMARY"

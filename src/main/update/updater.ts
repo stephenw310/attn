@@ -15,8 +15,8 @@ export interface UpdateFeedInfo {
   version: string
   /** The schema the target release opens after running its migrations. */
   requiredSchemaVersion: number | null
-  /** Undefined means legacy exact-schema metadata; null means an invalid declared value. */
-  minimumSchemaVersion: number | null | undefined
+  /** The oldest existing profile the target release can migrate. */
+  minimumSchemaVersion: number | null
 }
 
 /** The injected transport: electron-updater in production, fakes in tests. */
@@ -122,9 +122,8 @@ export class AppUpdater {
 
   /**
    * The target is installable when it is newer and its retained migration
-   * range contains this build's open database. Legacy feed entries without a
-   * minimum remain exact-schema updates. Re-check before installation because
-   * an operator can replace the database after the download.
+   * range contains this build's open database. Re-check before installation
+   * because an operator can replace the database after the download.
    */
   private classify(info: UpdateFeedInfo): Exclude<UpdateCheckOutcome, 'error'> {
     if (!isNewerVersion(info.version, this.options.currentVersion)) return 'up-to-date'
@@ -132,7 +131,7 @@ export class AppUpdater {
     if (info.minimumSchemaVersion === null) return 'incompatible'
     const local = this.options.localSchemaVersion()
     if (local === null || local !== this.options.schemaVersion) return 'incompatible'
-    const minimum = info.minimumSchemaVersion ?? info.requiredSchemaVersion
+    const minimum = info.minimumSchemaVersion
     if (minimum > info.requiredSchemaVersion) return 'incompatible'
     if (local < minimum || local > info.requiredSchemaVersion) return 'incompatible'
     return 'available'

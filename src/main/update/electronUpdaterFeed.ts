@@ -96,10 +96,7 @@ export function createElectronUpdaterFeed(metadata: DistributionMetadata): Updat
       return {
         version: result.updateInfo.version,
         requiredSchemaVersion: positiveInteger(result.updateInfo.requiredSchemaVersion),
-        minimumSchemaVersion:
-          result.updateInfo.minimumSchemaVersion === undefined
-            ? undefined
-            : positiveInteger(result.updateInfo.minimumSchemaVersion)
+        minimumSchemaVersion: positiveInteger(result.updateInfo.minimumSchemaVersion)
       }
     },
     download: async (): Promise<void> => {

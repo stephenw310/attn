@@ -81,9 +81,8 @@ unsigned installers that never check for updates.
    (the full `npm run verify` on the release commit) → `build` on `macos-latest` and
    `windows-latest` (unit tests, package, sign, notarize, `package:verify --release`) → `publish`
    (stamp the feed files, create a draft release, upload every asset, publish, then replace the
-   `update-feed` files so installed apps see it). The workflow also updates the current
-   `feed-schema-<n>` compatibility feed. Older exact-schema clients can use it to install a
-   migration-capable bridge release. The step summary prints the feed files and release URL.
+   `update-feed` files so installed apps see it). The step summary prints the feed files and
+   release URL.
 4. Installed apps pick it up within six hours, or immediately from **Check for updates**. To
    watch one: open Settings → About on a release build, check, and confirm the status line moves
    from "Downloading" to "downloaded"; quit and relaunch to land on the new version.
@@ -110,10 +109,6 @@ versioned release's download URL and appends the current and minimum migratable 
 a file whose `version:` is not package.json's, is a prerelease, names an asset that was not built, or
 is not newer than what the feed already offers.
 
-The first migration-capable release must keep the current schema number. Existing clients can then
-install it from their old `feed-schema-<n>` feed and switch to `update-feed` on relaunch. Later
-schema-changing releases travel through `update-feed` and migrate the profile at startup.
-
 ## Building a release locally
 
 The same scripts run on a Mac or Windows machine with the credentials in the environment:
@@ -126,6 +121,4 @@ npm run release:stamp-feed -- dist --assets-base https://github.com/owner/repo/r
 ```
 
 Then upload `dist/*` to the `v0.2.0` release and the two `.yml` files to `update-feed`, in that order.
-For the first migration-capable release, upload the same files to the current `feed-schema-<n>`
-compatibility release. That is the workflow's `publish` job done by hand; keep the
-draft-then-publish order.
+That is the workflow's `publish` job done by hand. Keep the draft-then-publish order.
