@@ -37,6 +37,7 @@ const config = {
   files: [
     'out/**/*',
     'package.json',
+    'LICENSE',
     'resources/icon.png',
     'resources/menuBarTemplate.png',
     'resources/tray.png',

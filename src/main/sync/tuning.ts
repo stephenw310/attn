@@ -28,9 +28,8 @@ export const ALL_MAIL_WINDOW = 'newer_than:12m'
 /**
  * How many conversations the lifetime sweep keeps locally, newest first.
  *
- * SPEC §9 #22 targets smooth operation to roughly a million messages, and this
- * is what makes that target real rather than aspirational. At about 2.5 messages
- * per thread, 400,000 threads is that million.
+ * SPEC F2 bounds historical header fetching with this limit. At about 2.5
+ * messages per thread, 400,000 threads holds roughly one million messages.
  *
  * The cost it bounds is time, not just disk. Gmail admits background work at
  * 6,000 quota units a minute, less a 500-unit interactive reserve, and a thread

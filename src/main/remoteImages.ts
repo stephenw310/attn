@@ -1,4 +1,4 @@
-// Remote-image blocking policy (SPEC §6 Security, §9 #5, M4 T33). Enforcement
+// Remote-image blocking policy (SPEC §6 Security and F15). Enforcement
 // lives in the main process's request layer: the renderer is sandboxed and
 // runs untrusted mail markup, so it can never be the enforcement point. The
 // reader registers each mounted mail frame under a nonce it sets as the
@@ -9,7 +9,7 @@
 import { normalizeEmailKey } from '../shared/address'
 
 export interface RemoteImagePolicy {
-  /** The global toggle (settings row `remoteImages`); default load (§9 #5). */
+  /** The global toggle (settings row `remoteImages`); default load (SPEC F15). */
   blocked: boolean
   /** Normalized sender addresses with `remoteImages:allow:<address>` rows. */
   allowedSenders: ReadonlySet<string>

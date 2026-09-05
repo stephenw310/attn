@@ -11,7 +11,7 @@ e2e/.artifacts/
 # E2E inputs generated at run time (large seeds); never uploaded by CI
 e2e/.generated/
 
-# Local audit worksheets (TEST-SUITE-AUDIT-2026-09-02.md §"local-only")
+# Local audit worksheets
 .audit/
 
 # Per-user Google OAuth client (see README.md) — never commit
