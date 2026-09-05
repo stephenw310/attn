@@ -90,6 +90,27 @@ export function SplitStrip({
           )
         })}
       </div>
+      <button
+        type="button"
+        data-testid="split-rules-settings"
+        aria-label="Manage Inbox splits"
+        title="Manage Inbox splits"
+        onClick={onManage}
+        className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center rounded-md text-ink-faint hover:bg-active hover:text-ink"
+      >
+        <svg
+          aria-hidden
+          viewBox="0 0 24 24"
+          className="size-4 fill-none stroke-current"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <title>Manage Inbox splits</title>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16M15 4v16" />
+        </svg>
+      </button>
       {overflowSplits.length > 0 && (
         <div ref={overflowRef} className="relative flex-none">
           <button
@@ -130,27 +151,6 @@ export function SplitStrip({
           )}
         </div>
       )}
-      <button
-        type="button"
-        data-testid="split-rules-settings"
-        aria-label="Manage Inbox splits"
-        title="Manage Inbox splits"
-        onClick={onManage}
-        className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center rounded-md text-ink-faint hover:bg-active hover:text-ink"
-      >
-        <svg
-          aria-hidden
-          viewBox="0 0 24 24"
-          className="size-4 fill-none stroke-current"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <title>Manage Inbox splits</title>
-          <rect x="3" y="4" width="18" height="16" rx="2" />
-          <path d="M9 4v16M15 4v16" />
-        </svg>
-      </button>
     </div>
   )
 }

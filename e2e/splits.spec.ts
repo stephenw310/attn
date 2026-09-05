@@ -199,6 +199,16 @@ test('classifies once, navigates locally, and restores each split selection', as
     }
   })
   await expect(tabs).toHaveCount(8)
+  const expectManagerBeforeOverflow = async (): Promise<void> => {
+    const tabListBox = await page.getByRole('tablist', { name: 'Inbox splits' }).boundingBox()
+    const managerBox = await page.getByTestId('split-rules-settings').boundingBox()
+    const overflowBox = await page.getByTestId('split-strip-overflow').boundingBox()
+    if (!tabListBox || !managerBox || !overflowBox) throw new Error('Split controls are unavailable')
+    expect(managerBox.x - (tabListBox.x + tabListBox.width)).toBeGreaterThanOrEqual(0)
+    expect(managerBox.x - (tabListBox.x + tabListBox.width)).toBeLessThanOrEqual(12)
+    expect(overflowBox.x).toBeGreaterThanOrEqual(managerBox.x + managerBox.width)
+  }
+  await expectManagerBeforeOverflow()
   await page.getByTestId('split-strip-overflow').click()
   await expect(page.getByTestId('split-overflow-menu')).toBeVisible()
   await expect(page.getByTestId('split-overflow-tab')).toHaveCount(1)
@@ -208,6 +218,13 @@ test('classifies once, navigates locally, and restores each split selection', as
     'data-active',
     'true'
   )
+
+  await expectManagerBeforeOverflow()
+  const overflowPath = join(artifactDirectory, 'split-inbox-overflow.png')
+  await page.screenshot({ path: overflowPath, animations: 'disabled' })
+  await testInfo.attach('split-inbox-overflow', { path: overflowPath, contentType: 'image/png' })
+  await openSplitRules(page)
+  await page.keyboard.press('Escape')
 
   await page.keyboard.press('ControlOrMeta+K')
   await page.getByTestId('command-palette-input').fill('Go to:')
