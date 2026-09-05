@@ -193,8 +193,8 @@ const roster = new AccountRoster({
 function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   const shouldShow = options.show ?? true
   const win = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: 1440,
+    height: 900,
     minWidth: 900,
     minHeight: 600,
     icon: appIcon,
