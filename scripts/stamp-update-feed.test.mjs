@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -32,6 +32,9 @@ const stamp = (text, overrides = {}) =>
     ...overrides
   })
 
+const releaseVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+const [major, minor, patch] = releaseVersion.split('.').map(Number)
+const nextReleaseVersion = `${major}.${minor}.${patch + 1}`
 const temporaryDirectories = []
 
 afterEach(() => {
@@ -45,7 +48,7 @@ function feedDirectories(currentText) {
   const current = join(root, 'current')
   mkdirSync(release)
   mkdirSync(current)
-  const file = `version: 0.0.1
+  const file = `version: ${releaseVersion}
 files:
   - url: Attn.exe
 path: Attn.exe
@@ -103,7 +106,7 @@ describe('feed helpers', () => {
 })
 
 describe('current feed guard', () => {
-  const assetsBase = 'https://github.com/stephenw310/attn/releases/download/v0.0.1'
+  const assetsBase = `https://github.com/stephenw310/attn/releases/download/v${releaseVersion}`
 
   it('fails when an existing rolling release is missing a platform feed', () => {
     const directories = feedDirectories(null)
@@ -119,10 +122,13 @@ describe('current feed guard', () => {
     ).toThrow('current feed has no valid release version')
   })
 
-  it('fails when the published feed is not older', () => {
-    const directories = feedDirectories('version: 0.0.2\n')
-    expect(() =>
-      stampDirectory({ directory: directories.release, assetsBase, current: directories.current })
-    ).toThrow('the feed already offers 0.0.2; 0.0.1 is not newer')
-  })
+  it.each([releaseVersion, nextReleaseVersion])(
+    'fails when the published feed %s is not older',
+    (published) => {
+      const directories = feedDirectories(`version: ${published}\n`)
+      expect(() =>
+        stampDirectory({ directory: directories.release, assetsBase, current: directories.current })
+      ).toThrow(`the feed already offers ${published}; ${releaseVersion} is not newer`)
+    }
+  )
 })

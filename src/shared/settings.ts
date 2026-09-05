@@ -40,7 +40,7 @@ export interface AppSettings {
   /** Epoch ms all notifications stay paused until; null = not paused (F12). */
   notificationsPausedUntil: number | null
   /**
-   * Block remote images in mail frames (§9 #5, T33). Default load; stored
+   * Block remote images in mail frames (SPEC F15, T33). Default load; stored
    * per-sender Always-load overrides ride their own typed channels.
    */
   remoteImagesBlocked: boolean
@@ -63,7 +63,7 @@ export const APP_SETTINGS_DEFAULTS: AppSettings = {
 }
 
 /**
- * The compile-time historical sync limit (F2, §9 #22). `sync/tuning.ts`
+ * The compile-time historical sync limit (F2). `sync/tuning.ts`
  * re-exports these as `LIFETIME_THREAD_CAP` / `LIFETIME_THREAD_CAP_UNLIMITED`;
  * they live here so the renderer's settings surface labels the same numbers
  * the sweep enforces, with no second literal.
@@ -83,7 +83,7 @@ export const ATTN_SIGNATURE_URL = 'https://github.com/stephenw310/attn'
 
 export interface AccountSettings {
   /**
-   * Historical sync limit override (F2, §9 #22): conversations of additional
+   * Historical sync limit override (F2): conversations of additional
    * historical header fetching to allow. `null` means the compile-time
    * default applies; `0` means All mail. It bounds only the lifetime sweep —
    * lowering it deletes nothing, and inbox sync, new mail, server search,

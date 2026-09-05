@@ -125,7 +125,7 @@ export function restoreFollowUpReminder(
 
 /**
  * A *pending* snooze hides its thread until the reminder fires, and Gmail has no
- * concept of that (SPEC §9 #6), so local state wins over a fresh label snapshot.
+ * concept of that (SPEC F4), so local state wins over a fresh label snapshot.
  *
  * Only 'pending' qualifies. 'returned' is a display flag for the inbox badge and
  * is deliberately left set until the user handles the thread in Attn — treating

@@ -158,7 +158,7 @@ describe('composer HTML fidelity', () => {
   })
 
   it('freezes a table whole when a cell or row carries legacy presentational styling', () => {
-    // SPEC §9 #18a. Two things have to hold at once: the attributes survive
+    // SPEC F6. Two things have to hold at once: the attributes survive
     // sanitization (they used to be silently stripped), and the table freezes as
     // one byte-exact region rather than being cut at the `td` — a region cut
     // there cannot stand alone, because parsed outside its table the HTML parser

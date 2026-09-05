@@ -64,7 +64,7 @@ interface SyncControllerContext {
    * True while the active account is waiting on the indexing slot this
    * account holds. The chain checks it at every page boundary and, when set,
    * settles early and re-queues itself — the durable cursors are what make
-   * that hand-over free (F18, §9 #21(g)).
+   * that hand-over free (F18).
    */
   shouldPreemptIndexing?: (accountId: string) => boolean
   /** Drops the attachment spool of a draft row remote sync deleted (owned by the runtime). */

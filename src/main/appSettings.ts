@@ -34,8 +34,7 @@ const notificationsPausedUntilSetting = typedSetting<number | null>(
   }
 )
 
-// The stored form is the word 'blocked'; loading is the default (§9 decision
-// #5), so an absent row means every remote image passes.
+// The stored form is the word 'blocked'; loading is the default. See SPEC F15.
 const remoteImagesBlockedSetting = typedSetting(
   'remoteImages',
   false,

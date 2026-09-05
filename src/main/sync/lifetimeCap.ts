@@ -1,4 +1,4 @@
-// Per-account historical sync limit (SPEC F2/F15, §9 #22). The stored
+// Per-account historical sync limit (SPEC F2/F15, F2). The stored
 // preference bounds only the lifetime header sweep's additional fetching; an
 // absent or invalid row falls back to the compile-time default, and 0 means
 // All mail. Applying a change never resets auth, pollers, or send executors —

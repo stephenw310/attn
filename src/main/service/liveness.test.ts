@@ -16,7 +16,7 @@ import { SyncController } from '../syncController'
 import type { SchedulerTime, TimerHandle } from '../time'
 import { IndexingSlot } from './runtime'
 
-// A2's cross-account liveness contract (F18, §9 #21(b)): every worker is
+// A2's cross-account liveness contract (F18): every worker is
 // wired exactly as ServiceRuntime.createSession binds it — an `accountId()`
 // callback answering its own account while the session exists — so an
 // inactive account's queues, deadlines, and reminders stay live no matter
@@ -309,7 +309,7 @@ describe('multi-account liveness', () => {
     await expect.poll(() => sweepCursor(ACCOUNT_B), { timeout: 5_000 }).toBe('done')
     // B checkpointed page one, yielded the slot at the boundary, A ran its
     // whole chain, then B resumed from its durable cursor — page two, not
-    // page one (F18 §9 #21(g)).
+    // page one (F18).
     expect(events).toEqual(['b:sweep:start', 'b:sweep:p2', 'a:sweep:start', 'b:sweep:p2'])
     controllerA.stop()
     controllerB.stop()

@@ -1,52 +1,37 @@
 # Known issues
 
-This file lists live defects and gaps on `main`. It is the triage list. Every entry here is unfixed as of its
-**Verified** date, and each one carries the evidence needed to pick it up cold.
+This file records unresolved defects and validation gaps. Remove an entry when the work is complete. Do not keep completed reviews here.
 
-**This is not a status archive.** Delete an entry in the PR that fixes it. Do not mark it done, strike it
-through, or move it to a "fixed" section. A file that accumulates closed items stops being read. The PR that
-removes a line is the record that it closed.
+## Manual validation gaps
 
-**Adding an entry.** Give it the next free ID in its section, a one-line symptom, a `file:line` anchor, the
-concrete failure it produces, and a fix direction. Verify the anchor against `main` before you write it and
-stamp the date. IDs are never reused.
+These checks remain unrecorded in the repository. They are not confirmed product defects. Automated coverage exists, but it does not replace these checks.
 
-**Always name the symbol, not only the line.** Line numbers drift fast: six anchors in this file moved when
-#65 landed, one day after they were written, while every defect they described was untouched. Read the line
-as a hint and the symbol as the truth, and re-stamp the date when you correct a drifted anchor.
+| ID | Check still required | Automated coverage or implementation |
+| --- | --- | --- |
+| MANUAL-1 | Use Attn as the only mail client for seven consecutive days. Record failures and friction, including snippets, follow-ups, signatures, and AI if enabled. | Feature suites in `e2e/` |
+| MANUAL-2 | With real Gmail, test forced-quit draft recovery and offline relaunch. Test undo send at several delays and crashes around remote draft creation and send. Confirm no duplicate messages. | `e2e/composer.spec.ts`, `src/main/outbox/` tests |
+| MANUAL-3 | Send and receive real attachments, including inline images. Confirm that the Gmail signature and optional Attn footer survive the round trip. | `e2e/composer.spec.ts`, `e2e/settings.spec.ts` |
+| MANUAL-4 | Open a real header-only message. Confirm body download, local persistence, and retry after a lost connection. | `e2e/hydration.spec.ts` |
+| MANUAL-5 | Capture initial sync with a fresh profile and a long-lived Gmail mailbox. Record the measurements below. | `src/main/sync/`, `e2e/lifetime-sweep.spec.ts` |
+| MANUAL-6 | On macOS and Windows, click a real notification and confirm the intended account and conversation open. | `e2e/notifications.spec.ts`, `e2e/accounts.spec.ts` |
+| MANUAL-7 | Add a second real Gmail account during historical indexing. Confirm indexing priority, background mail actions, notification routing, and the combined unread badge. | `e2e/accounts.spec.ts`, `e2e/perf.spec.ts`, `src/main/db/isolation.test.ts` |
+| MANUAL-8 | On both operating systems, test two-account settings, login startup, background pause and resume, and unread badges. Check the macOS menu-bar toggle. | `e2e/settings.spec.ts`, `e2e/background.spec.ts`, notification unit tests |
+| MANUAL-9 | Change the historical sync limit against real Gmail. Test custom limits and All mail, resume after restart, and confirm a lower limit deletes nothing. Record disk use and elapsed time. | `e2e/settings.spec.ts`, `e2e/lifetime-sweep.spec.ts` |
+| MANUAL-10 | Send mail with a follow-up reminder. Test cancellation by a real reply and return after a real expiry. | `e2e/follow-up.spec.ts`, `src/main/followUps.test.ts` |
+| MANUAL-11 | Test AI drafting and autocomplete with a real provider. Record latency and request counts. Disable each feature and confirm its requests stop. | `e2e/ai.spec.ts`, `e2e/ai-draft.spec.ts`, `e2e/ai-autocomplete.spec.ts` |
+| MANUAL-12 | Build and install personal packages on macOS and Windows without release credentials. Confirm no updater traffic or cached update installation. | `scripts/verify-package.mjs`, `e2e/update.spec.ts` |
 
-**Defects below come from the 2026-09-02 sweep.** [REVIEW-2026-09-02.md](REVIEW-2026-09-02.md) is the
-whole-codebase re-review that this paragraph used to ask for; its bug, security, refactor and deletion findings
-carry `B`/`S`/`R`/`D` ids there, and the entries here cite them. Low-severity items and the deletion list stay in
-the review rather than being copied here — pick them up from that document.
+For MANUAL-5, retain a redacted `[sync:metric]` log. Record mailbox thread and message counts, the configured quota, and these stages:
 
-Sources so far: the 2026-08-16 review of `main` @ #52 ([REVIEW-2026-08-16.md](archive/REVIEW-2026-08-16.md))
-and its coverage map ([REVIEW-2026-08-16-coverage.md](archive/REVIEW-2026-08-16-coverage.md)), and the
-2026-09-02 review of `main` @ #107 ([REVIEW-2026-09-02.md](REVIEW-2026-09-02.md)). All three are frozen
-snapshots kept for their reasoning; the two settled ones now live in [archive/](archive/), while the
-2026-09-02 sweep stays in `docs/` because the entries below still cite its open items. This file is the part
-that stays current. Each entry cross-references its original review tag, because the review's `S1` and `S2`
-security tags collide with the `S1` through `S4` task names in M3-PLAN.
+- First readable page and Inbox metadata readiness.
+- Recent bodies and drafts.
+- All Mail, Spam, Trash, and reconciliation.
+- Historical headers and full background completion.
 
-A finding already attached to a planned task stays with that task instead of moving here. The review's B4
-pruning edge shipped with M3 S2 on 2026-08-22. M3-PLAN records its coverage and keeps the status current.
-
-Milestone and task status stays in [SPEC.md](SPEC.md) §8 and the plan docs, per [AGENTS.md](../AGENTS.md).
-Manual sign-off evidence is ticked in [T20-EVIDENCE.md](T20-EVIDENCE.md). Nothing here is a milestone gate
-unless a plan doc says so.
-
----
+For each stage, record listed and fetched counts, elapsed time, threads per minute, and quota wait time. Do not use the unread badge as sync progress. Confirm that an older contact appears in autocomplete and that historical rows stay header-only until opened.
 
 ## Product defects
 
-None recorded. Every defect the 2026-09-02 review found at high or medium severity was fixed on the branch
-that recorded it; the low-severity items stay listed in [REVIEW-2026-09-02.md](REVIEW-2026-09-02.md) §1.
+No unresolved product defect was established by this documentation cleanup. This is not a new whole-codebase audit. The prior review findings have later fix commits and must not be copied back as open bugs without reproduction.
 
-## Test coverage gaps
-
-Each was verified against the acceptance criteria in SPEC §4 and the plan docs' Testing bullets.
-
-## Refactors
-
-None recorded. `Inbox.tsx` and `Composer.tsx` are both below the ~350-line component bar; Inbox's behavior
-coordination and layout now live behind separate contracts in `useInboxController` and `InboxLayout`.
+For a new defect, record the symptom, steps to reproduce, affected symbol or test path, and verification date. Keep IDs stable and do not reuse them.

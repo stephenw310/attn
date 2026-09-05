@@ -2,4 +2,4 @@
 
 # Claude Code
 
-The working agreement above is imported from [AGENTS.md](../AGENTS.md) in the repo root — one file, shared across agent tools. Add project rules there, not here; keep this file for Claude-Code-specific notes only.
+Read the shared development rules in [AGENTS.md](../AGENTS.md). Add project rules there. Use this file only for Claude Code-specific instructions.

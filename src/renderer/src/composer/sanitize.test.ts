@@ -84,7 +84,7 @@ describe('outgoing HTML sanitizer in a browser-compatible DOM', () => {
   })
 
   it('keeps legacy presentational table attributes, and only on table elements', () => {
-    // SPEC §9 #18a: real mail paints tables with these, and ALLOWED_URI_REGEXP
+    // SPEC F6: real mail paints tables with these, and ALLOWED_URI_REGEXP
     // was stripping them from every attribute value that is not a URI.
     const table =
       '<table border="1" cellpadding="4" cellspacing="0" bgcolor="#ffffff"><tbody><tr bgcolor="#eeeeee"><td align="center" valign="top">Cell</td></tr></tbody></table>'

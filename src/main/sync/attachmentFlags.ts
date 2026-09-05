@@ -1,5 +1,5 @@
 // Ids-only lifetime pass that marks which stored threads carry an attachment
-// (SPEC §9 #18c). Header-only rows — everything the all-mail stage and the
+// (SPEC F2). Header-only rows — everything the all-mail stage and the
 // lifetime sweep store — have no MIME part tree, so `threads.has_attachment`
 // stays 0 until a thread is hydrated: no paperclip chip in the list and no
 // local `has:attachment` match. Gmail can answer the question by search, and

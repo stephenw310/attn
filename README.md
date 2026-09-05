@@ -1,144 +1,155 @@
 # Attn
 
-Keyboard-first, local-first desktop email client for macOS and Windows, modeled on Superhuman's triage philosophy: sub-perceptible latency, everything on the keyboard, inbox zero as the default state.
+Attn is a desktop Gmail client for macOS and Windows. It uses Electron, React, TypeScript, and SQLite.
 
-**Current state: every planned engineering task from M0 through M5 is merged on `main`; no milestone is formally signed off, because each exit checklist ends in manual evidence the harness cannot produce (operator-credentialed signing and the release-feed decision, real-OS/real-Gmail/real-provider/two-account runs, and on-hardware frame timings) — see [SPEC §8](docs/SPEC.md#8-milestones) and [T40-EVIDENCE.md](docs/T40-EVIDENCE.md).** The Dispatch full-width list ⇄ full-window conversation flow includes keyboard triage and bulk actions, durable offline replay, snooze scheduling, incremental Gmail polling with label-catalog refresh and a visible sync status, sanitized HTML/attachment rendering, background lifecycle, notifications, unread badges, and personal-build packaging. M2 added the full-window composer with crash-safe local drafts, inline reply/reply-all/forward drafting, rich content with a zero-formatting-loss invariant, two-way Gmail Drafts sync, attachments (spooled locally, mirrored to Gmail), send with undo send behind an exactly-once outbox, self-healing failed triage actions, on-demand body hydration, and a lifetime header sweep with the full staged backfill (inbox → bodies → drafts → all-mail → spam → trash → reconcile). T20 adds a windowed 10k inbox, checked interaction/memory budgets, weighted Gmail quota pacing, and structured bootstrap telemetry. Still open before M2 sign-off: the real-Gmail evidence matrix, a one-week sole-client dogfood run, and the real-OS notification click-through smoke — see [the evidence ledger](docs/T20-EVIDENCE.md).
+Read cached mail, write drafts, and organize your inbox without a network connection. Attn saves changes locally and syncs them with Gmail when the connection returns. Keyboard commands cover the main mail actions.
 
-- **[docs/SPEC.md](docs/SPEC.md)** — product & technical spec, the source of truth for behavior (v0.16)
-- **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
-- **[docs/M2-PLAN.md](docs/M2-PLAN.md)** — M2 implementation plan: pre-M2 refactors, composer, drafts, send + undo send, exactly-once outbox, and the M2 exit checklist
-- **[docs/M3-PLAN.md](docs/M3-PLAN.md)** — M3 implementation record: shipped sync, mailboxes, search, palette, themes, splits, and Move; planned chord guide and inbox zero
-- **[docs/RELEASE.md](docs/RELEASE.md)** — how a version reaches installed apps: the release workflow, its secrets, the feed-repository decision, and the schema gate on auto-update
-- **[docs/T20-EVIDENCE.md](docs/T20-EVIDENCE.md)** — M2 sign-off evidence: the recorded 10k list and composer measurements, quota/bootstrap instrumentation, and the manual real-Gmail and dogfood items still outstanding
-- **[docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)** — the live triage list: open bugs, security hardening, test-coverage gaps, and refactor proposals, each verified against `main` with a `file:line` anchor
-- **[docs/archive/](docs/archive/)** — frozen snapshots kept for their reasoning, not for their status: the 2026-08-16 review of `main` at the end of M2 feature work ([REVIEW-2026-08-16.md](docs/archive/REVIEW-2026-08-16.md)) with its test-coverage map ([REVIEW-2026-08-16-coverage.md](docs/archive/REVIEW-2026-08-16-coverage.md)), and the S1 utility-process boundary design ([S1-DESIGN.md](docs/archive/S1-DESIGN.md))
-- **[AGENTS.md](AGENTS.md)** — working agreement for coding agents (verification contract, test harness, conventions). `.claude/CLAUDE.md` imports it, so Claude Code picks it up automatically; other tools read it directly.
+Attn is in early development. You need your own Google OAuth client to connect Gmail. Manual Gmail and desktop validation remains open. See [known issues](docs/KNOWN-ISSUES.md) before you use Attn as your only mail client.
 
-## Prerequisites
+## What you can do
 
-- **Node 22.12+** (developed on 24) and npm — better-sqlite3 and Electron's tooling require ≥ 22.12
-- **macOS:** Xcode Command Line Tools
-- **Windows:** Visual Studio Build Tools with the C++ workload
+- Add multiple Gmail accounts and switch between separate inboxes.
+- Archive, snooze, label, move, and undo actions on one or more conversations.
+- Write rich-text messages with attachments, saved snippets, and Gmail signatures.
+- Save drafts locally, sync drafts with Gmail, and cancel sends during the undo-send delay.
+- Search cached mail or submit a search to Gmail for older mail.
+- Create inbox splits with rules and set follow-up reminders.
+- Use desktop notifications, unread badges, and light or dark themes.
+- Enable AI reply drafts or inline autocomplete with your own provider. Both are optional.
 
-Both native toolchains are only needed if a native module has to be compiled from source; see [Install](#install--run) below.
+Calendar, Outlook, IMAP, a unified inbox, and scheduled send are not supported. Linux can run the test suite, but it is not a supported product target.
 
-## Install & run
+## Get started
 
-```bash
+### 1. Install the prerequisites
+
+Use macOS or Windows with Git, Node.js 22.12 or later, and npm.
+
+If a native dependency needs compilation, install the tools for your operating system:
+
+- macOS: Xcode Command Line Tools.
+- Windows: Visual Studio Build Tools with the C++ workload.
+
+### 2. Get the source
+
+```sh
+git clone https://github.com/stephenw310/attn.git
+cd attn
 npm install
+```
+
+The install step downloads Electron and checks the SQLite native module inside Electron. If that check fails later, run `npm run toolchain` to repair the installation.
+
+### 3. Configure Google sign-in
+
+Each user supplies a Google OAuth client. The same client can connect all your Gmail accounts.
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a project or select an existing project.
+3. Enable the Gmail API for the project.
+4. Configure Google Auth Platform with an External audience and Testing status.
+5. Add each Gmail address you want to connect as a test user.
+6. Create an OAuth client with the **Desktop app** application type.
+7. Copy `oauth.config.example.json` to `oauth.config.json` in the repository root.
+8. Put the client ID and client secret in the corresponding fields.
+
+Attn expects this file structure:
+
+```json
+{
+  "client_id": "YOUR_CLIENT_ID",
+  "client_secret": "YOUR_CLIENT_SECRET",
+  "quota_units_per_minute": 6000
+}
+```
+
+Keep `oauth.config.json` private. Git ignores this file. Set the quota value to the per-user limit shown for your project. See [Gmail API usage limits](https://developers.google.com/workspace/gmail/api/reference/quota).
+
+Attn requests `gmail.modify`, `openid`, and `email`. The mail scope permits mail reading, composition, sending, and label changes. See [Google's scope reference](https://developers.google.com/workspace/gmail/api/auth/scopes).
+
+External apps in Testing status receive refresh tokens that expire after seven days when they request Gmail access. Expect to sign in again. See [Google's token expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+### 4. Start Attn
+
+```sh
 npm run dev
 ```
 
-`npm install` downloads Electron and then verifies that `better-sqlite3` actually loads *inside* Electron (postinstall: `scripts/ensure-electron-toolchain.mjs`). better-sqlite3 ships Node-API prebuilds, so normally nothing is compiled. The script rebuilds only if that check fails, and on restricted networks — where Electron's binary and header hosts are blocked — it self-heals using github.com and nodejs.org. If an install ever ends up half-broken, `npm run toolchain` re-runs the repair and reports what it did.
+Select **Sign in with Google**. Complete sign-in in your browser. If Google shows an unverified-app notice, check that the client belongs to your project before you continue.
 
-The app starts on its Google sign-in screen. Connecting a real inbox requires the one-time
-[Google OAuth client](#google-oauth-client-for-real-gmail-data) setup below.
+The first conversations appear while Attn syncs the rest of the mailbox. Older messages can require a connection when you first open them. The sync status shows background progress.
 
-## Verification
+To add another account, open the account menu and select **Add account**.
 
-```bash
-npm run verify
-```
+## Use the keyboard
 
-Typecheck → lint/format → unit tests → production build → Playwright end-to-end tests that drive the **real built Electron app** (main process, SQLite, preload bridge, IPC, keyboard loop). The suite needs no Google credentials: signed-out tests cover onboarding, while mail features use a deterministic seeded SQLite store in throwaway user-data directories. It uses Xvfb automatically on display-less Linux. GitHub Actions runs the same gates as three jobs: static checks + unit tests + build, Electron smoke, and the performance suite.
+`Mod` means Command on macOS and Control on Windows.
 
-| Script | What it does |
-|---|---|
-| `npm run verify` | The full gate — run this before calling a change done |
-| `npm run test:unit` | Pure main/renderer module tests |
-| `npm run e2e` | Build + end-to-end tests |
-| `npm run e2e:only` | End-to-end tests without rebuilding (only when `out/` is current) |
-| `npm run e2e:perf` | Build, generate the 10,000-thread seed, and enforce list/composer budgets |
-| `npm run typecheck` · `npm run lint` | Fast static passes |
-| `npm run build` | Production bundles into `out/` |
-| `npm run toolchain` | Repair the Electron binary / native-module setup |
+| Keys | Action |
+| --- | --- |
+| `J`, `K` | Select the next or previous conversation |
+| `Enter` | Open the selected conversation |
+| `Esc` | Return to the list or close the current control |
+| `E` | Archive |
+| `H` | Snooze |
+| `Z` | Undo the last mail action |
+| `C` | Write a new message |
+| `R`, `A`, `F` | Reply, reply all, or forward |
+| `Mod+Enter` | Send from the composer |
+| `/` | Search |
+| `Mod+K` | Open the command palette |
+| `Mod+/` | Open the keyboard shortcut reference |
+| `Mod+,` | Open settings |
+| `Mod+1` through `Mod+9` | Switch accounts in their configured order |
 
-The e2e suite writes visual-review screenshots under `e2e/.artifacts/` — `login.png`, `inbox.png`, `reading.png`, `simple-mail.png`, `label-picker.png`, `auth-paused.png`, `composer.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, and `gmail-draft.png` (the authoritative list is in AGENTS.md); failures leave Playwright traces in `e2e/.results/` (`npx playwright show-trace <path>`).
+Use the command palette to find other actions. The [keyboard map](docs/SPEC.md#5-keyboard-map-v1-defaults) lists the defaults.
 
-## Package & install locally
+## Build an installed app
 
-Packaging uses `electron-builder` and writes installable artifacts to `dist/`. Build on the target
-operating system so Electron and `better-sqlite3` use the correct native architecture.
+Build on the operating system where you will use the app. The commands write installers to `dist/`.
 
-```bash
-# Fast unpacked app for packaging smoke tests
-npm run package:dir
+| Target | Command | Install |
+| --- | --- | --- |
+| macOS, current architecture | `npm run package:mac` | Open the DMG and drag Attn to Applications |
+| macOS, Apple Silicon and Intel | `npm run package:mac:all` | Use the DMG for your Mac |
+| Windows, current architecture | `npm run package:win` | Run the EXE installer |
+| Unpacked app for local checks | `npm run package:dir` | Open the app in `dist/` |
 
-# macOS: DMG + ZIP for the current Mac architecture
-npm run package:mac
-
-# Windows: NSIS installer for the current Windows architecture
-npm run package:win
-```
-
-On macOS, open the generated `.dmg` in `dist/` and drag **Attn** to Applications. On Windows, run
-the generated `.exe` in `dist/`. macOS personal builds are ad-hoc signed rather than Developer ID
-signed or notarized. Windows personal builds are unsigned and may trigger a Microsoft Defender
-SmartScreen warning. Personal builds never check for updates; Settings → About says which kind of
-build is running.
-
-The `Package desktop apps` GitHub Actions workflow builds both Apple Silicon and Intel macOS
-artifacts plus the Windows installer only when manually dispatched. It retains the non-release
-installers as workflow artifacts for 14 days.
-
-## Release
-
-Pushing a `v<version>` tag runs the `Release` workflow: signed and notarized macOS builds, a signed
-Windows installer, and a GitHub Release whose feed files carry the database schema version, which is
-what installed release builds auto-update from. The credentials, the feed-repository decision, and the
-step-by-step procedure are in [docs/RELEASE.md](docs/RELEASE.md).
-
-For a packaged app using real Gmail data, keep `oauth.config.json` outside the installed app in its
-per-user data directory, then restart Attn:
+For an installed app, put `oauth.config.json` in its user data directory:
 
 - macOS: `~/Library/Application Support/Attn/oauth.config.json`
 - Windows: `%APPDATA%\Attn\oauth.config.json`
 
-## Google OAuth client (for real Gmail data)
+Restart Attn after you add the file. Keep the file outside the installed application.
 
-v1 is deliberately "dev-mode" (SPEC §9.2): you supply your own Google OAuth client, and no Google app verification is involved. Until this is configured, the sign-in screen links the missing setup to these instructions and does not expose an inbox.
+Personal macOS builds use an ad-hoc signature and are not notarized. Personal Windows builds are unsigned and can trigger a SmartScreen warning. Personal builds do not check for updates. Signing and the automatic-update feed are deferred. To update, get the new source and build the app again. The [release guide](docs/RELEASE.md) describes the procedure if signed releases are enabled later.
 
-In the [Google Cloud Console](https://console.cloud.google.com), accomplish these five things (the console UI moves around; the goals don't):
+## Data and privacy
 
-1. Create (or pick) a project.
-2. **Enable the Gmail API** for that project.
-3. Configure the **OAuth consent screen**: External user type, leave the app in **Testing** mode, and add your own Gmail address as a **test user**.
-4. Create an **OAuth client ID** of type **Desktop app**. Copy the Client ID and Client Secret.
-5. In the project root: `cp oauth.config.example.json oauth.config.json`, then paste both values in. That file is gitignored — never commit it. The example's `quota_units_per_minute` is Google's post-1-May-2026 per-user project limit (6,000); set it to the actual limit shown for your project if you have customized it. Attn's weighted scheduler uses the [authoritative Gmail quota costs and limits](https://developers.google.com/workspace/gmail/api/reference/quota).
+Attn stores cached mail and local drafts in SQLite under your user data directory. The mail database is not encrypted by Attn. OAuth tokens and AI provider keys use Electron `safeStorage`, backed by the operating system.
 
-Restart the app and click **Sign in with Google**. The browser will show Google's "unverified app" screen — expected in dev-mode; proceed via the advanced/continue path. Tokens are encrypted through the OS keychain (Electron `safeStorage`), never stored in plaintext.
+Attn has no hosted mail backend or telemetry. It connects to Google for mail. Signed release builds also contact their configured update feed.
 
-### Known constraints (v1, by design — SPEC §9)
+Remote images load directly from senders by default. You can block them in settings and allow individual senders.
 
-- **Testing-mode refresh tokens expire after about 7 days**, so expect to re-authenticate roughly weekly.
-- `gmail.modify` is a restricted scope: public distribution would require Google's app verification plus a security assessment. Out of scope for v1.
+AI is disabled by default. If you enable it, Attn sends mail context to your chosen provider for requested reply drafts. Inline autocomplete has a separate opt-in and sends a limited excerpt of unsent text. Review generated text before you send it.
 
-## Development tuning
+Snooze and follow-up timers run locally. If Attn is closed when a reminder becomes due, it returns when Attn next starts.
 
-Compile-time defaults are grouped by behavior:
+## Contribute
 
-- [Sync tuning](src/main/sync/tuning.ts): mail windows, historical cap, read limits, polling, retries,
-  concurrency, Gmail request sizes, and quota policy.
-- [Composer and outbox tuning](src/shared/outboxTuning.ts): save checkpoints, send recovery, shutdown
-  deadlines, undo-send options, and retention.
-- [Renderer tuning](src/renderer/src/tuning.ts): search and autocomplete delays, keyboard chords,
-  toast duration, and the Inbox Zero clock.
+Read [AGENTS.md](AGENTS.md) for the code structure and development rules. Read the [product specification](docs/SPEC.md) for expected behavior.
 
-Changes to these files require a rebuild. Existing injected options, the OAuth quota override, and
-persisted preferences still take precedence where supported. Keep unrelated settings independent even
-when their values match. Protocol constants, schema versions, MIME rules, security limits, and component
-layout measurements stay with the code that enforces them.
+Run the full check before you submit a change:
 
-## Repository layout
-
+```sh
+npm run verify
 ```
-docs/SPEC.md         Product & technical spec — the source of truth
-AGENTS.md            Working agreement for coding agents (.claude/CLAUDE.md imports it)
-design/explorations/ Static HTML visual-direction studies
-src/main/            Electron main process: windows, OAuth, SQLite, Gmail sync
-src/preload/         contextBridge API — the renderer's only path to the main process
-src/renderer/        React UI (sandboxed; no Node access)
-src/shared/          Types shared across processes
-e2e/                 Playwright suite driving the built app
-scripts/             Toolchain repair + e2e runner
-```
+
+This command runs type checks, Biome, unit tests, a production build, and Electron end-to-end tests. Tests use temporary local profiles and need no Google credentials. See the [test guide](docs/TESTING.md) for focused commands and failure diagnosis.
+
+For a bug report, include the operating system, Attn version, steps to reproduce, expected result, and actual result. Remove mail content, addresses, tokens, and API keys from logs and screenshots.
+
+## License
+
+Attn uses the [MIT license](LICENSE).
