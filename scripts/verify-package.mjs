@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync, readdirSync } from 'node:fs'
 import { access, readdir, readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listPackage, statFile } from '@electron/asar'
-import { packagedSchemaVersion } from './write-distribution-metadata.mjs'
+import { packagedSchemaVersions } from './write-distribution-metadata.mjs'
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outputDir = join(projectDir, 'dist')
@@ -119,11 +120,16 @@ async function verifyDistributionMetadata(archive) {
   } catch {
     throw new Error(`${relative(projectDir, archive)} has no readable distribution.json beside app.asar`)
   }
-  const schemaVersion = packagedSchemaVersion()
-  if (metadata?.metadataVersion !== 1) throw new Error(`${path}: unknown metadataVersion`)
+  const { schemaVersion, minimumSchemaVersion } = packagedSchemaVersions()
+  if (metadata?.metadataVersion !== 2) throw new Error(`${path}: unknown metadataVersion`)
   if (metadata.schemaVersion !== schemaVersion) {
     throw new Error(
       `${path}: declares schema v${metadata.schemaVersion}, packaged build is v${schemaVersion}`
+    )
+  }
+  if (metadata.minimumSchemaVersion !== minimumSchemaVersion) {
+    throw new Error(
+      `${path}: declares minimum schema v${metadata.minimumSchemaVersion}, packaged build is v${minimumSchemaVersion}`
     )
   }
   if (releaseMode) {
@@ -154,15 +160,53 @@ function verifyReleaseSignature(archive, platform) {
   }
   if (platform === 'win32') {
     // The NSIS installer is the shipped artifact; require its Authenticode
-    // signature. `signtool` exists on the Windows release runner.
-    const installer = process.env.ATTN_RELEASE_INSTALLER
-    if (!installer) {
-      throw new Error('release verification on Windows requires ATTN_RELEASE_INSTALLER=<path to .exe>')
-    }
-    execFileSync('signtool', ['verify', '/pa', installer], { stdio: 'pipe' })
+    // signature. ATTN_RELEASE_INSTALLER names it explicitly; otherwise the
+    // one installer in dist/ is it.
+    const installer = process.env.ATTN_RELEASE_INSTALLER ?? releaseInstaller()
+    execFileSync(findSigntool(), ['verify', '/pa', installer], { stdio: 'pipe' })
     return
   }
   throw new Error(`${platform} artifacts are not a release target`)
+}
+
+function releaseInstaller() {
+  const installers = readdirSync(outputDir).filter((name) => name.endsWith('.exe'))
+  if (installers.length !== 1) {
+    throw new Error(
+      `expected exactly one installer in ${outputDir}, found ${installers.length}; set ATTN_RELEASE_INSTALLER`
+    )
+  }
+  return join(outputDir, installers[0])
+}
+
+/**
+ * `signtool` is not on PATH on a stock Windows runner. Prefer PATH, then the
+ * Windows SDK installs, newest kit first.
+ */
+function findSigntool() {
+  try {
+    execFileSync('where', ['signtool'], { stdio: 'pipe' })
+    return 'signtool'
+  } catch {
+    // fall through to the SDK search
+  }
+  const kits = join(
+    process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)',
+    'Windows Kits',
+    '10',
+    'bin'
+  )
+  if (existsSync(kits)) {
+    const versions = readdirSync(kits)
+      .filter((name) => /^\d+\.\d+/.test(name))
+      .sort()
+      .reverse()
+    for (const version of versions) {
+      const candidate = join(kits, version, 'x64', 'signtool.exe')
+      if (existsSync(candidate)) return candidate
+    }
+  }
+  throw new Error('signtool.exe not found on PATH or under the Windows 10 SDK; install the Windows SDK')
 }
 
 const archives = await findAppArchives(outputDir)

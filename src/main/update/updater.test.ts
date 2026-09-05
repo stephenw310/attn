@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { SchedulerTime, TimerHandle } from '../time'
 import {
   AppUpdater,
@@ -43,13 +43,13 @@ class ManualTimers {
 interface FeedScript {
   check?: () => Promise<UpdateFeedInfo | null>
   downloadError?: boolean
+  installError?: boolean
 }
 
 function harness(script: FeedScript = {}, localSchema: number | null = 24) {
   const timers = new ManualTimers()
   const states: UpdateState[] = []
-  const calls = { check: 0, download: 0, install: 0 }
-  const shutdown = vi.fn(async () => {})
+  const calls = { check: 0, download: 0, install: 0, stage: 0 }
   const feed: UpdateFeed = {
     check: async () => {
       calls.check++
@@ -61,6 +61,10 @@ function harness(script: FeedScript = {}, localSchema: number | null = 24) {
     },
     quitAndInstall: () => {
       calls.install++
+      if (script.installError) throw new Error('installer handoff failed')
+    },
+    installOnQuit: async () => {
+      calls.stage++
     }
   }
   const updater = new AppUpdater({
@@ -69,13 +73,16 @@ function harness(script: FeedScript = {}, localSchema: number | null = 24) {
     schemaVersion: 24,
     localSchemaVersion: () => localSchema,
     onStateChange: (state) => states.push(state),
-    shutdown,
     time: timers.time
   })
-  return { updater, timers, states, calls, shutdown }
+  return { updater, timers, states, calls }
 }
 
-const compatibleInfo: UpdateFeedInfo = { version: '1.1.0', requiredSchemaVersion: 24 }
+const compatibleInfo: UpdateFeedInfo = {
+  version: '1.1.0',
+  requiredSchemaVersion: 24,
+  minimumSchemaVersion: 21
+}
 
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -88,6 +95,10 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('1.0.0', '1.0.0')).toBe(false)
     expect(isNewerVersion('0.9.9', '1.0.0')).toBe(false)
     expect(isNewerVersion('not-a-version', '1.0.0')).toBe(false)
+    // Prereleases are never published; a parser that read "0-beta" as 0
+    // would let a beta client refuse the final release (PR #114 review).
+    expect(isNewerVersion('1.0.0-beta.1', '0.9.0')).toBe(false)
+    expect(isNewerVersion('1.0.0', '1.0.0-beta.1')).toBe(false)
   })
 })
 
@@ -97,7 +108,11 @@ describe('cadence and state machine', () => {
     h.updater.start()
     await settle()
     expect(h.calls).toMatchObject({ check: 1, download: 1 })
-    expect(h.updater.state()).toEqual({ phase: 'ready', readyVersion: '1.1.0' })
+    expect(h.updater.state()).toEqual({
+      phase: 'ready',
+      readyVersion: '1.1.0',
+      lastCheck: { at: 0, outcome: 'available', version: '1.1.0' }
+    })
     expect(h.states.map((state) => state.phase)).toEqual(['checking', 'downloading', 'ready'])
     expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
     // A later tick never re-downloads a ready update.
@@ -110,7 +125,66 @@ describe('cadence and state machine', () => {
     const h = harness()
     h.updater.start()
     await settle()
-    expect(h.updater.state().phase).toBe('idle')
+    expect(h.updater.state()).toEqual({
+      phase: 'idle',
+      readyVersion: null,
+      lastCheck: { at: 0, outcome: 'up-to-date', version: null }
+    })
+    expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
+  })
+
+  it('records why a newer release did not download, and a failed check as an error', async () => {
+    const incompatible = harness({
+      check: async () => ({
+        version: '2.0.0',
+        requiredSchemaVersion: 25,
+        minimumSchemaVersion: 25
+      })
+    })
+    incompatible.updater.start()
+    await settle()
+    expect(incompatible.calls.download).toBe(0)
+    expect(incompatible.updater.state().lastCheck).toEqual({
+      at: 0,
+      outcome: 'incompatible',
+      version: '2.0.0'
+    })
+
+    const failing = harness({
+      check: async () => {
+        throw new Error('feed down')
+      }
+    })
+    failing.updater.start()
+    await settle()
+    expect(failing.updater.state().lastCheck).toEqual({ at: 0, outcome: 'error', version: null })
+  })
+
+  it('checkNow runs one check, joins an in-flight one, and restarts the cadence from it', async () => {
+    const pending: { release: () => void } = { release: () => {} }
+    const h = harness({
+      check: () =>
+        new Promise((resolve) => {
+          pending.release = () => resolve(null)
+        })
+    })
+    h.updater.start()
+    await settle()
+    expect(h.calls.check).toBe(1)
+    // A second request while the first is still answering joins it.
+    const joined = h.updater.checkNow()
+    await settle()
+    expect(h.calls.check).toBe(1)
+    pending.release()
+    expect((await joined).lastCheck?.outcome).toBe('up-to-date')
+    expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
+
+    // A manual check replaces the pending scheduled one rather than stacking.
+    const manual = h.updater.checkNow()
+    await settle()
+    expect(h.calls.check).toBe(2)
+    pending.release()
+    await manual
     expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
   })
 
@@ -135,17 +209,69 @@ describe('cadence and state machine', () => {
   })
 })
 
-describe('schema gating', () => {
+describe('migration compatibility', () => {
   it('missing schema metadata rejects before download', async () => {
-    const h = harness({ check: async () => ({ version: '1.1.0', requiredSchemaVersion: null }) })
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: null,
+        minimumSchemaVersion: null
+      })
+    })
     h.updater.start()
     await settle()
     expect(h.calls.download).toBe(0)
     expect(h.updater.state().phase).toBe('idle')
   })
 
-  it('a target for another schema never downloads', async () => {
-    const h = harness({ check: async () => ({ version: '1.1.0', requiredSchemaVersion: 25 }) })
+  it('rejects invalid migration metadata', async () => {
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 24,
+        minimumSchemaVersion: null
+      })
+    })
+    h.updater.start()
+    await settle()
+    expect(h.calls.download).toBe(0)
+  })
+
+  it('downloads a newer schema when the target can migrate the local database', async () => {
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 27,
+        minimumSchemaVersion: 21
+      })
+    })
+    h.updater.start()
+    await settle()
+    expect(h.calls.download).toBe(1)
+    expect(h.updater.state().phase).toBe('ready')
+  })
+
+  it('rejects a target whose migration history starts after the local schema', async () => {
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 27,
+        minimumSchemaVersion: 25
+      })
+    })
+    h.updater.start()
+    await settle()
+    expect(h.calls.download).toBe(0)
+  })
+
+  it('rejects feed metadata without a minimum schema', async () => {
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 24,
+        minimumSchemaVersion: null
+      })
+    })
     h.updater.start()
     await settle()
     expect(h.calls.download).toBe(0)
@@ -166,7 +292,13 @@ describe('schema gating', () => {
   })
 
   it('a non-newer version never downloads', async () => {
-    const h = harness({ check: async () => ({ version: '1.0.0', requiredSchemaVersion: 24 }) })
+    const h = harness({
+      check: async () => ({
+        version: '1.0.0',
+        requiredSchemaVersion: 24,
+        minimumSchemaVersion: 21
+      })
+    })
     h.updater.start()
     await settle()
     expect(h.calls.download).toBe(0)
@@ -174,21 +306,25 @@ describe('schema gating', () => {
 })
 
 describe('restart to apply', () => {
-  it('awaits the worker shutdown before handing over to the installer', async () => {
-    const order: string[] = []
+  it('hands over while the app is live so a failed handoff cannot strand torn-down workers', async () => {
     const h = harness({ check: async () => compatibleInfo })
-    h.shutdown.mockImplementation(async () => {
-      order.push('shutdown')
-    })
     h.updater.start()
     await settle()
-    const original = h.calls
     const installed = await h.updater.restartToApply()
-    order.push(`install:${original.install}`)
     expect(installed).toBe(true)
-    expect(h.shutdown).toHaveBeenCalledTimes(1)
     expect(h.calls.install).toBe(1)
-    expect(order[0]).toBe('shutdown')
+  })
+
+  it('keeps a ready update retryable after a synchronous handoff failure', async () => {
+    const h = harness({ check: async () => compatibleInfo, installError: true })
+    h.updater.start()
+    await settle()
+    expect(await h.updater.restartToApply()).toBe(false)
+    expect(h.updater.state().phase).toBe('ready')
+    expect(h.updater.state().readyVersion).toBe('1.1.0')
+    expect(h.timers.delays()).toEqual([UPDATE_CHECK_INTERVAL_MS])
+    expect(await h.updater.restartToApply()).toBe(false)
+    expect(h.calls.install).toBe(2)
   })
 
   it('refuses with nothing ready and never installs twice', async () => {
@@ -197,6 +333,53 @@ describe('restart to apply', () => {
     await settle()
     expect(await h.updater.restartToApply()).toBe(false)
     expect(h.calls.install).toBe(0)
+  })
+
+  it('stages a ready update for the ordinary quit, once, and never for a stale one', async () => {
+    const h = harness({ check: async () => compatibleInfo })
+    h.updater.start()
+    await settle()
+    await h.updater.installOnQuit()
+    expect(h.calls.stage).toBe(1)
+    expect(h.calls.install).toBe(0)
+    // Quit preparation and the explicit restart share one claim.
+    await h.updater.installOnQuit()
+    expect(await h.updater.restartToApply()).toBe(false)
+    expect(h.calls.stage).toBe(1)
+
+    const idle = harness()
+    idle.updater.start()
+    await settle()
+    await idle.updater.installOnQuit()
+    expect(idle.calls.stage).toBe(0)
+  })
+
+  it('a stale cached download is dropped at quit instead of staged', async () => {
+    let localSchema = 24
+    const timers = new ManualTimers()
+    const calls = { stage: 0 }
+    const updater = new AppUpdater({
+      feed: {
+        check: async () => compatibleInfo,
+        download: async () => {},
+        quitAndInstall: () => {},
+        installOnQuit: async () => {
+          calls.stage++
+        }
+      },
+      currentVersion: '1.0.0',
+      schemaVersion: 24,
+      localSchemaVersion: () => localSchema,
+      onStateChange: () => {},
+      time: timers.time
+    })
+    updater.start()
+    await settle()
+    expect(updater.state().phase).toBe('ready')
+    localSchema = 25
+    await updater.installOnQuit()
+    expect(calls.stage).toBe(0)
+    expect(updater.state().phase).toBe('idle')
   })
 
   it('re-validates the cached download at install time', async () => {
@@ -209,13 +392,13 @@ describe('restart to apply', () => {
         download: async () => {},
         quitAndInstall: () => {
           calls.install++
-        }
+        },
+        installOnQuit: async () => {}
       },
       currentVersion: '1.0.0',
       schemaVersion: 24,
       localSchemaVersion: () => localSchema,
       onStateChange: () => {},
-      shutdown: async () => {},
       time: timers.time
     })
     updater.start()

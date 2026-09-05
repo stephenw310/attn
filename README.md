@@ -8,6 +8,7 @@ Keyboard-first, local-first desktop email client for macOS and Windows, modeled 
 - **[docs/M1-PLAN.md](docs/M1-PLAN.md)** — shipped M1 task record and remaining exit checklist
 - **[docs/M2-PLAN.md](docs/M2-PLAN.md)** — M2 implementation plan: pre-M2 refactors, composer, drafts, send + undo send, exactly-once outbox, and the M2 exit checklist
 - **[docs/M3-PLAN.md](docs/M3-PLAN.md)** — M3 implementation record: shipped sync, mailboxes, search, palette, themes, splits, and Move; planned chord guide and inbox zero
+- **[docs/RELEASE.md](docs/RELEASE.md)** — how a version reaches installed apps: the release workflow, its secrets, the feed-repository decision, and the schema gate on auto-update
 - **[docs/T20-EVIDENCE.md](docs/T20-EVIDENCE.md)** — M2 sign-off evidence: the recorded 10k list and composer measurements, quota/bootstrap instrumentation, and the manual real-Gmail and dogfood items still outstanding
 - **[docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)** — the live triage list: open bugs, security hardening, test-coverage gaps, and refactor proposals, each verified against `main` with a `file:line` anchor
 - **[docs/archive/](docs/archive/)** — frozen snapshots kept for their reasoning, not for their status: the 2026-08-16 review of `main` at the end of M2 feature work ([REVIEW-2026-08-16.md](docs/archive/REVIEW-2026-08-16.md)) with its test-coverage map ([REVIEW-2026-08-16-coverage.md](docs/archive/REVIEW-2026-08-16-coverage.md)), and the S1 utility-process boundary design ([S1-DESIGN.md](docs/archive/S1-DESIGN.md))
@@ -73,11 +74,19 @@ npm run package:win
 On macOS, open the generated `.dmg` in `dist/` and drag **Attn** to Applications. On Windows, run
 the generated `.exe` in `dist/`. macOS personal builds are ad-hoc signed rather than Developer ID
 signed or notarized. Windows personal builds are unsigned and may trigger a Microsoft Defender
-SmartScreen warning. Public signing, notarization, and GitHub Releases auto-update remain M4 work.
+SmartScreen warning. Personal builds never check for updates; Settings → About says which kind of
+build is running.
 
 The `Package desktop apps` GitHub Actions workflow builds both Apple Silicon and Intel macOS
 artifacts plus the Windows installer only when manually dispatched. It retains the non-release
 installers as workflow artifacts for 14 days.
+
+## Release
+
+Pushing a `v<version>` tag runs the `Release` workflow: signed and notarized macOS builds, a signed
+Windows installer, and a GitHub Release whose feed files carry the database schema version, which is
+what installed release builds auto-update from. The credentials, the feed-repository decision, and the
+step-by-step procedure are in [docs/RELEASE.md](docs/RELEASE.md).
 
 For a packaged app using real Gmail data, keep `oauth.config.json` outside the installed app in its
 per-user data directory, then restart Attn:

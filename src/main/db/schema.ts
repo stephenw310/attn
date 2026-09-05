@@ -1,7 +1,11 @@
-// Development schema snapshot. Bump the version whenever this SQL changes.
-// Runtime compatibility migrations stay out of the app; AGENTS.md documents the
-// manual additive-upgrade procedure for preserving a local dogfood profile.
+// Current schema snapshot for new profiles. Every change bumps this version and
+// adds the matching ordered step in migrations.ts; the registry test makes a
+// version-only bump fail.
 export const CURRENT_SCHEMA_VERSION = 27
+
+// The oldest profile this build can upgrade in place. Keep the complete path
+// from this version to CURRENT_SCHEMA_VERSION in migrations.ts.
+export const MINIMUM_MIGRATABLE_SCHEMA_VERSION = 21
 
 // `messages.labels_json` deliberately stays nullable: NULL identifies a pre-S2
 // row whose message-level labels are unknown, so readers fall back to the thread

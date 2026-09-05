@@ -4,7 +4,7 @@ import type { AiGenerateRequest, AiSettingKey, AiSettings, AiStreamEvent } from 
 import type { AccountSyncStatus, AuthSignInResult, AuthStatus } from './auth'
 import type { CommandUsage } from './commandUsage'
 import type { ContactSearchResult } from './contacts'
-import type { UpdateState } from './distribution'
+import type { AppInfo, UpdateState } from './distribution'
 import type {
   Draft,
   DraftAttachmentMutationResult,
@@ -90,7 +90,9 @@ export const IPC_CHANNELS = {
   outboxListPending: 'outbox:listPending',
   outboxChanged: 'outbox:changed',
   outboxProgress: 'outbox:progress',
+  appGetInfo: 'app:getInfo',
   updateGetState: 'update:getState',
+  updateCheck: 'update:check',
   updateRestart: 'update:restart',
   updateState: 'update:state',
   syncGetState: 'sync:getState',
@@ -279,9 +281,13 @@ export interface InvokeChannels {
   [IPC_CHANNELS.outboxUndoSend]: { args: [outboxId: string]; result: ReopenOutboxResult }
   [IPC_CHANNELS.outboxReopen]: { args: [outboxId: string]; result: ReopenOutboxResult }
   [IPC_CHANNELS.outboxListPending]: { args: []; result: OutboxItem[] }
+  // The About surface (F15): version, schema, and build kind, all main-owned.
+  [IPC_CHANNELS.appGetInfo]: { args: []; result: AppInfo }
   // T39 auto-update: main-owned; a personal, dev, or seeded build answers
-  // idle and restart resolves false — there is no updater to talk to.
+  // idle, a check answers the same idle state, and restart resolves false —
+  // there is no updater to talk to.
   [IPC_CHANNELS.updateGetState]: { args: []; result: UpdateState }
+  [IPC_CHANNELS.updateCheck]: { args: []; result: UpdateState }
   [IPC_CHANNELS.updateRestart]: { args: []; result: boolean }
   [IPC_CHANNELS.syncGetState]: { args: []; result: SyncState }
   [IPC_CHANNELS.syncGetInboxReady]: { args: []; result: boolean }

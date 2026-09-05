@@ -5,29 +5,114 @@
 // Releases. `app.isPackaged` alone never enables updates.
 
 export const DISTRIBUTION_METADATA_FILE = 'distribution.json'
-const DISTRIBUTION_METADATA_VERSION = 1
+const DISTRIBUTION_METADATA_VERSION = 2
+export const UPDATE_FEED_TAG = 'update-feed'
 
 // Auto-update state shared across processes. The renderer only receives this
 // snapshot, and no state can force a restart without an explicit command.
 export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready'
 
+/** How the most recent completed check ended. */
+export type UpdateCheckOutcome = 'up-to-date' | 'available' | 'incompatible' | 'error'
+
+export interface UpdateCheck {
+  /** Wall-clock milliseconds when the check finished. */
+  at: number
+  outcome: UpdateCheckOutcome
+  /** The feed's newest version for 'available' and 'incompatible'; null otherwise. */
+  version: string | null
+}
+
 export interface UpdateState {
   phase: UpdatePhase
   /** The downloaded-and-ready version, when phase is 'ready'. */
   readyVersion: string | null
+  /** The last completed check; null until one finishes (or forever without an updater). */
+  lastCheck: UpdateCheck | null
 }
 
-export const UPDATE_STATE_IDLE: UpdateState = { phase: 'idle', readyVersion: null }
+export const UPDATE_STATE_IDLE: UpdateState = { phase: 'idle', readyVersion: null, lastCheck: null }
 
 type DistributionMode = 'personal' | 'release'
+
+/** What kind of build is running, for the About surface (F15). */
+export type DistributionKind = 'development' | DistributionMode
+
+export interface AppInfo {
+  version: string
+  schemaVersion: number
+  distribution: DistributionKind
+  /** The GitHub Releases feed as `owner/repo`; only a release build has one. */
+  feed: string | null
+  /** True when an updater was constructed: release, packaged, not under the harness. */
+  updaterActive: boolean
+}
+
+/**
+ * The one-line update status Settings shows and the palette toasts (F15
+ * About). Pure so both surfaces say the same thing about the same state.
+ */
+export function describeUpdateStatus(info: AppInfo | null, state: UpdateState, now: number): string {
+  // A downloaded update is the state that matters most, whatever produced it.
+  if (state.phase === 'ready' && state.readyVersion) {
+    return `Version ${state.readyVersion} is downloaded. It installs when you quit, or restart now.`
+  }
+  if (info === null) return 'Loading…'
+  if (!info.updaterActive) {
+    if (info.distribution === 'release') return 'Updates are paused in this session.'
+    if (info.distribution === 'development') return 'Development builds never check for updates.'
+    return 'Personal builds never update themselves — install a newer build over this one.'
+  }
+  if (state.phase === 'checking') return 'Checking for updates…'
+  if (state.phase === 'downloading') {
+    return state.lastCheck?.version
+      ? `Downloading ${state.lastCheck.version} in the background…`
+      : 'Downloading an update in the background…'
+  }
+  const check = state.lastCheck
+  if (check === null) return 'Not checked yet.'
+  const when = describeCheckedAt(check.at, now)
+  switch (check.outcome) {
+    case 'up-to-date':
+      return `Up to date — checked ${when}.`
+    case 'available':
+      return `Version ${check.version} is available — checked ${when}.`
+    case 'incompatible':
+      return `Version ${check.version} cannot migrate this database automatically, so it will not install. See the release notes.`
+    case 'error':
+      return `Could not reach the update feed — tried ${when}. Attn retries on its own.`
+  }
+}
+
+/** "just now", "5 minutes ago", "3 hours ago", or "yesterday" — enough for a status line. */
+export function describeCheckedAt(at: number, now: number): string {
+  const elapsedMs = Math.max(0, now - at)
+  const minutes = Math.floor(elapsedMs / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`
+  const days = Math.floor(hours / 24)
+  return days === 1 ? 'yesterday' : `${days} days ago`
+}
 
 export interface DistributionMetadata {
   metadataVersion: number
   mode: DistributionMode
-  /** The schema snapshot this build runs; updates never cross it. */
+  /** The schema snapshot this build runs. */
   schemaVersion: number
+  /** The oldest existing profile this build can migrate to schemaVersion. */
+  minimumSchemaVersion: number
   /** Release feed location; required in release mode, absent in personal. */
   feed?: { owner: string; repo: string }
+}
+
+/**
+ * The rolling feed release. Its latest.yml / latest-mac.yml entries point at
+ * versioned release assets and declare the target and minimum input schemas.
+ */
+export function updateFeedUrl(feed: { owner: string; repo: string }): string {
+  return `https://github.com/${feed.owner}/${feed.repo}/releases/download/${UPDATE_FEED_TAG}`
 }
 
 function isFeed(value: unknown): value is { owner: string; repo: string } {
@@ -58,12 +143,21 @@ export function parseDistributionMetadata(value: unknown): DistributionMetadata 
   ) {
     return null
   }
+  if (
+    typeof metadata.minimumSchemaVersion !== 'number' ||
+    !Number.isSafeInteger(metadata.minimumSchemaVersion) ||
+    metadata.minimumSchemaVersion <= 0 ||
+    metadata.minimumSchemaVersion > metadata.schemaVersion
+  ) {
+    return null
+  }
   if (metadata.mode === 'release') {
     if (!isFeed(metadata.feed)) return null
     return {
       metadataVersion: DISTRIBUTION_METADATA_VERSION,
       mode: 'release',
       schemaVersion: metadata.schemaVersion,
+      minimumSchemaVersion: metadata.minimumSchemaVersion,
       feed: { owner: metadata.feed.owner, repo: metadata.feed.repo }
     }
   }
@@ -71,7 +165,8 @@ export function parseDistributionMetadata(value: unknown): DistributionMetadata 
   return {
     metadataVersion: DISTRIBUTION_METADATA_VERSION,
     mode: 'personal',
-    schemaVersion: metadata.schemaVersion
+    schemaVersion: metadata.schemaVersion,
+    minimumSchemaVersion: metadata.minimumSchemaVersion
   }
 }
 
@@ -97,7 +192,7 @@ export function shouldConstructUpdater(
  */
 export function verifyDistributionMetadata(
   raw: unknown,
-  options: { release: boolean; packagedSchemaVersion: number }
+  options: { release: boolean; packagedSchemaVersion: number; packagedMinimumSchemaVersion: number }
 ): string[] {
   const errors: string[] = []
   const metadata = parseDistributionMetadata(raw)
@@ -108,6 +203,11 @@ export function verifyDistributionMetadata(
   if (metadata.schemaVersion !== options.packagedSchemaVersion) {
     errors.push(
       `distribution metadata declares schema v${metadata.schemaVersion} but the packaged build is v${options.packagedSchemaVersion}`
+    )
+  }
+  if (metadata.minimumSchemaVersion !== options.packagedMinimumSchemaVersion) {
+    errors.push(
+      `distribution metadata declares minimum schema v${metadata.minimumSchemaVersion} but the packaged build is v${options.packagedMinimumSchemaVersion}`
     )
   }
   if (options.release && metadata.mode !== 'release') {

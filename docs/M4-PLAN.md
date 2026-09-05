@@ -36,7 +36,7 @@ evidence.
 | T37 AI reply drafting in the composer (F17) | **shipped** 2026-08-31 (`12be729`) | nothing |
 | T37A inline AI autocomplete (F17) | **shipped** 2026-08-31 (`2a50fda`) | nothing |
 | T38 Windows unread badge overlay (F12) | **shipped** 2026-08-31 (`1ed0d80`); revised after Windows dogfood 2026-09-01 (`583f273`) | nothing |
-| T39 auto-update, signing, notarization (§6) | **code shipped** 2026-08-31 (`8ace1ab`); operator credentials and the release-feed decision open | T40's update-in-place check |
+| T39 auto-update, signing, notarization (§6) | **code shipped** 2026-08-31 (`8ace1ab`); release workflow + About surface 2026-09-04; operator credentials and the release-feed decision open | T40's update-in-place check |
 | T40 M4 exit and v1 sign-off | **in progress** — see [T40-EVIDENCE.md](T40-EVIDENCE.md) | the v1 tag |
 
 **Why this order.** T32 goes first because T32A's sync control, T32B's footer preference, T33's toggle,
@@ -61,14 +61,10 @@ follow-up below, and T40 requires its resolution before sign-off.
 
 ## Global rules (carried from M3, still binding)
 
-1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
-   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 25 after T35's durable-ordering review
-   fix. T34 and T35 introduced versions 23 and 24; the follow-up ordering fix introduces version 25. Each
-   publishes its dogfood DDL in its section. A real dogfood profile gets the manual additive upgrade in
-   AGENTS.md. T39 permits automatic updates only
-   within one schema version; a schema-changing release needs a separate upgrade procedure. The DDL in
-   this plan starts from schema 22, preserving `thread_mailboxes`, `mailbox_cursor`, and the current FTS
-   indexes. Profiles still on 21 first need the separate manual PR #98 upgrade in M3-PLAN.
+1. **Every schema change has a runtime migration.** `src/main/db/schema.ts` is the new-profile snapshot.
+   Every edit bumps `CURRENT_SCHEMA_VERSION` and appends one immutable, contiguous step to
+   `src/main/db/migrations.ts`. The retained path starts at schema 21 and includes the historical changes
+   recorded below.
 2. **IPC has three parts:** main handler, preload bridge, and the typed channel map in `src/shared/`. All in
    the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike. In M4 this extends to LLM output: an AI draft
@@ -930,7 +926,7 @@ The unit matrix is green and the Windows manual check is ticked in the T40 check
 
 ## T39: auto-update, signing, and notarization
 
-**Status: code parts shipped (2026-08-31, `8ace1ab`); operator-credential parts open.** The state machine, gating, distribution metadata, and `package:verify --release` are in and tested; Apple/Windows signing credentials, the release-feed repository decision (deferred into `ATTN_RELEASE_FEED`, so no code blocks on it), and the publishing workflow that stamps `requiredSchemaVersion` into the feed remain operator work recorded in T40.
+**Status: code parts shipped (2026-08-31, `8ace1ab`); publishing workflow and About surface shipped 2026-09-04; migration support followed in PR #114; operator-credential parts open.** The state machine, distribution metadata, and `package:verify --release` are in and tested. The Release workflow verifies, signs, notarizes, stamps the target and minimum migratable schemas into `latest*.yml`, publishes the versioned assets, and updates the rolling `update-feed`. The ordinary quit and explicit restart both revalidate the cached release before installation. Settings → About shows the version, schema, build kind, feed, last check, and update actions. [RELEASE.md](RELEASE.md) is the runbook. The Apple and Windows signing credentials and the public feed-repository decision remain operator work recorded in T40.
 
 **Depends on:** operator-supplied credentials (below) · **Unblocks:** T40 · **Spec:** §6 Packaging
 
@@ -966,16 +962,11 @@ auto-update from GitHub Releases.
   quit applies the update. Construct the updater only in packaged, non-seeded release builds. Personal,
   dev, and e2e builds neither check nor install a cached update. Route update restarts through the existing
   awaited shutdown so draft mirroring and sending quiesce before the installer takes over.
-- **Automatic updates never cross a schema version.** `openDatabase` rejects a different nonzero
-  `user_version`; downloading a new binary is not a database upgrade. Publish separate feeds for each
-  `CURRENT_SCHEMA_VERSION` and include the required schema version in update metadata. Before download
-  and again before installation, require an exact match among the running build, the local database,
-  and the target release. Missing or mismatched metadata rejects the update, including cached downloads.
-  The release verifier checks that feed metadata agrees with the packaged schema, so a schema-changing
-  artifact cannot enter the prior schema's feed. Existing installations stay on their compatible feed.
-  Moving to a new schema requires a separate, explicit upgrade procedure with backup and data-preservation
-  checks; it never deletes the profile, tokens, drafts, queued sends, or reminders automatically. This
-  task does not add a runtime migration framework.
+- **Automatic updates carry schema migrations.** The rolling feed declares the target schema and the
+  oldest schema that release can migrate. Before download and again before installation, require the open
+  database to fall inside that range. `openDatabase` then applies every ordered step in one transaction
+  and checks database integrity before commit. Missing metadata, migration gaps, unsupported old profiles,
+  and databases newer than the binary fail without deleting the profile or local-only state.
 - **Verification follows the build mode.** `npm run package:verify` retains runtime-asset and native-module
   checks for every build, including unpacked `package:dir` smoke tests. The release workflow additionally
   invokes `npm run package:verify -- --release`, which requires release metadata, a valid Developer ID

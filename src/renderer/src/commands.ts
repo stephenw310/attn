@@ -155,7 +155,9 @@ export const COMMAND_SPECS = {
   },
   'notifications.resume': { title: 'Resume notifications', context: 'global', allowInComposer: true },
   // T39: applies a downloaded update through the ordinary awaited shutdown;
-  // with nothing ready it explains itself instead of restarting.
+  // with nothing ready it explains itself instead of restarting. The check
+  // runs one now and toasts what it found; builds without an updater say so.
+  'update.check': { title: 'Check for updates', context: 'global', allowInComposer: true },
   'update.restart': { title: 'Restart to update', context: 'global', allowInComposer: true },
   'cheatsheet.open': {
     title: 'Keyboard shortcuts',

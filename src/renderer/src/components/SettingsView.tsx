@@ -20,6 +20,7 @@ import { accountNeedsAttention, useAccountHealth } from '../hooks/useAccountHeal
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { useShowToast } from '../toastContext'
+import { AboutSection } from './AboutSection'
 import { AccountHealthLine } from './AccountHealthLine'
 import { AiSettingsSection } from './AiSettingsSection'
 import { Kbd } from './Kbd'
@@ -675,6 +676,11 @@ export function SettingsView({
                     ))}
                   </select>
                 </label>
+              </section>
+
+              <section data-testid="settings-about" aria-label="About">
+                <SectionTitle>About</SectionTitle>
+                <AboutSection />
               </section>
             </div>
           </section>

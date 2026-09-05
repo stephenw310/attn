@@ -1,5 +1,8 @@
+import { mkdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { runPaletteCommand } from './nav'
 import { emitSeam } from './seams'
 
 // T39 wiring under the harness, where no updater may exist: seeded builds
@@ -10,6 +13,8 @@ import { emitSeam } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
+const artifactDirectory = join(__dirname, '.artifacts')
+
 test('a seeded build has no updater: idle state, refused restart, quiet ready toast', async ({
   app,
   page
@@ -18,7 +23,8 @@ test('a seeded build has no updater: idle state, refused restart, quiet ready to
 
   expect(await page.evaluate(() => window.attn.update.getState())).toEqual({
     phase: 'idle',
-    readyVersion: null
+    readyVersion: null,
+    lastCheck: null
   })
 
   // The palette command exists everywhere but never restarts without a
@@ -59,4 +65,55 @@ test('a ready update that predates the window is announced by the mount-time rea
   await page.reload()
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await expect(page.getByTestId('toast')).toContainText('Update 9.9.10 ready')
+})
+
+test('About shows the running version and build kind, and a ready update offers the restart', async ({
+  app,
+  page
+}, testInfo) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  // The harness launches the unpackaged build, so the version it must show
+  // is the repository's, not Electron's.
+  const version = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version as string
+  expect(version).toMatch(/^\d+\.\d+\.\d+/)
+  const schemaVersion = await page.evaluate(() =>
+    window.attn.app.getInfo().then((info) => info.schemaVersion)
+  )
+  expect(schemaVersion).toBeGreaterThan(0)
+
+  await page.keyboard.press('ControlOrMeta+,')
+  const about = page.getByTestId('settings-view').getByTestId('settings-about')
+  await expect(about).toBeVisible()
+  await expect(about.getByTestId('settings-app-version')).toHaveText(`Attn ${version}`)
+  // The harness runs the unpackaged build: no feed, no updater, and the
+  // surface says so rather than offering a check that could never run.
+  await expect(about.getByTestId('settings-app-build')).toHaveText(
+    `Development build · database schema v${schemaVersion}`
+  )
+  await expect(about.getByTestId('settings-update-status')).toContainText('Development builds never check')
+  await expect(about.getByTestId('settings-update-check')).toHaveCount(0)
+  await expect(about.getByTestId('settings-update-restart')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  // The palette command answers with the same status line.
+  await runPaletteCommand(page, 'Check for updates')
+  await expect(page.getByTestId('toast')).toContainText('Development builds never check')
+
+  // A downloaded update surfaces its version and the restart button; with no
+  // updater behind it the restart explains itself, exactly like the palette.
+  await emitSeam(app, TEST_CHANNELS.setUpdateState, {
+    phase: 'ready',
+    readyVersion: '9.9.11',
+    lastCheck: { at: Date.now(), outcome: 'available', version: '9.9.11' }
+  })
+  await page.keyboard.press('ControlOrMeta+,')
+  await expect(about.getByTestId('settings-update-status')).toContainText('Version 9.9.11 is downloaded')
+  await about.evaluate((section) => section.scrollIntoView({ block: 'end' }))
+  mkdirSync(artifactDirectory, { recursive: true })
+  const path = join(artifactDirectory, 'settings-about.png')
+  await page.screenshot({ path })
+  await testInfo.attach('settings-about', { path, contentType: 'image/png' })
+  await about.getByTestId('settings-update-restart').click()
+  await expect(page.getByTestId('toast')).toContainText('No update is ready yet')
+  await expect(page.getByTestId('settings-view')).toBeVisible()
 })
