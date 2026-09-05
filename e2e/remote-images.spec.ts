@@ -9,7 +9,7 @@ import { expect, test } from './electron'
 import { runPaletteCommand } from './nav'
 import { emitSeam } from './seams'
 
-// T33 (§9 #5): remote-content blocking enforced in main's request layer. The
+// T33 (SPEC F15): remote-content blocking enforced in main's request layer. The
 // seeded message points its resources at a local HTTP server the test
 // controls, so "zero requests" is a hard fact about the wire, not a rendering
 // guess. Coverage spans request types beyond images (a stylesheet @import),

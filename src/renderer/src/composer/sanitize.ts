@@ -131,7 +131,7 @@ const SAFE_URI = /^(?:(?:https?|mailto|cid):|data:image\/(?:png|jpeg|gif|webp);b
  */
 export const COMPOSER_LINK_SCHEMES = ['https', 'http', 'mailto']
 /**
- * Presentational table attributes real mail still ships (SPEC §9 #18a). They
+ * Presentational table attributes real mail still ships (SPEC F6). They
  * carry no URL and run nothing, but every legacy mail client honours them, so
  * dropping them silently repainted a table on open. They are deliberately *not*
  * in the editor's representable set (`preserve.ts`), so a table carrying them

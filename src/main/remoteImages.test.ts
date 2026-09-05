@@ -14,7 +14,7 @@ const blocking = (allowed: string[] = []): RemoteImagePolicy => ({
 })
 
 describe('shouldBlockMailFrameRequest', () => {
-  it('passes everything while the default-load decision stands (§9 #5)', () => {
+  it('passes everything while the default-load decision stands (SPEC F15)', () => {
     expect(shouldBlockMailFrameRequest(DEFAULT_REMOTE_IMAGE_POLICY, undefined)).toBe(false)
     expect(
       shouldBlockMailFrameRequest(

@@ -533,7 +533,7 @@ function applySnooze(
        WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up' AND state = 'returned'`
     ).run(accountId, threadId)
     applyThreadDelta(db, accountId, { threadId, add: [], remove: ['INBOX'] })
-    // v1 snooze is local-only by decision (SPEC §9 #6): Gmail sees a plain
+    // v1 snooze is local-only by decision (SPEC F4): Gmail sees a plain
     // archive. Gmail-side labels + exact-time return arrive with the v1.5
     // companion script (SPEC F7).
     if (wasInInbox) {

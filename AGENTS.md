@@ -1,130 +1,157 @@
-# AGENTS.md
+# Development guide for coding agents
 
-Working agreement for coding agents on **Attn** — a keyboard-first, local-first desktop email client (Electron + React + TypeScript + SQLite) in the Dispatch visual direction (full-width list ⇄ full-window conversation/composer). **This file records how to work in this repo, never project status: milestone state and task progress live in [docs/SPEC.md](docs/SPEC.md) §8 and the plan docs (`docs/M*-PLAN.md`), which are updated as part of shipping — do not record them here, where they rot.**
+Attn is a desktop Gmail client for macOS and Windows. It uses Electron, React, TypeScript, and SQLite.
 
-This is the only file you need to start work, and the one place these rules live — tool-specific entry points (`.claude/CLAUDE.md`) just import it, so edit this file rather than copying rules elsewhere. [docs/SPEC.md](docs/SPEC.md) is the source of truth for product behavior — consult it for any feature question. [README.md](README.md) covers human onboarding (prerequisites, Google OAuth client setup); you don't need Google credentials to build or test.
+This file contains the shared development rules. `.claude/CLAUDE.md` imports this file. Put project rules here, not in separate instructions for each agent tool.
 
-## Verification contract
+## Start here
 
-**A change is not done until `npm run verify` is green.** Run it before claiming completion, committing, or pushing.
+1. Read [README.md](README.md) for installation and product use.
+2. Read the relevant feature in [docs/SPEC.md](docs/SPEC.md) before you change behavior.
+3. Check [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) for open defects.
+4. Inspect the affected code and its tests.
+5. Run `npm install` if dependencies are absent.
 
+You need Node.js 22.12 or later. You do not need Google credentials to build or test. Do not read a developer's `oauth.config.json` or token files for a test.
+
+## Code structure
+
+| Path | Purpose |
+| --- | --- |
+| `src/main/index.ts` | Application startup, windows, and shutdown |
+| `src/main/auth/` | Google OAuth and encrypted token storage |
+| `src/main/service/` | Utility process, supervisor, and request handlers |
+| `src/main/db/` | SQLite schema, migrations, and queries |
+| `src/main/sync/` | Gmail polling, historical sync, and derived data |
+| `src/main/gmail/` | Gmail client, parsing, and quota control |
+| `src/main/actions/` | Mail actions, undo, and queued action execution |
+| `src/main/outbox/` | Drafts, attachments, Gmail draft sync, and send recovery |
+| `src/main/ipc.ts` | Main-process IPC registration and forwarding |
+| `src/main/testIpc.ts` | Test-only application controls |
+| `src/preload/index.ts` | Typed bridge exposed to the renderer |
+| `src/renderer/src/` | React views, hooks, command registry, and composer |
+| `src/shared/` | Types and pure logic shared across processes |
+| `e2e/` | Playwright tests for the built Electron application |
+| `scripts/` | Install repair, tests, packaging, and release checks |
+| `docs/TESTING.md` | Test fixtures, controls, screenshots, and diagnosis |
+| `docs/RELEASE.md` | Signed builds, update feeds, and release procedure |
+
+## Process boundaries
+
+The renderer is sandboxed. Keep `contextIsolation` enabled and `nodeIntegration` disabled. The renderer must not access Google or the filesystem directly.
+
+The renderer calls the typed preload bridge. Main handles native operations and forwards store operations to the utility process. The utility process owns the SQLite connection, mail reads, sync workers, action execution, drafts, and sends. Do not add a fallback database connection in main.
+
+For a new IPC capability, update these parts together:
+
+- The channel types in `src/shared/ipc.ts`.
+- The bridge in `src/preload/index.ts`.
+- The registration in `src/main/ipc.ts` and the applicable handler.
+
+Validate untrusted arguments at the process boundary. Keep local reads independent of network availability. Apply mail changes to SQLite first and update the UI optimistically.
+
+## Account isolation
+
+Scope account-owned rows and queries by `account_id`. The UI shows one active account. Other signed-in accounts continue to sync and send in the background.
+
+Preserve account ownership across asynchronous work. Ignore stale results after an account switch, removal, or authentication change. Use the isolation tests in `src/main/db/isolation.test.ts` when you add a read query.
+
+## Mail and credential security
+
+Mail bodies and attachments are untrusted input.
+
+- Put plain text in text nodes.
+- Pass HTML through DOMPurify before display or serialization.
+- Render mail HTML only in the existing scriptless sandbox.
+- Do not add `allow-scripts` or use `dangerouslySetInnerHTML`.
+- Keep external-link checks and remote-image authorization in main.
+- Preserve sanitization when you import or restore opaque composer content.
+
+`ConversationMsg` omits stored attachment `inlineData`. The `mail:getInlineImage` bridge can return an allowlisted image as a base64 `dataUrl`. The size limit is 25 MB. Treat that value as untrusted attachment content when you assign it inside the frame.
+
+Store OAuth tokens and AI provider keys through `safeStorage`. Never commit credentials or read them into test fixtures.
+
+## Durable actions and drafts
+
+`action_queue` stores user mail actions keyed by Gmail thread ID. Do not put outbox UUIDs or draft checkpoint work in that queue.
+
+Draft checkpoint, retry, and delete work derives from outbox revisions. `DraftMirrorExecutor` runs that work independently, so draft retry delays cannot block mail actions.
+
+A Gmail draft create is not idempotent. Keep mirror mutations single-attempt. During normal shutdown, await `DraftMirrorExecutor.stop()` before SQLite closes. It allows the active row five seconds to save its returned remote ID, aborts after the deadline, and awaits cancellation. It must not start another row during shutdown.
+
+Preserve send recovery and the `needs-review` state. Do not retry an uncertain remote send as a new send without proof that the first send failed.
+
+## Sync and timers
+
+Use `src/main/sync/cursorWalk.ts` for new paged sync workers. Backfill, lifetime headers, attachment flags, split metadata, and FTS backfill already use this shared code.
+
+Keep the dedicated implementation in `sync/existenceSweep.ts`. Its state row also marks whether the evidence snapshot is valid. It walks All Mail, Spam, and Trash with separate page tokens. An expired-token reset discards all three evidence sets. It throws errors to its caller. These differences are required behavior.
+
+Give time-driven code the injectable `SchedulerTime` contract from `src/main/time.ts`. Use `systemTime` in production. Tests use an injected clock or Vitest fake timers. Do not make tests wait for undo-send or retry deadlines on the wall clock.
+
+Compile-time defaults live in these files:
+
+- `src/main/sync/tuning.ts`: mail windows, limits, polling, retries, and Gmail quota policy.
+- `src/shared/outboxTuning.ts`: draft checkpoints, send recovery, shutdown deadlines, and retention.
+- `src/renderer/src/tuning.ts`: search, autocomplete, keyboard, and toast delays.
+
+These defaults require a rebuild. Preserve explicit options and saved preferences that override them. Keep protocol constants, schema versions, MIME rules, and security limits with their implementation.
+
+## Change the database schema
+
+Every schema change requires an automatic migration. `schema.ts` defines fresh profiles. `migrations.ts` upgrades existing profiles through an immutable, ordered registry.
+
+1. Edit `CURRENT_SCHEMA` in `src/main/db/schema.ts`.
+2. Increment `CURRENT_SCHEMA_VERSION` by one.
+3. Append exactly one contiguous step to `SCHEMA_MIGRATIONS` in `src/main/db/migrations.ts`.
+4. Add representative old data and upgrade assertions to `src/main/db/schemaUpgrade.test.ts`.
+5. Verify both a fresh profile and an upgraded profile.
+6. Run `npm run verify`.
+
+Preserve existing rows and local-only data. If a table must be replaced, copy retained data within the migration transaction.
+
+Do not rewrite a released migration, update `user_version` outside the migration transaction, or require a profile reset. Do not provide manual SQL as the user upgrade procedure.
+
+`openDatabase()` applies all skipped steps in one transaction. It runs `PRAGMA quick_check` before commit. Keep the contiguous-path test from `MINIMUM_MIGRATABLE_SCHEMA_VERSION` to the current schema.
+
+## Add or change a feature
+
+Update the behavior and acceptance criteria in `docs/SPEC.md` when needed. Add end-to-end coverage in the same change. Every user-facing feature needs a command-palette command.
+
+Keep real Gmail calls out of end-to-end tests. Test sync behavior against a mock `MailProvider`. Use the real temporary SQLite store where persistence matters.
+
+Match the surrounding code. Biome enforces single quotes, no semicolons, and a 110-column line width. The pre-commit hook also checks formatting.
+
+Use `data-testid` for end-to-end selectors. Do not select Tailwind classes. Put shared application drivers in `e2e/nav.ts`, composer operations in `e2e/composer.ts`, and test controls in `e2e/seams.ts`.
+
+Write documentation with STE-style instructions. Use active voice, one instruction per sentence, and consistent terms. Keep procedures near 20 words per sentence. Remove filler and promotional language.
+
+## Verify the change
+
+A change is not complete until `npm run verify` passes. Run it before you claim completion, commit, or push.
+
+```sh
+npm run verify
 ```
-npm run verify     # typecheck (3 project tsconfigs) → biome ci → unit → build → e2e
-```
 
-The e2e suite (Playwright) drives the **real built Electron app** — main process, SQLite, preload bridge, IPC, and keyboard loop — headless. On display-less Linux it wraps itself in Xvfb automatically; `--no-sandbox` is added automatically when running as root or in CI.
+The command runs all three TypeScript project checks, Biome, unit tests, a production build, and the Electron end-to-end suite.
 
-| Command | Use |
-|---|---|
-| `npm run verify` | The full gate — the definition of done |
-| `npm run test:unit` | Unit tests across main + renderer. Decisions live in pure planner modules, but DB-touching code can be unit-tested too: better-sqlite3 ships Node-API prebuilds, so `openDatabase(':memory:')` works under vitest (see `outbox/{spool,queue,inlineImages}.test.ts`) — no Electron needed |
-| `npm run e2e` | Build + e2e only |
-| `npm run e2e:only` | E2e without rebuilding — **only** when `out/` already matches `src/` |
-| `npm run e2e:only -- --grep <pattern>` | One test while iterating |
-| `npm run e2e:perf` | Build + generated two-account Electron profile — 10,000 threads plus a 1,000-thread second account (windowing, main private + utility heap/external/SQLite-cache memory, list/conversation/bulk/composer budgets, warm account-switch p95) |
-| `npm run e2e:perf:scale` | Build + generated 40,000-thread profile for reads that must not scale with the store (mailbox counts, All Mail paging, common-term search). Opt-in: the profile imports through the production write path before measuring reads. The 10,000-thread job cannot catch this class — the account scan it was added for measured under a millisecond there |
-| `npm run e2e:perf:only` / `e2e:perf:scale:only` | The same two perf jobs without rebuilding — **only** when `out/` already matches `src/` |
-| `npm run typecheck` / `npm run lint` | Fast static passes |
-| `npm run toolchain` | Repair Electron binary / native-module ABI (also runs as postinstall) |
-| `npm run package:dir` | Build and verify an unpacked app for the current platform |
-| `npm run package:mac` / `package:mac:all` | Build and verify macOS artifacts for one/both architectures |
-| `npm run package:win` | Build and verify the Windows installer for the current architecture |
-| `npm run package:verify` | Assert packaged runtime assets and native module architecture |
-| `npm run release:mac` / `release:win` | Release-mode packaging: signed, notarized (macOS), feed declared, then `package:verify --release`. Needs `ATTN_DISTRIBUTION_MODE=release`, `ATTN_RELEASE_FEED`, and the signing credentials in [docs/RELEASE.md](docs/RELEASE.md); the `Release` workflow runs both on a `v*` tag |
-| `npm run release:stamp-feed -- <dir> --assets-base <url>` | Rewrite `latest*.yml` for the rolling feed with absolute asset URLs plus the target and minimum migratable schema versions |
+After a UI change, inspect every affected screenshot in `e2e/.artifacts/`. Confirm the layout and colors. Do not leave text-selection highlights in screenshots. Find screenshot writers with `rg -n '\.artifacts' e2e --glob '*.spec.ts'`.
 
-**Visual self-check:** the e2e suite rewrites `e2e/.artifacts/login.png`, `inbox.png`, `inbox-light.png`, `all-mail.png`, `spam-loading.png`, `spam.png`, `sidebar-collapsed.png`, `trash-marker.png`, `reading.png`, `reading-light.png`, `remote-images-blocked.png`, `reader-controls.png`, `message-selected-expanded.png`, `message-cursor.png`, `message-inline-reply.png`, `message-inline-reply-light.png`, `simple-mail.png`, `mail-layout.png`, `mail-layout-light.png`, `neutral-backgrounds-light.png`, `mixed-reply-light.png`, `mixed-reply-dark.png`, `mixed-quote-light.png`, `mixed-quote-dark.png`, `apple-mail-backgrounds-light.png`, `apple-mail-backgrounds-dark.png`, `apple-mail-quote-light.png`, `apple-mail-quote-dark.png`, `colored-reply.png`, `label-picker.png`, `move-picker.png`, `auth-paused.png`, `account-menu.png`, `account-removal-error.png`, `composer.png`, `composer-formatting.png`, `inline-reply.png`, `draft-chip.png`, `attachments.png`, `newsletter-quote.png`, `gmail-draft.png`, `composer-signature-collapsed.png`, `composer-signature-quote-collapsed.png`, `composer-reply-empty-lines.png`, `composer-signature-font.png`, `composer-signature-prefix-collapsed.png`, `composer-signature-prefix-expanded.png`, `composer-attn-signature.png`, `composer-attn-signature-light.png`, `ai-draft.png`, `ai-autocomplete.png`, `ai-autocomplete-light.png`, `label-view.png`, `search.png`, `search-partial.png`, `search-capped.png`, `server-search.png`, `server-search-cached.png`, `palette.png`, `split-inbox.png`, `split-inbox-light.png`, `split-inbox-overflow.png`, `split-rules.png`, `split-rules-drag.png`, `chord-guide.png`, `settings.png`, `settings-scopes.png`, `settings-ai.png`, `settings-sync.png`, `settings-about.png`, `cheat-sheet.png`, `snippet-manager.png`, `inbox-zero.png`, and `inbox-zero-light.png` (grep `e2e/*.spec.ts` for `.artifacts` when adding one, and list it here). After UI changes, inspect every affected artifact and confirm the rendering matches intent; test setup must not leave text-selection highlights in screenshots. Failure debugging: traces land in `e2e/.results/` (`npx playwright show-trace …`), and the main-process log is attached to failed tests.
-
-## How the e2e harness works
-
-- Signed-out tests exercise the onboarding screen. Mail-feature suites use a deterministic seeded real SQLite store, so OAuth and Gmail are never involved and the suite stays runnable with zero credentials.
-- Electron windows stay hidden by default so local e2e runs do not flash or steal focus. Pass `--visible` through either e2e script (for example, `npm run e2e -- --visible`) when debugging with an OS-visible window; specs that explicitly launch with `--hidden` remain hidden.
-- The e2e fixture emulates a dark OS preference so the original Dispatch screenshots and color assertions stay deterministic on light and dark developer machines. Theme specs override the emulated preference when they exercise F14's System behavior.
-- Specs can opt into a seeded real SQLite store with `test.use({ seed: 'fixtures/seed-inbox.json' })`; the underlying `ATTN_TEST_SEED` seam is honored only alongside `ATTN_TEST_USER_DATA`. Date seed messages with `receivedDaysAgo` (day-anchored, `receivedAt` for the wall-clock time) rather than an absolute `internalDate` — absolute stamps drift into "Older" as the repo ages, which breaks date-group assertions and makes `inbox.png` read as stale mail.
-- The `boot.relaunch()` helper restarts Electron against the same userData directory and returns the new app and page, so durability tests exercise persisted state without reseeding. `relaunch({ kill: true })` SIGKILLs the app instead of quitting it, which is what a crash-recovery test must use; keep the graceful form where the assertion is about clean shutdown (the draft-checkpoint quiescence).
-- Each test boots its own app instance against a throwaway userData dir via the `ATTN_TEST_USER_DATA` seam (`src/main/index.ts`) — fresh DB, no tokens, and a developer's real `oauth.config.json` can't leak in. Under that seam the app also tees console output to `main.log` in the same dir, which is what makes boot-time lines assertable.
-- Fixtures live in `e2e/electron.ts` (`app`, `page`, `userData`, `mainLog`). The boot fixture fails any test that produced renderer console errors — collected across every launch, `relaunch()` included — keep it that way.
-- Seed messages may carry optional `messageId` and `references` fields for RFC threading tests. The visible `t-roadmap` fixture pins both headers plus a latest-message `Reply-To` that differs from `From`; append new fixture threads rather than reordering the existing list because triage specs depend on its indices. The test-only `attn:test:reloadSeed` main-process event replays the fixture through `persistThread` so idempotent derived data can be regression-tested; it may also receive an authoritative label array, replacing the seeded catalog and broadcasting `mail:changed` when that catalog differs so poller-driven picker refreshes can be exercised without Gmail.
-- Server-search fixtures may place snapshots in `remoteThreads` and map exact translated Gmail queries to their ids in `remoteSearches`. Unmapped queries return no remote ids, so an e2e cannot pass by receiving a server result that does not match its query.
-- The test-only `attn:test:failNextAction` and `attn:test:failNextActionAuth` events install a seeded provider that rejects only the named thread once, serves authoritative snapshots for every fixture thread while installed, and clears after the target recovery read or successful auth retry. T18 e2e covers permanent recovery, auth-pause UI, SQLite convergence, acknowledged IPC toast delivery, and undo invalidation without contacting Gmail. The seeded store has no OAuth config, so `TestSeams` (every `attn:test:*` seam lives in `src/main/testIpc.ts`, constructed disabled outside the env seam) also installs the hook that makes a reconnect click resume the seeded account — production `signIn()` stays free of test branching, and the real OAuth reconnect path is consequently unit-covered rather than e2e-covered.
-- The test-only `attn:test:runLifetimeSweep` event runs the production lifetime worker against a supplied in-memory provider while retaining the real SQLite store. Use it for cursor/relaunch coverage that must never contact Gmail; assertions should pin requested formats and page tokens so the seam cannot hide a body fetch or a restart from page one.
-- The test-only `attn:test:runExistenceSweep` event runs the production expiry tombstone pass against supplied complete All Mail, Spam, and Trash id sets while retaining the real SQLite store. Use it to prove ghost removal through the utility-process boundary without contacting Gmail.
-- The test-only `attn:test:listMailboxThreadIds` event reads the production per-message mailbox membership query. Use it to prove seeded mixed-label threads belong to each expected system mailbox before the full M3 navigation UI exists.
-- The test-only `attn:test:runFtsBackfill` event runs the production FTS backfill against the real SQLite store. It can first reset the index to the manually-upgraded-profile state (stored messages, empty index, unset `fts_cursor`) and pause after N committed batches, which is how the utility-crash spec proves the pass resumes from its persisted cursor without duplicate rows. `attn:test:searchIndexStats` runs FTS5 MATCH queries inside the utility process and reports per-query latencies plus the index's on-disk size via `dbstat`; the perf suite records both in T20-EVIDENCE.md.
-- The test-only `attn:test:queryPerfStats` event times production mailbox counts, All Mail paging, and local search inside the utility process. The large-profile suite uses it to measure database work without a renderer refresh warming the handler cache before a sample.
-- Composer/outbox specs share the `ComposerPage` driver in `e2e/composer.ts`: open with `openNew()`/`openReply()`, type through the editor, and send with the platform modifier, without coupling tests to composer markup. Composer state settles over IPC, so the driver's reads are retrying assertions — `expectRecipients()` polls the chips' normalized `data-email` (a chip missing that attribute fails rather than falling back to display text), `expectSaved()` requires a per-mount local revision newer than its last observation and polls until that exact revision is persisted, and `expectPending()` polls the header's user-action count. Add new reads in that shape; a one-shot snapshot passes for the wrong reason before the IPC round-trip lands.
-- Time-driven main-process schedulers take the injectable `SchedulerTime` contract from `src/main/time.ts` (`now()` plus a timer factory), defaulting to `systemTime` in production. Everything time-driven takes it — `SnoozeScheduler`, `ActionExecutor`, `DraftMirrorExecutor`, `OutboxSender`, `OfflineRetryScheduler`, `HistoryPoller`, `OnDemandBodyHydrator`, `GmailClient` (token expiry plus transient-retry backoff) and its quota limiter (`gmail/quota.ts`), and the `backfill`/`lifetimeSweep`/`attachmentFlags`/`ftsBackfill` runners — and new ones do the same. Unit tests supply that dependency or Vitest fake timers; never make undo-send or outbox tests wait on wall-clock time.
-- Beyond the seams called out above, specs also lean on `attn:test:` `installFakeAiProvider`, `aiProviderRequests`, `installSendProvider`, `setUndoSendDelay`, `setSyncState`, `focusThread`, `crashUtility`, `utilityState`, the `delay*` pacing seams, `failNextDraftSave`, `failOutbox`, `remoteDraft`, `setSearchWindow`, `setUpdateState`, `holdNextResponse`, `observeInvokes`, `invokeHandler`, `failNextInvoke`, and `expireReminders`; all of them live in `src/main/testIpc.ts` and are disabled outside the env seam. `holdNextResponse` parks one invoke result after main computed it so a spec can interleave a competing action without a sleep; `observeInvokes` records a channel's call arguments, `invokeHandler` calls a registered handler from main (a request whose answer nothing delivers), and `failNextInvoke` lets one invoke's real handler run — optionally with substituted arguments — and then reject. All four ride the same wrapper: every invoke channel is claimed through `ipcMain.handle` (`registerIpc`'s own `handle()` for main-owned channels, the same call in its forwarding loop for the rest), which the seam wraps and whose listeners it records — never reach into Electron's private `_invokeHandlers` from a spec.
-- Shared helpers, not copies: `e2e/seams.ts` owns the `ipcMain.emit(channel, {}, …, done)` shapes (`callSeam`/`emitSeam`/`fireSeam` plus the named seams built on them), and `e2e/nav.ts` the app-driving ones (`goTo`, `openPalette`/`runPaletteCommand`, `selectedIndex`, `threadRow`, `enableAi`). Add a new helper there rather than a fourth private copy of it.
-- Hidden windows never dispatch `selectionchange`, so Lexical only learns a clicked or arrowed caret from the next `beforeinput`; keydown-driven edits (Backspace, Delete, Enter) act on its last internal selection. To edit at a spot in the composer, click it and type a character first, then delete through it — Home/End/Shift+Arrow selections are invisible to the editor in the e2e harness.
-- Never make a test wait on the wall clock for a product timer: `page.clock.install()` + `resume()` leaves the app running normally while letting a spec `fastForward` exactly one interval (the autocomplete debounce and cooldown are driven this way), and a released `holdNextResponse` is settled by a couple of real IPC round trips (`flushRendererIpc`), not by a sleep. A reminder that must be due at relaunch is written far in the future and then back-dated through `attn:test:expireReminders`, which updates the stored deadline without refreshing the live scheduler and reports the pending-reminder count so a spec can poll for the row it is about to expire; `boot.relaunch()` has no wait option. The remaining `waitForTimeout` calls are windows in which something must *not* happen, and each says so.
-- Seeds generated at run time — large ones (the account-restore profiles, the derived perf split seed) and small derived ones (`inbox-zero.spec.ts`'s readiness seeds) — are written to the gitignored `e2e/.generated/`, not to `e2e/.artifacts/`, which CI uploads wholesale. Prefer deriving a seed that differs from a sibling by a field or two over adding another near-identical `e2e/fixtures/*.json`.
-- Select on `data-testid` attributes (add them for new UI); never on Tailwind classes.
-
-## Architecture invariants
-
-Violating these is a correctness bug, not a style preference:
-
-- **The renderer is sandboxed** (`contextIsolation`, no `nodeIntegration`) and never talks to Google or the filesystem. Everything crosses through the typed `contextBridge` API in `src/preload/index.ts` plus the handlers registered in `src/main/ipc.ts` — add both halves, and the channel type in `src/shared/ipc.ts`, when you add a capability.
-- **Mail bodies are untrusted input.** Plain text stays in text nodes. HTML must pass through
-  DOMPurify and render only in the scriptless sandbox used by `MessageBody`; never add `allow-scripts`
-  or use `dangerouslySetInnerHTML` (SPEC §6). Stored attachment `inlineData` is omitted from
-  `ConversationMsg`, but CID rendering deliberately returns an allowlisted image as a base64 `dataUrl`
-  through the typed `mail:getInlineImage` bridge (maximum 25 MB) and assigns it inside that iframe.
-  Treat the bridged value as untrusted attachment content; it is not confined to the main process.
-- **Local-first:** reads and writes hit the local SQLite store and apply optimistically. Never block the UI on the network.
-- **`action_queue` stores only user mail intents keyed by Gmail thread id.** Draft checkpoint/retry/delete work derives from `outbox` revisions and runs through `DraftMirrorExecutor`; never overload `action_queue.thread_id` with an outbox UUID or let best-effort draft backoff block triage.
-- **Normal shutdown quiesces an active Gmail draft checkpoint before SQLite closes.** A remote draft create is not idempotent: mirror mutations are single-attempt, and `DraftMirrorExecutor.stop()` gives the current row five seconds to make its returned id durable before aborting it, awaits the canceled drain, then declines further rows. Do not turn that wait back into a fire-and-forget teardown.
-- **Paged Gmail listings run on the shared cursor walk** (`src/main/sync/cursorWalk.ts`): `backfill`, `lifetimeSweep`, `attachmentFlags`, `splitMetadata`, and `ftsBackfill` all persist a `phase[:token]` cursor through it, and a new paged runner does the same. The one deliberate exception is `sync/existenceSweep.ts`: its cursor is the dedicated `thread_existence_state(phase, page_token)` row whose presence doubles as the "evidence snapshot is valid" flag, it walks three listings with independent token spaces, its one-shot expired-token reset discards evidence across all three, and it throws to its caller instead of reporting through `onError`. Do not port it; extending the skeleton to fit would change behavior its tests pin.
-- **Every row is keyed by `account_id`** — the schema is multi-account-ready even though v1 ships single-account (SPEC D4).
-- **Every schema change ships an automatic migration.** `src/main/db/schema.ts` is the snapshot for new profiles. Existing profiles reach it only through the immutable, ordered registry in `src/main/db/migrations.ts`. Every schema edit bumps `CURRENT_SCHEMA_VERSION` and adds exactly one contiguous migration step; never rewrite a shipped step, update `user_version` outside the migration transaction, or require a user to delete and re-sync a profile.
-- Secrets live in the OS keychain via `safeStorage`; `oauth.config.json` is gitignored and must never be committed or read into a test.
-
-## When you add a feature
-
-- Extend the e2e suite in the same change, mirroring the feature's acceptance criteria in docs/SPEC.md §4. Untested features are not done.
-- Every user-facing feature must register a command-palette command (SPEC F5) — when the palette lands (M3) its spec asserts this; keep the invariant in mind now.
-- Real-Gmail paths stay out of e2e; sync-engine correctness gets unit tests against a mock `MailProvider` (M1+).
-- Match the surrounding code: Biome formatting (single quotes, no semicolons, 110 cols) is enforced by `npm run lint` and a pre-commit hook.
+For failures, inspect `e2e/.results/`. The tests attach main-process logs to failed cases. See [the test guide](docs/TESTING.md) for focused commands and fixture rules.
 
 ## Environment notes
 
-### Changing the database schema
+`npm install` runs `scripts/ensure-electron-toolchain.mjs`. It checks the SQLite module inside Electron and repairs missing binaries or native modules. Run `npm run toolchain` to repeat this check.
 
-1. Edit `CURRENT_SCHEMA` in `src/main/db/schema.ts` and increment `CURRENT_SCHEMA_VERSION` by one.
-2. Append one migration to `SCHEMA_MIGRATIONS` in `src/main/db/migrations.ts`. Never edit a migration that appeared in a release.
-3. Preserve existing rows and local-only state. A destructive schema rewrite must copy retained data into the replacement shape inside the same migration transaction.
-4. Extend `src/main/db/schemaUpgrade.test.ts` with representative old data and assertions for the new shape. The registry test must still prove a contiguous path from `MINIMUM_MIGRATABLE_SCHEMA_VERSION` to the current snapshot.
-5. Run `npm run verify`. Test both a fresh profile and an upgraded profile before shipping.
+Do not set `ELECTRON_RUN_AS_NODE` for the application under test.
 
-`openDatabase()` applies every skipped step in one transaction and runs `PRAGMA quick_check` before commit. Do not publish manual SQL as the user upgrade path, edit `user_version` by hand, delete a profile, or touch `tokens.bin` to make a schema change work.
+The test runner uses Xvfb automatically on Linux without a display. It adds `--no-sandbox` for root or CI. Tests keep windows hidden unless you pass `--visible`.
 
-- `npm install` runs `scripts/ensure-electron-toolchain.mjs`, which verifies better-sqlite3 actually loads **inside Electron** and self-heals what restricted networks break (Electron binary download, native-module headers) — see that script's header comment for the mechanism. Never set `ELECTRON_RUN_AS_NODE` in the environment of the app under test.
-- **Claude Code on the web:** the SessionStart hook (`.claude/hooks/session-start.sh`) runs `npm install` + build so a fresh container can verify immediately. These containers block `www.electronjs.org` / `artifacts.electronjs.org`; the toolchain script routes around it via github.com + nodejs.org. **Allowlisting those two hosts in the environment's network policy would let plain `npm install` work and retire the fallback.**
-- **GitHub authentication on macOS:** run `gh auth status` and other authenticated `gh` commands with host access so GitHub CLI can read credentials from the macOS Keychain. If a sandboxed authentication check fails, retry it with host access before asking the user to authenticate.
+On macOS, authenticated `gh` commands need host access to the Keychain. If authentication fails in a sandbox, retry with host access before you ask the user to authenticate.
 
-## Repository layout
+## Keep documentation current
 
-```
-AGENTS.md            This file — the working agreement, shared by every agent tool
-.claude/             Claude Code config: CLAUDE.md (imports this file), settings, hooks
-docs/SPEC.md         Product & technical spec — source of truth for behavior
-docs/M1-PLAN.md      M1 task guide: triage core
-docs/M2-PLAN.md      M2 task guide: composer, drafts, send, exactly-once outbox
-docs/M3-PLAN.md      M3 task guide: sync restructure + find & focus
-docs/M4-PLAN.md      M4 task guide: power finish (settings, snippets, follow-ups, AI drafting, packaging)
-docs/M5-PLAN.md      M5 task guide: multi-account
-docs/KNOWN-ISSUES.md Live triage list: open bugs, coverage gaps, refactor proposals
-docs/RELEASE.md      Release runbook: workflow, secrets, feed decision, schema gate
-README.md            Human onboarding: prerequisites, OAuth client, scripts
-design/explorations/ Static HTML visual-direction studies
-src/main/            Main process: windows, OAuth, SQLite (db/), Gmail (gmail/, sync/)
-src/main/sync/tuning.ts  Mail storage, read limits, sync scheduling, and Gmail throughput defaults
-src/shared/outboxTuning.ts  Composer checkpoints, send recovery, undo-send options, and retention defaults
-src/renderer/src/tuning.ts  Renderer interaction timings
-src/preload/         contextBridge API — the renderer's only path to the main process
-src/renderer/        React UI (sandboxed)
-src/shared/          Types shared across processes
-e2e/                 Playwright suite + fixtures
-scripts/             Toolchain repair, e2e runner
-```
+Keep unresolved defects in `docs/KNOWN-ISSUES.md`. Include a stable symbol or test path and the observed failure. Remove an entry when the defect is fixed. Do not reuse issue IDs.
+
+Keep milestone plans, completed reviews, audit worksheets, and task progress out of permanent documentation. Git history preserves prior records. This file describes how to work in the repository, not project status.

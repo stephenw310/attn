@@ -2,7 +2,7 @@
 // the settings sentinel (T32 rule 9): a privacy preference about a sender does
 // not change per mailbox. The rows are `remoteImages` for the toggle and
 // `remoteImages:allow:<address>` per sender override; the default stays load
-// (§9 decision #5), so an absent toggle row means everything passes.
+// (SPEC F15), so an absent toggle row means everything passes.
 
 import { normalizeEmailKey } from '../shared/address'
 import { remoteImagesBlocked } from './appSettings'
