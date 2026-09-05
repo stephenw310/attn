@@ -183,38 +183,3 @@ export function shouldConstructUpdater(
 ): metadata is DistributionMetadata {
   return metadata !== null && metadata.mode === 'release' && packaged && !seeded
 }
-
-/**
- * Metadata-level verification shared by `package:verify` and its `--release`
- * mode: what a valid personal or release build must declare. Returns the
- * failures; an empty list is a pass. Signature and notarization checks are
- * the release workflow's OS-level additions on top of this.
- */
-export function verifyDistributionMetadata(
-  raw: unknown,
-  options: { release: boolean; packagedSchemaVersion: number; packagedMinimumSchemaVersion: number }
-): string[] {
-  const errors: string[] = []
-  const metadata = parseDistributionMetadata(raw)
-  if (metadata === null) {
-    errors.push('distribution metadata is missing or malformed')
-    return errors
-  }
-  if (metadata.schemaVersion !== options.packagedSchemaVersion) {
-    errors.push(
-      `distribution metadata declares schema v${metadata.schemaVersion} but the packaged build is v${options.packagedSchemaVersion}`
-    )
-  }
-  if (metadata.minimumSchemaVersion !== options.packagedMinimumSchemaVersion) {
-    errors.push(
-      `distribution metadata declares minimum schema v${metadata.minimumSchemaVersion} but the packaged build is v${options.packagedMinimumSchemaVersion}`
-    )
-  }
-  if (options.release && metadata.mode !== 'release') {
-    errors.push('a personal artifact cannot be published: --release requires mode "release"')
-  }
-  if (!options.release && metadata.mode !== 'personal') {
-    errors.push('personal packaging must declare mode "personal" (updater disabled)')
-  }
-  return errors
-}

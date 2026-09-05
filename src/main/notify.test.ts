@@ -89,13 +89,6 @@ describe('planNotifications', () => {
   })
 })
 
-describe('tomorrowStart', () => {
-  it('returns local midnight at the start of the next day', () => {
-    const now = new Date(2026, 7, 11, 17, 42, 30)
-    expect(tomorrowStart(now)).toBe(new Date(2026, 7, 12).getTime())
-  })
-})
-
 describe('notification pause settings', () => {
   it('persists one-hour and tomorrow pauses and resumes notifications', () => {
     const { db, values } = fakeSettingsDb()

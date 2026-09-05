@@ -5,7 +5,6 @@ import { normalizeAppleMailLineBackgrounds } from './mailAppleBackgrounds'
 import {
   forceLightMailCss,
   mailPresentationForHtml,
-  mailSurfaceForHtml,
   normalizeNativeMailBackgrounds,
   normalizeNativeMailDocument
 } from './mailSurface'
@@ -34,13 +33,14 @@ describe('mail surface classification', () => {
     `<style>div{border:1px solid red}</style>${APPLE_LINES}`,
     '<div style="-webkit-text-size-adjust:auto;background-color:rgb(58,58,60)"><span style="background-color:white">A single highlighted line.</span></div>'
   ])('keeps ambiguous or designed gray backgrounds intact', (html) => {
-    expect(mailSurfaceForHtml(html)).toBe('light')
+    expect(mailPresentationForHtml(html).surface).toBe('light')
   })
 
   it('still preserves a designed panel beside Apple Mail lines', () => {
-    expect(mailSurfaceForHtml(`${APPLE_LINES}<div style="background:#fff3d6">An important panel</div>`)).toBe(
-      'light'
-    )
+    expect(
+      mailPresentationForHtml(`${APPLE_LINES}<div style="background:#fff3d6">An important panel</div>`)
+        .surface
+    ).toBe('light')
   })
 
   it('cleans a sanitized display fragment without removing text, spacing, or designed siblings', () => {
@@ -77,7 +77,7 @@ describe('mail surface classification', () => {
     const before = template.innerHTML
     normalizeAppleMailLineBackgrounds(template.content)
     expect(template.innerHTML).toBe(before)
-    expect(mailSurfaceForHtml(html)).toBe('light')
+    expect(mailPresentationForHtml(html).surface).toBe('light')
   })
 
   it('preserves white text backgrounds within a designed ancestor', () => {
@@ -89,17 +89,18 @@ describe('mail surface classification', () => {
   })
 
   it('uses the native surface for plain and text-like HTML', () => {
-    expect(mailSurfaceForHtml(null)).toBe('native')
-    expect(mailSurfaceForHtml('<div>Pls see attached</div>')).toBe('native')
+    expect(mailPresentationForHtml(null).surface).toBe('native')
+    expect(mailPresentationForHtml('<div>Pls see attached</div>').surface).toBe('native')
     expect(
-      mailSurfaceForHtml('<p>Hello <strong>there</strong> <a href="https://attn.test">link</a></p>')
+      mailPresentationForHtml('<p>Hello <strong>there</strong> <a href="https://attn.test">link</a></p>')
+        .surface
     ).toBe('native')
-    expect(mailSurfaceForHtml('<div dir="ltr"><span style="font-size:12.8px">Gmail text</span></div>')).toBe(
-      'native'
-    )
-    expect(mailSurfaceForHtml('<div style="background-color:rgb(255, 255, 255)">Plain mail</div>')).toBe(
-      'native'
-    )
+    expect(
+      mailPresentationForHtml('<div dir="ltr"><span style="font-size:12.8px">Gmail text</span></div>').surface
+    ).toBe('native')
+    expect(
+      mailPresentationForHtml('<div style="background-color:rgb(255, 255, 255)">Plain mail</div>').surface
+    ).toBe('native')
   })
 
   it('does not confuse typography, media, or layout with an authored canvas', () => {
@@ -115,41 +116,41 @@ describe('mail surface classification', () => {
       '<style>body{font-family:Arial;color:#1a1a1a;margin:28px auto;max-width:640px}.footer{border-top:1px solid #ddd}</style><p>Styled note</p>'
     ]
 
-    for (const html of textLikeMessages) expect(mailSurfaceForHtml(html)).toBe('native')
+    for (const html of textLikeMessages) expect(mailPresentationForHtml(html).surface).toBe('native')
   })
 
   it('keeps the real Garamond forward and its reply chain on the native surface', () => {
     const forwarded =
       '<div class="gmail_quote gmail_quote_container"><div class="gmail_attr">---------- Forwarded message ---------</div><div><font size="4" face="garamond, times new roman, serif">Thank you for praying for our Ethiopia mission.</font></div></div>'
 
-    expect(mailSurfaceForHtml(`<div>draft a payer and share with them via text!!!</div>${forwarded}`)).toBe(
-      'native'
-    )
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(`<div>draft a payer and share with them via text!!!</div>${forwarded}`).surface
+    ).toBe('native')
+    expect(
+      mailPresentationForHtml(
         `<p>Yeah, let's do that.</p><blockquote><div>On Sunday, Ashley wrote:</div>${forwarded}</blockquote>`
-      )
+      ).surface
     ).toBe('native')
   })
 
   it('ignores presentation markup confined to a signature', () => {
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<div>Thanks</div><div class="gmail_signature"><table bgcolor="#f6d5c4"><tr><td><img src="logo.png">Logo</td></tr></table></div>'
-      )
+      ).surface
     ).toBe('native')
   })
 
   it('keeps a plain quoted reply trail on the native surface', () => {
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<div>Sounds good to me</div><blockquote type="cite"><table><tr><td><img src="photo.jpg">Are we still on for Tuesday?</td></tr></table></blockquote>'
-      )
+      ).surface
     ).toBe('native')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<div>Sounds good</div><div class="gmail_quote"><style>.quote{margin:0;color:#111}</style><div class="quote">Original plain note</div></div>'
-      )
+      ).surface
     ).toBe('native')
   })
 
@@ -163,7 +164,7 @@ describe('mail surface classification', () => {
       '<style>.hero{background:var(--hero-background)}</style><div class="hero">Designed mail</div>'
     ]
 
-    for (const html of designedMessages) expect(mailSurfaceForHtml(html)).toBe('light')
+    for (const html of designedMessages) expect(mailPresentationForHtml(html).surface).toBe('light')
   })
 
   it('keeps framed white transactional templates on their sender-owned light canvas', () => {
@@ -175,26 +176,36 @@ describe('mail surface classification', () => {
       </table>
     </td></tr></table>`
 
-    expect(mailSurfaceForHtml(googleTransactional)).toBe('light')
-    expect(mailSurfaceForHtml('<div style="border:1px solid #ddd">Ordinary note</div>')).toBe('native')
-    expect(mailSurfaceForHtml('<blockquote style="border-left:25px solid #ddd">Quote</blockquote>')).toBe(
-      'native'
-    )
+    expect(mailPresentationForHtml(googleTransactional).surface).toBe('light')
+    expect(mailPresentationForHtml('<div style="border:1px solid #ddd">Ordinary note</div>')).toMatchObject({
+      surface: 'native'
+    })
+    expect(
+      mailPresentationForHtml('<blockquote style="border-left:25px solid #ddd">Quote</blockquote>').surface
+    ).toBe('native')
   })
 
   it('ignores stylesheet background rules that cannot match the message', () => {
-    expect(mailSurfaceForHtml('<style>.unused{background:#123456}</style><p>Hello</p>')).toBe('native')
+    expect(mailPresentationForHtml('<style>.unused{background:#123456}</style><p>Hello</p>')).toMatchObject({
+      surface: 'native'
+    })
     expect(
-      mailSurfaceForHtml('<style>@media (max-width:600px){.unused{background:#123456}}</style><p>Hello</p>')
+      mailPresentationForHtml(
+        '<style>@media (max-width:600px){.unused{background:#123456}}</style><p>Hello</p>'
+      ).surface
     ).toBe('native')
     expect(
-      mailSurfaceForHtml('<style>[data-label="a,b"]{background:#123456}</style><p data-label="a,b">Hello</p>')
+      mailPresentationForHtml(
+        '<style>[data-label="a,b"]{background:#123456}</style><p data-label="a,b">Hello</p>'
+      ).surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml('<style>.button:hover{background:#123456}</style><a class="button">Open</a>')
+      mailPresentationForHtml('<style>.button:hover{background:#123456}</style><a class="button">Open</a>')
+        .surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml('<style>p{background:#123456;background:transparent}</style><p>Hello</p>')
+      mailPresentationForHtml('<style>p{background:#123456;background:transparent}</style><p>Hello</p>')
+        .surface
     ).toBe('native')
   })
 
@@ -208,7 +219,7 @@ describe('mail surface classification', () => {
       '<style>.card{background:#123456}</style><style>.card{background:transparent}</style><div class="card">Plain</div>',
       '<style>.card{background:#123456!important}</style><div class="card" style="background:transparent!important">Plain</div>'
     ]
-    for (const html of neutralMessages) expect(mailSurfaceForHtml(html)).toBe('native')
+    for (const html of neutralMessages) expect(mailPresentationForHtml(html).surface).toBe('native')
 
     const designedMessages = [
       '<style>.card{background:transparent}.card{background:#123456}</style><div class="card">Designed</div>',
@@ -216,18 +227,21 @@ describe('mail surface classification', () => {
       '<style>div.card{background:#123456}.card{background:transparent}</style><div class="card">Designed</div>',
       '<style>.card{background:#123456!important}</style><div class="card" style="background:transparent">Designed</div>'
     ]
-    for (const html of designedMessages) expect(mailSurfaceForHtml(html)).toBe('light')
+    for (const html of designedMessages) expect(mailPresentationForHtml(html).surface).toBe('light')
   })
 
   it('accepts browser-valid important syntax on inline backgrounds', () => {
-    expect(mailSurfaceForHtml('<div style="background:#123456 ! important">Designed mail</div>')).toBe(
-      'light'
-    )
     expect(
-      mailSurfaceForHtml('<div style="background:#123456!important/* template note */">Designed mail</div>')
+      mailPresentationForHtml('<div style="background:#123456 ! important">Designed mail</div>').surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml('<div style="background:#fff ! important/* template note */">Plain mail</div>')
+      mailPresentationForHtml(
+        '<div style="background:#123456!important/* template note */">Designed mail</div>'
+      ).surface
+    ).toBe('light')
+    expect(
+      mailPresentationForHtml('<div style="background:#fff ! important/* template note */">Plain mail</div>')
+        .surface
     ).toBe('native')
   })
 
@@ -243,76 +257,78 @@ describe('mail surface classification', () => {
       '<style>#styled-white{background:#fff!important;font-weight:700}</style><div>Practice is at 5:00.</div><p><span id=inline-white style="background:#fff;color:#202124">Bring a glove and water.</span></p><p id=styled-white>Games start next Saturday.</p>'
     ]
 
-    for (const html of neutralMessages) expect(mailSurfaceForHtml(html)).toBe('native')
+    for (const html of neutralMessages) expect(mailPresentationForHtml(html).surface).toBe('native')
   })
 
   it('ignores canvases that exist only in a dark color-scheme media query', () => {
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media screen and (prefers-color-scheme:dark){body{background:#111}}body{color:#222}</style><p>Dark-capable note</p>'
-      )
+      ).surface
     ).toBe('native')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media (prefers-color-scheme:light){body{background:#fff3d6}}</style><p>Designed note</p>'
-      )
+      ).surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media (prefers-color-scheme:dark), (max-width:600px){body{background:#fff3d6}}</style><p>Responsive design</p>'
-      )
+      ).surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media not (prefers-color-scheme:dark){body{background:#fff3d6}}</style><p>Light-only design</p>'
-      )
+      ).surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media not screen and (prefers-color-scheme:dark){body{background:#fff3d6}}</style><p>Negated dark design</p>'
-      )
+      ).surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media not screen and (prefers-color-scheme:light){body{background:#fff3d6}}</style><p>Negated light design</p>'
-      )
+      ).surface
     ).toBe('native')
   })
 
   it('ignores print-only backgrounds when resolving the screen canvas', () => {
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media print{.receipt{background:#123456}}</style><p class="receipt">Receipt</p>'
-      )
+      ).surface
     ).toBe('native')
 
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>body{background:#fff}@media print{#receipt{background:#fff!important}#summary{background:#fff!important;color:#000!important}table{background:#fff!important}}</style><div style="display:none">Preview</div><table id="receipt" width="100%" bgcolor="#ecf0f1"><tr><td id="summary" style="background:#2c3d4f;color:#fff">Confirmed order</td></tr></table>'
-      )
+      ).surface
     ).toBe('light')
 
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>@media print, screen and (prefers-color-scheme:dark){body{background:#111}}</style><p>Screen note</p>'
-      )
+      ).surface
     ).toBe('native')
   })
 
   it('preserves a real authored canvas inside forwarded content', () => {
     const forwarded =
       '<div class="gmail_quote"><table bgcolor="#f6d5c4"><tr><td>Summit agenda</td></tr></table></div>'
-    expect(mailSurfaceForHtml(`<div>---------- Forwarded message ----------</div>${forwarded}`)).toBe('light')
-    expect(mailSurfaceForHtml(`<div>FYI</div>${forwarded}`)).toBe('light')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(`<div>---------- Forwarded message ----------</div>${forwarded}`).surface
+    ).toBe('light')
+    expect(mailPresentationForHtml(`<div>FYI</div>${forwarded}`).surface).toBe('light')
+    expect(
+      mailPresentationForHtml(
         '<div class="gmail_quote"><style>.hero{background:#fff3d6}</style><div class="hero">Designed</div></div>'
-      )
+      ).surface
     ).toBe('light')
     expect(
-      mailSurfaceForHtml(
+      mailPresentationForHtml(
         '<style>.gmail_quote{background:#f6d5c4}</style><div class="gmail_quote">Quoted design</div>'
-      )
+      ).surface
     ).toBe('light')
   })
 
