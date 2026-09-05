@@ -2,7 +2,7 @@
 
 Attn is a desktop Gmail client for macOS and Windows. This document defines product behavior and acceptance criteria. It does not record implementation progress.
 
-See [README.md](../README.md) for setup, [AGENTS.md](../AGENTS.md) for development rules, and [known issues](KNOWN-ISSUES.md) for unresolved validation.
+See [README.md](../README.md) for setup, [AGENTS.md](../AGENTS.md) for development rules, and [known issues](KNOWN-ISSUES.md) for recorded product defects.
 
 ## 1. Product principles
 

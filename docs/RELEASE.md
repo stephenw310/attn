@@ -2,7 +2,7 @@
 
 Signing and the automatic-update feed are deferred. Current distribution uses source and personal builds. Use the package commands in [README.md](../README.md#build-an-installed-app). Install updates manually.
 
-The procedure below applies if signed releases are enabled later. Before the first signed release, complete the relevant [manual checks](KNOWN-ISSUES.md). Test signed installation and updates on both operating systems with a populated profile. Confirm automatic schema migration and rejection of incompatible updates.
+The procedure below applies if signed releases are enabled later.
 
 ## Configure the release environment
 

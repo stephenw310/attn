@@ -8,7 +8,7 @@ This file contains the shared development rules. `.claude/CLAUDE.md` imports thi
 
 1. Read [README.md](README.md) for installation and product use.
 2. Read the relevant feature in [docs/SPEC.md](docs/SPEC.md) before you change behavior.
-3. Check [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) for open defects and validation gaps.
+3. Check [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) for open defects.
 4. Inspect the affected code and its tests.
 5. Run `npm install` if dependencies are absent.
 
@@ -152,6 +152,6 @@ On macOS, authenticated `gh` commands need host access to the Keychain. If authe
 
 ## Keep documentation current
 
-Keep unresolved defects and validation gaps in `docs/KNOWN-ISSUES.md`. Include a stable symbol or test path and the observed failure. Remove an entry when the fix or validation is complete. Do not reuse issue IDs.
+Keep unresolved defects in `docs/KNOWN-ISSUES.md`. Include a stable symbol or test path and the observed failure. Remove an entry when the defect is fixed. Do not reuse issue IDs.
 
 Keep milestone plans, completed reviews, audit worksheets, and task progress out of permanent documentation. Git history preserves prior records. This file describes how to work in the repository, not project status.

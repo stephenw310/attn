@@ -4,7 +4,7 @@ Attn is a desktop Gmail client for macOS and Windows. It uses Electron, React, T
 
 Read cached mail, write drafts, and organize your inbox without a network connection. Attn saves changes locally and syncs them with Gmail when the connection returns. Keyboard commands cover the main mail actions.
 
-Attn is in early development. You need your own Google OAuth client to connect Gmail. Manual Gmail and desktop validation remains open. See [known issues](docs/KNOWN-ISSUES.md) before you use Attn as your only mail client.
+Attn is in early development. You need your own Google OAuth client to connect Gmail.
 
 ## What you can do
 
