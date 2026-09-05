@@ -5,7 +5,8 @@
 // Releases. `app.isPackaged` alone never enables updates.
 
 export const DISTRIBUTION_METADATA_FILE = 'distribution.json'
-const DISTRIBUTION_METADATA_VERSION = 1
+const DISTRIBUTION_METADATA_VERSION = 2
+export const UPDATE_FEED_TAG = 'update-feed'
 
 // Auto-update state shared across processes. The renderer only receives this
 // snapshot, and no state can force a restart without an explicit command.
@@ -77,7 +78,7 @@ export function describeUpdateStatus(info: AppInfo | null, state: UpdateState, n
     case 'available':
       return `Version ${check.version} is available — checked ${when}.`
     case 'incompatible':
-      return `Version ${check.version} is available but needs a database upgrade, so it will not install automatically. See the release notes.`
+      return `Version ${check.version} cannot migrate this database automatically, so it will not install. See the release notes.`
     case 'error':
       return `Could not reach the update feed — tried ${when}. Attn retries on its own.`
   }
@@ -98,26 +99,20 @@ export function describeCheckedAt(at: number, now: number): string {
 export interface DistributionMetadata {
   metadataVersion: number
   mode: DistributionMode
-  /** The schema snapshot this build runs; updates never cross it. */
+  /** The schema snapshot this build runs. */
   schemaVersion: number
+  /** The oldest existing profile this build can migrate to schemaVersion. */
+  minimumSchemaVersion: number
   /** Release feed location; required in release mode, absent in personal. */
   feed?: { owner: string; repo: string }
 }
 
 /**
- * Where a build on schema `n` reads its update feed: the rolling
- * `feed-schema-<n>` release of the feed repository holds that schema's
- * latest.yml / latest-mac.yml, whose entries point at the versioned release's
- * assets by absolute URL (T39; the release workflow maintains it). Separate
- * per-schema feeds are what let an installation on an older schema keep
- * finding maintenance releases after a newer schema has shipped.
+ * The rolling feed release. Its latest.yml / latest-mac.yml entries point at
+ * versioned release assets and declare the target and minimum input schemas.
  */
-export function schemaFeedTag(schemaVersion: number): string {
-  return `feed-schema-${schemaVersion}`
-}
-
-export function schemaFeedUrl(feed: { owner: string; repo: string }, schemaVersion: number): string {
-  return `https://github.com/${feed.owner}/${feed.repo}/releases/download/${schemaFeedTag(schemaVersion)}`
+export function updateFeedUrl(feed: { owner: string; repo: string }): string {
+  return `https://github.com/${feed.owner}/${feed.repo}/releases/download/${UPDATE_FEED_TAG}`
 }
 
 function isFeed(value: unknown): value is { owner: string; repo: string } {
@@ -148,12 +143,21 @@ export function parseDistributionMetadata(value: unknown): DistributionMetadata 
   ) {
     return null
   }
+  if (
+    typeof metadata.minimumSchemaVersion !== 'number' ||
+    !Number.isSafeInteger(metadata.minimumSchemaVersion) ||
+    metadata.minimumSchemaVersion <= 0 ||
+    metadata.minimumSchemaVersion > metadata.schemaVersion
+  ) {
+    return null
+  }
   if (metadata.mode === 'release') {
     if (!isFeed(metadata.feed)) return null
     return {
       metadataVersion: DISTRIBUTION_METADATA_VERSION,
       mode: 'release',
       schemaVersion: metadata.schemaVersion,
+      minimumSchemaVersion: metadata.minimumSchemaVersion,
       feed: { owner: metadata.feed.owner, repo: metadata.feed.repo }
     }
   }
@@ -161,7 +165,8 @@ export function parseDistributionMetadata(value: unknown): DistributionMetadata 
   return {
     metadataVersion: DISTRIBUTION_METADATA_VERSION,
     mode: 'personal',
-    schemaVersion: metadata.schemaVersion
+    schemaVersion: metadata.schemaVersion,
+    minimumSchemaVersion: metadata.minimumSchemaVersion
   }
 }
 
@@ -187,7 +192,7 @@ export function shouldConstructUpdater(
  */
 export function verifyDistributionMetadata(
   raw: unknown,
-  options: { release: boolean; packagedSchemaVersion: number }
+  options: { release: boolean; packagedSchemaVersion: number; packagedMinimumSchemaVersion: number }
 ): string[] {
   const errors: string[] = []
   const metadata = parseDistributionMetadata(raw)
@@ -198,6 +203,11 @@ export function verifyDistributionMetadata(
   if (metadata.schemaVersion !== options.packagedSchemaVersion) {
     errors.push(
       `distribution metadata declares schema v${metadata.schemaVersion} but the packaged build is v${options.packagedSchemaVersion}`
+    )
+  }
+  if (metadata.minimumSchemaVersion !== options.packagedMinimumSchemaVersion) {
+    errors.push(
+      `distribution metadata declares minimum schema v${metadata.minimumSchemaVersion} but the packaged build is v${options.packagedMinimumSchemaVersion}`
     )
   }
   if (options.release && metadata.mode !== 'release') {

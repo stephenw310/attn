@@ -40,11 +40,11 @@ items needing real Gmail, a real LLM provider, or operator credentials are **ope
 - [ ] **Windows numeric badge visual check** — unit coverage pins the PNG, zero-clears behavior, and the
   cross-platform enable setting; the on-Windows badge/clear look and a macOS disable/enable check are open
   (operator).
-- [ ] **Signed/notarized install + same-schema update on both OSes** — the schema-gated updater, its
-  install-time re-validation, and `package:verify --release` shipped with T39 (21 unit tests;
-  `update.spec.ts` proves the harness build constructs no updater); the populated-profile update and
-  incompatible-schema rejection on real OSes need the operator credentials and a published test feed
-  (open).
+- [ ] **Signed/notarized install + schema-migrating update on both OSes** — the migration-aware updater,
+  its install-time re-validation, atomic v21-to-current migration coverage, and
+  `package:verify --release` are automated; `update.spec.ts` proves the harness build constructs no
+  updater. The populated-profile update on real OSes needs operator credentials and a published test
+  feed (open).
 - [ ] **Credential-free personal packaging on both OSes** — verified on Linux here (`package:dir`:
   personal metadata generated and packaged, verifier passes with zero credentials, `--release`
   refuses the personal artifact); the macOS and Windows runs are open (operator).
@@ -98,6 +98,6 @@ The v1 tag is cut from a green `npm run verify` on `main` once the open boxes ab
 struck with reasons. The T39 operator prerequisites (Apple Developer ID + notarytool credentials, the
 Windows signing certificate, and the release-feed repository decision — a public repository, recorded
 as the `ATTN_RELEASE_FEED` repository variable) gate the signed-update boxes. The publishing workflow
-that stamps `requiredSchemaVersion` into each release feed entry shipped on 2026-09-04
+stamps the target and minimum migratable schema into each release feed entry
 (`.github/workflows/release.yml`, [RELEASE.md](RELEASE.md)); running it is the first step of the
 signed-update box.

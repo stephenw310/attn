@@ -21,9 +21,10 @@ name: Release
 #
 # The whole verification contract (`npm run verify`) runs first, each build
 # verifies itself with `package:verify --release` before uploading, and the
-# publish job stamps `requiredSchemaVersion` into latest.yml / latest-mac.yml
-# and places them in the per-schema feed release (`feed-schema-<n>`), so an
-# installation only ever sees releases built for its own database schema.
+# publish job stamps the target and minimum migratable schemas into
+# latest.yml / latest-mac.yml and places them in the rolling `update-feed`
+# release. An installed app accepts a newer schema only when that release can
+# migrate its open database.
 
 on:
   push:
@@ -48,7 +49,9 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       feed: ${{ steps.meta.outputs.feed }}
       schema: ${{ steps.meta.outputs.schema }}
+      minimum_schema: ${{ steps.meta.outputs.minimum_schema }}
       feed_tag: ${{ steps.meta.outputs.feed_tag }}
+      legacy_feed_tag: ${{ steps.meta.outputs.legacy_feed_tag }}
       same_repo: ${{ steps.meta.outputs.same_repo }}
     steps:
       - name: Check out repository
@@ -66,9 +69,10 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           schema="$(node --input-type=module -e "import('./scripts/write-distribution-metadata.mjs').then(m => console.log(m.packagedSchemaVersion()))")"
+          minimum_schema="$(node --input-type=module -e "import('./scripts/write-distribution-metadata.mjs').then(m => console.log(m.packagedSchemaVersions().minimumSchemaVersion))")"
           tag="v$version"
           # Plain major.minor.patch only: the updater compares numerically and
-          # the feed has one channel per schema, not per prerelease line.
+          # the feed has no prerelease channel.
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::package.json version $version is not a release version (major.minor.patch, no prerelease suffix)"
             exit 1
@@ -88,10 +92,12 @@ jobs:
             echo "tag=$tag"
             echo "feed=$FEED"
             echo "schema=$schema"
-            echo "feed_tag=feed-schema-$schema"
+            echo "minimum_schema=$minimum_schema"
+            echo "feed_tag=update-feed"
+            echo "legacy_feed_tag=feed-schema-$schema"
             echo "same_repo=$same_repo"
           } >> "$GITHUB_OUTPUT"
-          echo "Releasing Attn $version (schema v$schema) to $FEED as $tag; feed release feed-schema-$schema" >> "$GITHUB_STEP_SUMMARY"
+          echo "Releasing Attn $version (migrates schema v$minimum_schema..v$schema) to $FEED as $tag" >> "$GITHUB_STEP_SUMMARY"
 
       # Only commits already on main are released, whatever ref the run was
       # started from, and an existing tag must name this exact commit — a
@@ -276,10 +282,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
-    # Different tags for one schema must not compare and replace the same
-    # rolling feed concurrently. Keep the monotonic check inside this lock.
+    # All tags compare and replace one rolling feed. Keep the monotonic check
+    # inside this lock.
     concurrency:
-      group: release-feed-${{ needs.prepare.outputs.feed }}-schema-${{ needs.prepare.outputs.schema }}
+      group: release-feed-${{ needs.prepare.outputs.feed }}
       cancel-in-progress: false
     permissions:
       contents: write
@@ -288,8 +294,10 @@ jobs:
       FEED: ${{ needs.prepare.outputs.feed }}
       TAG: ${{ needs.prepare.outputs.tag }}
       FEED_TAG: ${{ needs.prepare.outputs.feed_tag }}
+      LEGACY_FEED_TAG: ${{ needs.prepare.outputs.legacy_feed_tag }}
       VERSION: ${{ needs.prepare.outputs.version }}
       SCHEMA: ${{ needs.prepare.outputs.schema }}
+      MINIMUM_SCHEMA: ${{ needs.prepare.outputs.minimum_schema }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -307,17 +315,20 @@ jobs:
           merge-multiple: true
 
       # The feed files point at the versioned release's assets by absolute
-      # URL and carry requiredSchemaVersion; both are what make the release
-      # installable. The step fails when a feed file names a version other
-      # than package.json's, an asset that was not built, or a version no
-      # newer than the one this schema's feed already offers.
+      # URL and carry the migration range. The step fails when a feed file
+      # names another version, names an asset that was not built, or is not
+      # newer than the rolling feed.
       - name: Stamp the feed files
         run: |
-          mkdir -p current
+          mkdir -p current/update current/legacy
           current_args=()
           if gh release view "$FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
-            gh release download "$FEED_TAG" --repo "$FEED" --dir current --pattern 'latest*.yml'
-            current_args=(--current current)
+            gh release download "$FEED_TAG" --repo "$FEED" --dir current/update --pattern 'latest*.yml'
+            current_args+=(--current current/update)
+          fi
+          if gh release view "$LEGACY_FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
+            gh release download "$LEGACY_FEED_TAG" --repo "$FEED" --dir current/legacy --pattern 'latest*.yml'
+            current_args+=(--current current/legacy)
           fi
           node scripts/stamp-update-feed.mjs release \
             --assets-base "https://github.com/$FEED/releases/download/$TAG" \
@@ -336,7 +347,7 @@ jobs:
           SAME_REPO: ${{ needs.prepare.outputs.same_repo }}
           SOURCE: ${{ github.repository }}@${{ github.sha }}
         run: |
-          notes="Attn $VERSION. Requires database schema v$SCHEMA; installed apps on that schema update automatically from the feed-schema-$SCHEMA release. Built from $SOURCE."
+          notes="Attn $VERSION. Opens schema v$SCHEMA and migrates profiles from v$MINIMUM_SCHEMA or newer. Installed release builds update automatically from update-feed. Built from $SOURCE."
           if [ "$SAME_REPO" = "true" ]; then
             gh release create "$TAG" --repo "$FEED" --draft --title "Attn $VERSION" \
               --target "${{ github.sha }}" --generate-notes --notes "$notes"
@@ -347,15 +358,20 @@ jobs:
           gh release edit "$TAG" --repo "$FEED" --draft=false --latest
           echo "Published https://github.com/$FEED/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
 
-      # The per-schema feed is a rolling prerelease (never GitHub's "latest")
-      # whose only assets are this schema's feed files. Installed apps on
-      # schema v$SCHEMA read it; nothing else does. Replacing its files is
-      # the moment the release becomes visible to them.
-      - name: Point the schema feed at the new release
+      # update-feed is a rolling prerelease whose only assets are feed files.
+      # The legacy same-schema feed lets older exact-schema clients install
+      # this migration-capable bridge and move to update-feed.
+      - name: Point the update feeds at the new release
         run: |
           if ! gh release view "$FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
-            gh release create "$FEED_TAG" --repo "$FEED" --prerelease --title "Update feed for database schema v$SCHEMA" \
-              --notes "Rolling update feed read by Attn installations on database schema v$SCHEMA. Not an installer; download a versioned release instead."
+            gh release create "$FEED_TAG" --repo "$FEED" --prerelease --title "Attn update feed" \
+              --notes "Rolling update feed for Attn. Not an installer; download a versioned release instead."
           fi
           gh release upload "$FEED_TAG" --repo "$FEED" --clobber release/latest*.yml
-          echo "Feed feed-schema-$SCHEMA now offers $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          if ! gh release view "$LEGACY_FEED_TAG" --repo "$FEED" >/dev/null 2>&1; then
+            gh release create "$LEGACY_FEED_TAG" --repo "$FEED" --prerelease \
+              --title "Legacy update feed for database schema v$SCHEMA" \
+              --notes "Compatibility bridge to Attn's migration-capable update feed. Not an installer."
+          fi
+          gh release upload "$LEGACY_FEED_TAG" --repo "$FEED" --clobber release/latest*.yml
+          echo "Feeds $FEED_TAG and $LEGACY_FEED_TAG now offer $VERSION" >> "$GITHUB_STEP_SUMMARY"

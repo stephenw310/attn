@@ -1,11 +1,8 @@
 // The auto-update state machine (T39, SPEC §6): check on launch and every
 // six hours, download in the background, surface "ready", and apply only on
-// a normal or explicitly requested restart — never a forced one. The feed is
-// injected (electron-updater in production, fakes in tests) and time rides
-// SchedulerTime. Updates never cross a schema version: the running build,
-// the local database, and the target release must agree exactly, checked
-// before download AND again before install — on the explicit restart and on
-// the ordinary quit alike — so a stale cached download can never slip through.
+// a normal or explicitly requested restart. Feed metadata declares the target
+// schema and the oldest schema the release can migrate. Compatibility is
+// checked before download and again before either install path.
 
 import type { UpdateCheck, UpdateCheckOutcome, UpdatePhase, UpdateState } from '../../shared/distribution'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
@@ -16,8 +13,10 @@ export const UPDATE_ERROR_BACKOFF_MS = 15 * 60 * 1_000
 
 export interface UpdateFeedInfo {
   version: string
-  /** From release metadata; null when absent — absent always rejects. */
+  /** The schema the target release opens after running its migrations. */
   requiredSchemaVersion: number | null
+  /** Undefined means legacy exact-schema metadata; null means an invalid declared value. */
+  minimumSchemaVersion: number | null | undefined
 }
 
 /** The injected transport: electron-updater in production, fakes in tests. */
@@ -122,18 +121,21 @@ export class AppUpdater {
   }
 
   /**
-   * The target release is installable only when its declared schema exactly
-   * matches both the running build and the local database, and its version
-   * is genuinely newer. Checked before download and re-checked before
-   * install; a null anywhere rejects. The three answers are kept apart so
-   * the About surface can say "needs a database upgrade" rather than
-   * pretending an incompatible release does not exist.
+   * The target is installable when it is newer and its retained migration
+   * range contains this build's open database. Legacy feed entries without a
+   * minimum remain exact-schema updates. Re-check before installation because
+   * an operator can replace the database after the download.
    */
   private classify(info: UpdateFeedInfo): Exclude<UpdateCheckOutcome, 'error'> {
     if (!isNewerVersion(info.version, this.options.currentVersion)) return 'up-to-date'
     if (info.requiredSchemaVersion === null) return 'incompatible'
-    if (info.requiredSchemaVersion !== this.options.schemaVersion) return 'incompatible'
-    return this.options.localSchemaVersion() === info.requiredSchemaVersion ? 'available' : 'incompatible'
+    if (info.minimumSchemaVersion === null) return 'incompatible'
+    const local = this.options.localSchemaVersion()
+    if (local === null || local !== this.options.schemaVersion) return 'incompatible'
+    const minimum = info.minimumSchemaVersion ?? info.requiredSchemaVersion
+    if (minimum > info.requiredSchemaVersion) return 'incompatible'
+    if (local < minimum || local > info.requiredSchemaVersion) return 'incompatible'
+    return 'available'
   }
 
   private compatible(info: UpdateFeedInfo): boolean {

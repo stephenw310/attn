@@ -6,25 +6,21 @@ unsigned installers that never check for updates.
 
 ## How auto-update works
 
-- A release build carries `distribution.json` beside `app.asar` declaring `mode: release`, the
-  database schema version it runs, and the GitHub Releases feed (`owner/repo`). Only such a build,
-  packaged and outside the e2e harness, constructs an updater (`src/main/update/`).
+- A release build carries `distribution.json` beside `app.asar` declaring `mode: release`, its
+  current and minimum migratable database schemas, and the GitHub Releases feed (`owner/repo`). Only
+  such a build, packaged and outside the e2e harness, constructs an updater (`src/main/update/`).
 - The updater asks the feed on launch and every six hours, downloads in the background, and applies
   on the next quit. Nothing forces a restart. Settings → About shows the running version, the build
   kind, the feed, and the last check, with **Check for updates** and **Restart to update**; the
   command palette offers both as well.
-- **One feed per database schema.** A build on schema `n` reads `latest.yml` (Windows) and
-  `latest-mac.yml` (macOS) from the rolling `feed-schema-<n>` release of the feed repository, not
-  from whatever GitHub calls the latest release. Each entry carries `requiredSchemaVersion` and
-  points at the versioned release's assets by absolute URL. The updater installs a release only when
-  the stamped schema equals both the running build's schema and the local database's
-  `user_version`, checked before download and again at install time — on the explicit restart and
-  on the ordinary quit alike, since electron-updater's own install-on-quit is disabled. A release
-  built for a newer schema is published to its own feed, so older installations never see it as an
-  update; they keep receiving maintenance releases for their schema until you stop publishing them.
-  Moving an installation to a new schema is a manual procedure
-  ([AGENTS.md](../AGENTS.md#preserving-a-local-dogfood-database-across-a-schema-bump)); the app has
-  no runtime migration framework.
+- **One migration-aware feed.** Every release build reads `latest.yml` (Windows) or
+  `latest-mac.yml` (macOS) from the rolling `update-feed` release. Each entry points at versioned
+  assets and carries `requiredSchemaVersion` plus `minimumSchemaVersion`. The updater downloads a
+  newer release only when the open database falls inside that migration range. It checks again at
+  install time. On the first launch of the new binary, `openDatabase()` applies every ordered step
+  from `src/main/db/migrations.ts` in one transaction and runs `PRAGMA quick_check` before commit.
+  Missing migration metadata, a gap in the registry, an unsupported old profile, or a newer local
+  database rejects the operation without changing stored data.
 - macOS updates are Squirrel.Mac ZIPs and must be Developer ID signed and notarized; Windows
   updates are the NSIS installer, Authenticode signed. `npm run package:verify -- --release` checks
   both before anything is uploaded.
@@ -64,9 +60,9 @@ unsigned installers that never check for updates.
 
 ## Every release
 
-1. Make sure `main` is green (`npm run verify`) and that the database schema version in
-   `src/main/db/schema.ts` is the one the installed base runs. If it changed, this release cannot
-   auto-install anywhere; say so in the release notes and follow the manual upgrade procedure.
+1. Make sure `main` is green (`npm run verify`). If `src/main/db/schema.ts` changed, confirm that the
+   same commit adds the next contiguous step to `src/main/db/migrations.ts` and upgrade coverage in
+   `src/main/db/schemaUpgrade.test.ts`.
 2. Bump the version and tag it:
 
    ```bash
@@ -85,8 +81,9 @@ unsigned installers that never check for updates.
    (the full `npm run verify` on the release commit) → `build` on `macos-latest` and
    `windows-latest` (unit tests, package, sign, notarize, `package:verify --release`) → `publish`
    (stamp the feed files, create a draft release, upload every asset, publish, then replace the
-   `feed-schema-<n>` files so installed apps see it). The step summary prints the stamped feed
-   files and the release URL.
+   `update-feed` files so installed apps see it). The workflow also updates the current
+   `feed-schema-<n>` compatibility feed. Older exact-schema clients can use it to install a
+   migration-capable bridge release. The step summary prints the feed files and release URL.
 4. Installed apps pick it up within six hours, or immediately from **Check for updates**. To
    watch one: open Settings → About on a release build, check, and confirm the status line moves
    from "Downloading" to "downloaded"; quit and relaunch to land on the new version.
@@ -107,15 +104,15 @@ latest-mac.yml             latest.yml
 ```
 
 The DMG and EXE are what people download by hand; the ZIPs and blockmaps are what the updater
-downloads. The feed release, `feed-schema-27`, is a rolling prerelease holding only the two `.yml`
-files for that schema; every publish for schema 27 replaces them. `scripts/stamp-update-feed.mjs`
-rewrites each asset `url:` to the versioned release's download URL, appends
-`requiredSchemaVersion: <n>`, and refuses a file whose `version:` is not package.json's, is a
-prerelease, names an asset that was not built, or is not newer than what the feed already offers.
+downloads. The `update-feed` release is a rolling prerelease holding only the two `.yml` files.
+Every publish replaces them. `scripts/stamp-update-feed.mjs` rewrites each asset `url:` to the
+versioned release's download URL and appends the current and minimum migratable schemas. It refuses
+a file whose `version:` is not package.json's, is a prerelease, names an asset that was not built, or
+is not newer than what the feed already offers.
 
-When the database schema changes, the next release lands in a new `feed-schema-<n+1>` release and
-the old feed simply stops moving. Announce the manual upgrade path in the release notes; About on the
-old installations reports "up to date" against their own feed, which is accurate.
+The first migration-capable release must keep the current schema number. Existing clients can then
+install it from their old `feed-schema-<n>` feed and switch to `update-feed` on relaunch. Later
+schema-changing releases travel through `update-feed` and migrate the profile at startup.
 
 ## Building a release locally
 
@@ -128,5 +125,7 @@ npm run release:mac
 npm run release:stamp-feed -- dist --assets-base https://github.com/owner/repo/releases/download/v0.2.0
 ```
 
-Then upload `dist/*` to the `v0.2.0` release and the two `.yml` files to `feed-schema-<n>`, in
-that order. That is the workflow's `publish` job done by hand; keep the draft-then-publish order.
+Then upload `dist/*` to the `v0.2.0` release and the two `.yml` files to `update-feed`, in that order.
+For the first migration-capable release, upload the same files to the current `feed-schema-<n>`
+compatibility release. That is the workflow's `publish` job done by hand; keep the
+draft-then-publish order.

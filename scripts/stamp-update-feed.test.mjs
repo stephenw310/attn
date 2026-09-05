@@ -24,7 +24,13 @@ releaseDate: '2026-09-04T00:00:00.000Z'
 `
 const base = 'https://github.com/stephenw310/attn/releases/download/v0.2.0'
 const stamp = (text, overrides = {}) =>
-  stampUpdateInfo(text, { version: '0.2.0', schemaVersion: 27, assetsBase: base, ...overrides })
+  stampUpdateInfo(text, {
+    version: '0.2.0',
+    schemaVersion: 27,
+    minimumSchemaVersion: 21,
+    assetsBase: base,
+    ...overrides
+  })
 
 const temporaryDirectories = []
 
@@ -64,6 +70,7 @@ path: ${base}/Attn-0.2.0-mac-arm64.zip
 sha512: abc
 releaseDate: '2026-09-04T00:00:00.000Z'
 requiredSchemaVersion: 27
+minimumSchemaVersion: 21
 `)
   })
 
@@ -72,6 +79,8 @@ requiredSchemaVersion: 27
     expect(() => stamp(latestMac, { version: '0.2.0-beta.1' })).toThrow('not a release version')
     expect(() => stamp(stamp(latestMac))).toThrow('already stamped')
     expect(() => stamp(latestMac, { schemaVersion: 0 })).toThrow('positive integer')
+    expect(() => stamp(latestMac, { minimumSchemaVersion: 0 })).toThrow('minimum schema version')
+    expect(() => stamp(latestMac, { minimumSchemaVersion: 28 })).toThrow('minimum schema version')
     expect(() => stamp(latestMac, { assetsBase: 'ftp://x' })).toThrow('https URL')
     expect(() => stamp('version: 0.2.0\n')).toThrow('no files block')
   })
@@ -114,6 +123,18 @@ describe('current feed guard', () => {
     const directories = feedDirectories('version: 0.0.2\n')
     expect(() =>
       stampDirectory({ directory: directories.release, assetsBase, current: directories.current })
+    ).toThrow('the feed already offers 0.0.2; 0.0.1 is not newer')
+  })
+
+  it('checks every rolling feed before rewriting either platform file', () => {
+    const primary = feedDirectories('version: 0.0.0\n')
+    const legacy = feedDirectories('version: 0.0.2\n')
+    expect(() =>
+      stampDirectory({
+        directory: primary.release,
+        assetsBase,
+        current: [primary.current, legacy.current]
+      })
     ).toThrow('the feed already offers 0.0.2; 0.0.1 is not newer')
   })
 })

@@ -4,18 +4,19 @@ import {
   describeCheckedAt,
   describeUpdateStatus,
   parseDistributionMetadata,
-  schemaFeedTag,
-  schemaFeedUrl,
   shouldConstructUpdater,
+  UPDATE_FEED_TAG,
   UPDATE_STATE_IDLE,
+  updateFeedUrl,
   verifyDistributionMetadata
 } from './distribution'
 
-const personal = { metadataVersion: 1, mode: 'personal', schemaVersion: 24 }
+const personal = { metadataVersion: 2, mode: 'personal', schemaVersion: 24, minimumSchemaVersion: 21 }
 const release = {
-  metadataVersion: 1,
+  metadataVersion: 2,
   mode: 'release',
   schemaVersion: 24,
+  minimumSchemaVersion: 21,
   feed: { owner: 'stephenw310', repo: 'attn' }
 }
 
@@ -28,10 +29,12 @@ describe('parseDistributionMetadata', () => {
   it('rejects everything else as null (which means personal, updater off)', () => {
     expect(parseDistributionMetadata(null)).toBeNull()
     expect(parseDistributionMetadata({})).toBeNull()
-    expect(parseDistributionMetadata({ ...personal, metadataVersion: 2 })).toBeNull()
+    expect(parseDistributionMetadata({ ...personal, metadataVersion: 3 })).toBeNull()
     expect(parseDistributionMetadata({ ...personal, mode: 'canary' })).toBeNull()
     expect(parseDistributionMetadata({ ...personal, schemaVersion: 0 })).toBeNull()
     expect(parseDistributionMetadata({ ...personal, schemaVersion: 1.5 })).toBeNull()
+    expect(parseDistributionMetadata({ ...personal, minimumSchemaVersion: 0 })).toBeNull()
+    expect(parseDistributionMetadata({ ...personal, minimumSchemaVersion: 25 })).toBeNull()
     // A release build without a feed has nowhere valid to update from.
     expect(parseDistributionMetadata({ ...release, feed: undefined })).toBeNull()
     expect(parseDistributionMetadata({ ...release, feed: { owner: '', repo: 'attn' } })).toBeNull()
@@ -52,7 +55,7 @@ describe('shouldConstructUpdater', () => {
 })
 
 describe('verifyDistributionMetadata', () => {
-  const options = { release: false, packagedSchemaVersion: 24 }
+  const options = { release: false, packagedSchemaVersion: 24, packagedMinimumSchemaVersion: 21 }
 
   it('a valid personal artifact passes without credentials', () => {
     expect(verifyDistributionMetadata(personal, options)).toEqual([])
@@ -74,6 +77,14 @@ describe('verifyDistributionMetadata', () => {
   it('schema disagreement between metadata and the packaged build fails', () => {
     const errors = verifyDistributionMetadata(personal, { ...options, packagedSchemaVersion: 25 })
     expect(errors.join(' ')).toMatch(/schema v24.*v25/)
+  })
+
+  it('minimum schema disagreement between metadata and the packaged build fails', () => {
+    const errors = verifyDistributionMetadata(personal, {
+      ...options,
+      packagedMinimumSchemaVersion: 22
+    })
+    expect(errors.join(' ')).toMatch(/minimum schema v21.*v22/)
   })
 
   it('missing metadata fails both modes', () => {
@@ -150,7 +161,7 @@ describe('describeUpdateStatus', () => {
         { ...UPDATE_STATE_IDLE, lastCheck: { at: now, outcome: 'incompatible', version: '2.0.0' } },
         now
       )
-    ).toContain('Version 2.0.0 is available but needs a database upgrade')
+    ).toContain('Version 2.0.0 cannot migrate this database automatically')
     expect(
       describeUpdateStatus(
         releaseInfo,
@@ -176,13 +187,11 @@ describe('describeCheckedAt', () => {
   })
 })
 
-describe('schema feed location', () => {
-  it('names the rolling per-schema release the workflow maintains', () => {
-    // The release workflow builds the same tag from the schema number; the
-    // two must agree or installed apps read an empty feed.
-    expect(schemaFeedTag(27)).toBe('feed-schema-27')
-    expect(schemaFeedUrl({ owner: 'stephenw310', repo: 'attn' }, 27)).toBe(
-      'https://github.com/stephenw310/attn/releases/download/feed-schema-27'
+describe('update feed location', () => {
+  it('names the one rolling release the workflow maintains', () => {
+    expect(UPDATE_FEED_TAG).toBe('update-feed')
+    expect(updateFeedUrl({ owner: 'stephenw310', repo: 'attn' })).toBe(
+      'https://github.com/stephenw310/attn/releases/download/update-feed'
     )
   })
 })

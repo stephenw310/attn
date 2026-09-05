@@ -72,10 +72,9 @@ already takes an account id. What remains:
 
 ## Global rules (carried from M3, still binding)
 
-1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` stays the single snapshot;
-   A1 bumps `CURRENT_SCHEMA_VERSION` 21 → 22 and publishes its DDL for the manual dogfood upgrade
-   (AGENTS.md). The *token file* is not SQLite: A1's one-time fold-in of legacy `tokens.bin` is
-   deliberate, tiny, and self-deleting — do not generalize it into a framework either.
+1. **Every schema change has a runtime migration.** `src/main/db/schema.ts` is the new-profile snapshot;
+   existing profiles use the immutable steps in `src/main/db/migrations.ts`. The token file is not SQLite:
+   A1's one-time fold-in of legacy `tokens.bin` remains a separate, self-deleting conversion.
 2. **IPC has three parts** — main handler, preload bridge, typed channel map in `src/shared/ipc.ts` — all
    in the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike.

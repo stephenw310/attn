@@ -1,7 +1,11 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { expect, it } from 'vitest'
 import { openDatabase } from './index'
+import { migrateSchema, migrationPath, SCHEMA_MIGRATIONS } from './migrations'
+import { CURRENT_SCHEMA_VERSION, MINIMUM_MIGRATABLE_SCHEMA_VERSION } from './schema'
 
 it('applies the documented v21 upgrade with the current mailbox keys and preserved message dates', () => {
   const db = new Database(':memory:')
@@ -24,11 +28,7 @@ it('applies the documented v21 upgrade with the current mailbox keys and preserv
                                         ('other', 'message', 'thread', 2);
       PRAGMA user_version = 21;
     `)
-    const notes = readFileSync(new URL('../../../docs/M3-PLAN.md', import.meta.url), 'utf8')
-    const section = notes.split('## Schema revision 21 → 22:')[1]
-    const ddl = section?.match(/```sql\n([\s\S]*?)```/)?.[1]
-    expect(ddl).toBeDefined()
-    db.transaction(() => db.exec(ddl as string))()
+    migrateSchema(db, 21, 22)
 
     expect(db.pragma('user_version', { simple: true })).toBe(22)
     expect(db.pragma('quick_check', { simple: true })).toBe('ok')
@@ -69,12 +69,7 @@ it('applies the documented T34 v22 → 23 upgrade: snippets added, outbox.remote
       INSERT INTO outbox VALUES ('o1', 'account', 99, 'fp');
       PRAGMA user_version = 22;
     `)
-    const notes = readFileSync(new URL('../../../docs/M4-PLAN.md', import.meta.url), 'utf8')
-    const section = notes.split('## T34: snippets')[1]
-    const ddl = section?.match(/```sql\n([\s\S]*?)```/)?.[1]
-    expect(ddl).toBeDefined()
-    // The documented block carries its own BEGIN IMMEDIATE … COMMIT.
-    db.exec(ddl as string)
+    migrateSchema(db, 22, 23)
 
     expect(db.pragma('user_version', { simple: true })).toBe(23)
     expect(db.pragma('quick_check', { simple: true })).toBe('ok')
@@ -112,11 +107,7 @@ it('applies the documented T35 v23 → 24 upgrade: follow-up deadline and remind
       INSERT INTO reminders VALUES ('account', 't1', 'snooze', 123, 'pending');
       PRAGMA user_version = 23;
     `)
-    const notes = readFileSync(new URL('../../../docs/M4-PLAN.md', import.meta.url), 'utf8')
-    const section = notes.split('## T35: follow-up reminders')[1]
-    const ddl = section?.match(/```sql\n([\s\S]*?)```/)?.[1]
-    expect(ddl).toBeDefined()
-    db.exec(ddl as string)
+    migrateSchema(db, 23, 24)
 
     expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('quick_check', { simple: true })).toBe('ok')
@@ -174,11 +165,7 @@ it('applies the documented v24 → 25 upgrade and backfills durable follow-up or
       INSERT INTO reminders VALUES ('account', 't2', 'snooze', 789, 'pending', NULL, NULL, NULL);
       PRAGMA user_version = 24;
     `)
-    const notes = readFileSync(new URL('../../../docs/M4-PLAN.md', import.meta.url), 'utf8')
-    const section = notes.split('### Schema revision 24 → 25:')[1]
-    const ddl = section?.match(/```sql\n([\s\S]*?)```/)?.[1]
-    expect(ddl).toBeDefined()
-    db.exec(ddl as string)
+    migrateSchema(db, 24, 25)
 
     expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('quick_check', { simple: true })).toBe('ok')
@@ -209,12 +196,7 @@ it('applies the PR #108 v26 → 27 cleanup without changing account rows', () =>
       INSERT INTO accounts VALUES ('secondary', 'secondary@example.test', 456);
       PRAGMA user_version = 26;
     `)
-    db.exec(`
-      BEGIN IMMEDIATE;
-      ALTER TABLE accounts DROP COLUMN created_at;
-      PRAGMA user_version = 27;
-      COMMIT;
-    `)
+    migrateSchema(db, 26, 27)
 
     expect(db.pragma('user_version', { simple: true })).toBe(27)
     expect(db.pragma('quick_check', { simple: true })).toBe('ok')
@@ -226,5 +208,157 @@ it('applies the PR #108 v26 → 27 cleanup without changing account rows', () =>
   } finally {
     db.close()
     fresh.close()
+  }
+})
+
+it('applies the v25 → 26 cleanup without changing sync state rows', () => {
+  const db = new Database(':memory:')
+  try {
+    db.exec(`
+      CREATE TABLE sync_state (
+        account_id TEXT PRIMARY KEY,
+        sweep_threads_total INTEGER,
+        fts_cursor TEXT
+      );
+      INSERT INTO sync_state VALUES ('primary', 123, 'done');
+      PRAGMA user_version = 25;
+    `)
+    migrateSchema(db, 25, 26)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(26)
+    expect((db.pragma('table_info(sync_state)') as { name: string }[]).map((row) => row.name)).toEqual([
+      'account_id',
+      'fts_cursor'
+    ])
+    expect(db.prepare('SELECT * FROM sync_state').all()).toEqual([
+      { account_id: 'primary', fts_cursor: 'done' }
+    ])
+  } finally {
+    db.close()
+  }
+})
+
+it('openDatabase migrates an existing profile before returning it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'attn-schema-upgrade-'))
+  const path = join(root, 'attn.db')
+  try {
+    const old = openDatabase(path)
+    old.exec(`
+      ALTER TABLE accounts ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+      INSERT INTO accounts (id, email, created_at) VALUES ('account', 'person@example.test', 123);
+      PRAGMA user_version = 26;
+    `)
+    old.close()
+
+    const upgraded = openDatabase(path)
+    try {
+      expect(upgraded.pragma('user_version', { simple: true })).toBe(CURRENT_SCHEMA_VERSION)
+      expect(upgraded.prepare('SELECT * FROM accounts').get()).toEqual({
+        id: 'account',
+        email: 'person@example.test'
+      })
+    } finally {
+      upgraded.close()
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('keeps a contiguous migration path through the current schema', () => {
+  expect(SCHEMA_MIGRATIONS).toHaveLength(CURRENT_SCHEMA_VERSION - MINIMUM_MIGRATABLE_SCHEMA_VERSION)
+  expect(SCHEMA_MIGRATIONS[0]?.from).toBe(MINIMUM_MIGRATABLE_SCHEMA_VERSION)
+  expect(SCHEMA_MIGRATIONS.at(-1)?.to).toBe(CURRENT_SCHEMA_VERSION)
+  expect(migrationPath(MINIMUM_MIGRATABLE_SCHEMA_VERSION)).toHaveLength(
+    CURRENT_SCHEMA_VERSION - MINIMUM_MIGRATABLE_SCHEMA_VERSION
+  )
+})
+
+it('upgrades a populated v21 profile through every retained migration', () => {
+  const db = openDatabase(':memory:')
+  try {
+    // Reverse only the recorded v21..v27 changes to build a complete v21
+    // profile from the authoritative current snapshot.
+    db.exec(`
+      DROP TABLE thread_mailboxes;
+      DROP INDEX idx_message_fts_map_recent;
+      ALTER TABLE message_fts_map DROP COLUMN internal_date;
+      ALTER TABLE sync_state DROP COLUMN mailbox_cursor;
+      DROP TABLE snippets;
+      ALTER TABLE outbox ADD COLUMN remote_updated_at INTEGER;
+      ALTER TABLE outbox DROP COLUMN follow_up_at;
+      ALTER TABLE reminders DROP COLUMN origin_outbox_created_at;
+      ALTER TABLE reminders DROP COLUMN origin_internal_date;
+      ALTER TABLE reminders DROP COLUMN origin_rfc_message_id;
+      ALTER TABLE reminders DROP COLUMN origin_message_id;
+      ALTER TABLE sync_state ADD COLUMN sweep_threads_total INTEGER;
+      ALTER TABLE accounts ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+
+      INSERT INTO accounts (id, email, created_at)
+      VALUES ('account', 'person@example.test', 123);
+      INSERT INTO sync_state (account_id, sweep_threads_total)
+      VALUES ('account', 456);
+      INSERT INTO messages (account_id, id, thread_id, internal_date)
+      VALUES ('account', 'message', 'thread', 789);
+      INSERT INTO message_fts_map (account_id, message_id, thread_id, fts_rowid)
+      VALUES ('account', 'message', 'thread', 1);
+      INSERT INTO outbox (id, account_id, created_at, updated_at, remote_updated_at)
+      VALUES ('outbox', 'account', 100, 200, 300);
+      INSERT INTO reminders (account_id, thread_id, kind, due_at)
+      VALUES ('account', 'thread', 'snooze', 400);
+      PRAGMA user_version = 21;
+    `)
+
+    migrateSchema(db, 21)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(CURRENT_SCHEMA_VERSION)
+    expect(db.pragma('quick_check', { simple: true })).toBe('ok')
+    expect(db.prepare('SELECT * FROM accounts').get()).toEqual({
+      id: 'account',
+      email: 'person@example.test'
+    })
+    expect(db.prepare('SELECT internal_date FROM message_fts_map').get()).toEqual({
+      internal_date: 789
+    })
+    expect(db.prepare('SELECT mailbox_cursor FROM sync_state').get()).toEqual({ mailbox_cursor: null })
+    expect(db.prepare('SELECT follow_up_at FROM outbox').get()).toEqual({ follow_up_at: null })
+    expect(db.prepare('SELECT origin_message_id FROM reminders').get()).toEqual({
+      origin_message_id: null
+    })
+  } finally {
+    db.close()
+  }
+})
+
+it('rolls the whole skipped-version path back when a later migration fails', () => {
+  const db = new Database(':memory:')
+  try {
+    db.exec(`
+      CREATE TABLE sync_state (
+        account_id TEXT PRIMARY KEY,
+        sweep_threads_total INTEGER
+      );
+      INSERT INTO sync_state VALUES ('primary', 123);
+      PRAGMA user_version = 25;
+    `)
+
+    expect(() => migrateSchema(db, 25, 27)).toThrow('no such table: accounts')
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
+    expect((db.pragma('table_info(sync_state)') as { name: string }[]).map((row) => row.name)).toContain(
+      'sweep_threads_total'
+    )
+  } finally {
+    db.close()
+  }
+})
+
+it('rejects databases older than the retained migration history', () => {
+  const db = new Database(':memory:')
+  try {
+    expect(() => migrateSchema(db, MINIMUM_MIGRATABLE_SCHEMA_VERSION - 1)).toThrow(
+      `can migrate v${MINIMUM_MIGRATABLE_SCHEMA_VERSION} through v${CURRENT_SCHEMA_VERSION}`
+    )
+  } finally {
+    db.close()
   }
 })

@@ -1,20 +1,19 @@
 #!/usr/bin/env node
-// Prepares the electron-updater feed files (latest.yml, latest-mac.yml) for
-// the per-schema feed before the release workflow uploads them (T39, SPEC §6
-// Packaging):
+// Prepares electron-updater's latest.yml and latest-mac.yml before the release
+// workflow uploads them to the rolling update feed (T39, SPEC §6 Packaging):
 //
 //   node scripts/stamp-update-feed.mjs <dir> --assets-base <url> [--current <dir>]
 //
-// - `requiredSchemaVersion` is appended, read from src/main/db/schema.ts at
-//   the commit the artifacts were built from. The updater rejects any entry
-//   without it, so an unstamped feed is an update nobody can install.
+// - `requiredSchemaVersion` and `minimumSchemaVersion` are read from
+//   src/main/db/schema.ts. Together they describe the target schema and the
+//   oldest profile that target can migrate.
 // - Every `url:` / `path:` becomes an absolute URL under --assets-base (the
-//   versioned release's download directory). The feed itself lives in the
-//   rolling `feed-schema-<n>` release, so relative names would resolve there.
+//   versioned release's download directory). Relative names would otherwise
+//   resolve against the rolling feed release.
 // - Each file's `version:` must equal package.json's, must be a plain
 //   `major.minor.patch`, and — with --current, the directory holding the feed
-//   files currently published for this schema — must be newer than what the
-//   feed already offers, so a re-run of an older tag cannot roll a feed back.
+//   files currently published, must be newer than what the feed already
+//   offers, so a re-run of an older tag cannot roll the feed back.
 //
 // The feed files are flat YAML maps electron-builder writes; they are edited
 // line by line rather than re-serialized so nothing else in them changes.
@@ -22,7 +21,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { packagedSchemaVersion } from './write-distribution-metadata.mjs'
+import { packagedSchemaVersions } from './write-distribution-metadata.mjs'
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -71,9 +70,18 @@ export function feedAssetNames(text) {
  * expected shape: a different or non-release version, an existing stamp, no
  * `files:` block, or an asset that is already absolute (stamped twice).
  */
-export function stampUpdateInfo(text, { version, schemaVersion, assetsBase }) {
+export function stampUpdateInfo(text, { version, schemaVersion, minimumSchemaVersion, assetsBase }) {
   if (!Number.isSafeInteger(schemaVersion) || schemaVersion <= 0) {
     throw new Error(`schema version must be a positive integer, got ${schemaVersion}`)
+  }
+  if (
+    !Number.isSafeInteger(minimumSchemaVersion) ||
+    minimumSchemaVersion <= 0 ||
+    minimumSchemaVersion > schemaVersion
+  ) {
+    throw new Error(
+      `minimum schema version must be a positive integer no newer than v${schemaVersion}, got ${minimumSchemaVersion}`
+    )
   }
   if (!isReleaseVersion(version)) throw new Error(`${version} is not a release version (major.minor.patch)`)
   if (!/^https:\/\/\S+$/.test(assetsBase))
@@ -83,7 +91,9 @@ export function stampUpdateInfo(text, { version, schemaVersion, assetsBase }) {
   const declared = feedVersion(text)
   if (declared === null) throw new Error('feed file has no top-level version')
   if (declared !== version) throw new Error(`feed file declares version ${declared}, expected ${version}`)
-  if (topLevel('requiredSchemaVersion')) throw new Error('feed file is already stamped')
+  if (topLevel('requiredSchemaVersion') || topLevel('minimumSchemaVersion')) {
+    throw new Error('feed file is already stamped')
+  }
   if (!topLevel('files')) throw new Error('feed file has no files block')
   const base = assetsBase.endsWith('/') ? assetsBase : `${assetsBase}/`
   const absolute = (name) => {
@@ -95,15 +105,15 @@ export function stampUpdateInfo(text, { version, schemaVersion, assetsBase }) {
     return match ? `${match[1]}${absolute(unquote(match[2]))}` : line
   })
   const body = rewritten.join('\n')
-  return `${body.endsWith('\n') ? body : `${body}\n`}requiredSchemaVersion: ${schemaVersion}\n`
+  return `${body.endsWith('\n') ? body : `${body}\n`}requiredSchemaVersion: ${schemaVersion}\nminimumSchemaVersion: ${minimumSchemaVersion}\n`
 }
 
 function parseArguments(argv) {
-  const options = { directory: null, assetsBase: null, current: null }
+  const options = { directory: null, assetsBase: null, current: [] }
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index]
     if (argument === '--assets-base') options.assetsBase = argv[++index]
-    else if (argument === '--current') options.current = argv[++index]
+    else if (argument === '--current') options.current.push(argv[++index])
     else if (options.directory === null) options.directory = argument
     else throw new Error(`unexpected argument ${argument}`)
   }
@@ -115,7 +125,7 @@ function parseArguments(argv) {
 
 export function stampDirectory({ directory, assetsBase, current }) {
   const version = JSON.parse(readFileSync(join(projectDir, 'package.json'), 'utf8')).version
-  const schemaVersion = packagedSchemaVersion()
+  const { schemaVersion, minimumSchemaVersion } = packagedSchemaVersions()
   const present = UPDATE_INFO_FILES.filter((name) => existsSync(join(directory, name)))
   if (present.length === 0) {
     throw new Error(`no ${UPDATE_INFO_FILES.join(' or ')} in ${directory}; nothing to publish`)
@@ -127,8 +137,9 @@ export function stampDirectory({ directory, assetsBase, current }) {
     for (const asset of feedAssetNames(text)) {
       if (!siblings.has(asset)) throw new Error(`${name} names ${asset}, which is not in ${directory}`)
     }
-    if (current) {
-      const currentPath = join(current, name)
+    const currentDirectories = current ? (Array.isArray(current) ? current : [current]) : []
+    for (const currentDirectory of currentDirectories) {
+      const currentPath = join(currentDirectory, name)
       if (!existsSync(currentPath)) throw new Error(`current feed is missing ${name}`)
       const published = feedVersion(readFileSync(currentPath, 'utf8'))
       if (published === null || !isReleaseVersion(published)) {
@@ -138,9 +149,9 @@ export function stampDirectory({ directory, assetsBase, current }) {
         throw new Error(`${name}: the feed already offers ${published}; ${version} is not newer`)
       }
     }
-    writeFileSync(path, stampUpdateInfo(text, { version, schemaVersion, assetsBase }))
+    writeFileSync(path, stampUpdateInfo(text, { version, schemaVersion, minimumSchemaVersion, assetsBase }))
     console.log(
-      `[release] ${name}: version ${version}, requiredSchemaVersion ${schemaVersion}, assets at ${assetsBase}`
+      `[release] ${name}: version ${version}, schemas ${minimumSchemaVersion}..${schemaVersion}, assets at ${assetsBase}`
     )
   }
 }
@@ -150,6 +161,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   stampDirectory({
     directory: resolve(options.directory),
     assetsBase: options.assetsBase,
-    current: options.current ? resolve(options.current) : null
+    current: options.current.map((directory) => resolve(directory))
   })
 }

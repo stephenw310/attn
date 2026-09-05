@@ -60,9 +60,9 @@ const config = {
 
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
 
-  // Release builds write latest.yml / latest-mac.yml for this feed. Uploading is
-  // the release workflow's job (it stamps requiredSchemaVersion first), so the
-  // CLI always runs with --publish never; personal builds declare no feed.
+  // Release builds write latest.yml / latest-mac.yml for the rolling feed. The
+  // workflow stamps the target and minimum migratable schemas before upload,
+  // so the CLI runs with --publish never; personal builds declare no feed.
   ...(release ? { publish: { provider: 'github', ...releaseFeed() } } : {}),
 
   mac: {

@@ -50,7 +50,7 @@ Parallelization: T15 is pure modules and can run beside T14. T13A, T18, T19, and
 
 ## Global rules (every task — carried over from M1, plus two new ones)
 
-1. **The app has no runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single authoritative schema snapshot and every schema change bumps `CURRENT_SCHEMA_VERSION`. Throwaway profiles may be deleted and re-synced. A maintainer's real dogfood profile may instead receive an additive, data-preserving manual upgrade using the procedure in `AGENTS.md`; every schema-changing task must publish its exact eligible DDL. Do not add a general migration subsystem without its own product task.
+1. **Every schema change has a runtime migration.** `src/main/db/schema.ts` is the new-profile snapshot. Every edit bumps `CURRENT_SCHEMA_VERSION` and appends one immutable, contiguous step to `src/main/db/migrations.ts`. Existing profiles upgrade only through that tested path.
 2. **IPC has three parts** (main handler, preload bridge, shared types) — all in the same commit. After R2, channel names and signatures live in the typed channel map in `src/shared/` — never write a raw channel string in main or preload again.
 3. **Mail content is untrusted.** That now includes **outgoing** content: quoted history entering the composer passes the same DOMPurify path as display, and composer output is sanitized against a minimal allowlist before it is stored or built into MIME. Never `dangerouslySetInnerHTML`.
 4. **Select on `data-testid`** in e2e; add testids for every new interactive element.
@@ -1017,8 +1017,9 @@ T14C's existing import, editing, sanitization, plain-text alternative, draft mir
 Each local draft records a semantic fingerprint of the default signature inserted when that draft was
 created. Draft lifecycle checks compare against that immutable per-draft fingerprint, not the mutable
 account cache, so a Gmail signature change cannot expose, mirror, or retain an untouched older default.
-This additive schema v19 change is eligible for the manual local-upgrade procedure in `AGENTS.md` with the
-following task-specific DDL, applied with the version bump in one transaction:
+This additive schema v19 change predates the runtime migration registry. The DDL below is retained only as
+historical task context; supported profiles upgrade through `SCHEMA_MIGRATIONS` and must not apply it
+manually:
 
 ```sql
 ALTER TABLE outbox ADD COLUMN default_signature_fingerprint TEXT;

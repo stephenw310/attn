@@ -78,7 +78,11 @@ function harness(script: FeedScript = {}, localSchema: number | null = 24) {
   return { updater, timers, states, calls }
 }
 
-const compatibleInfo: UpdateFeedInfo = { version: '1.1.0', requiredSchemaVersion: 24 }
+const compatibleInfo: UpdateFeedInfo = {
+  version: '1.1.0',
+  requiredSchemaVersion: 24,
+  minimumSchemaVersion: 21
+}
 
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -130,7 +134,13 @@ describe('cadence and state machine', () => {
   })
 
   it('records why a newer release did not download, and a failed check as an error', async () => {
-    const incompatible = harness({ check: async () => ({ version: '2.0.0', requiredSchemaVersion: 25 }) })
+    const incompatible = harness({
+      check: async () => ({
+        version: '2.0.0',
+        requiredSchemaVersion: 25,
+        minimumSchemaVersion: 25
+      })
+    })
     incompatible.updater.start()
     await settle()
     expect(incompatible.calls.download).toBe(0)
@@ -199,20 +209,83 @@ describe('cadence and state machine', () => {
   })
 })
 
-describe('schema gating', () => {
+describe('migration compatibility', () => {
   it('missing schema metadata rejects before download', async () => {
-    const h = harness({ check: async () => ({ version: '1.1.0', requiredSchemaVersion: null }) })
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: null,
+        minimumSchemaVersion: null
+      })
+    })
     h.updater.start()
     await settle()
     expect(h.calls.download).toBe(0)
     expect(h.updater.state().phase).toBe('idle')
   })
 
-  it('a target for another schema never downloads', async () => {
-    const h = harness({ check: async () => ({ version: '1.1.0', requiredSchemaVersion: 25 }) })
+  it('invalid declared migration metadata rejects instead of using legacy compatibility', async () => {
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 24,
+        minimumSchemaVersion: null
+      })
+    })
     h.updater.start()
     await settle()
     expect(h.calls.download).toBe(0)
+  })
+
+  it('downloads a newer schema when the target can migrate the local database', async () => {
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 27,
+        minimumSchemaVersion: 21
+      })
+    })
+    h.updater.start()
+    await settle()
+    expect(h.calls.download).toBe(1)
+    expect(h.updater.state().phase).toBe('ready')
+  })
+
+  it('rejects a target whose migration history starts after the local schema', async () => {
+    const h = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 27,
+        minimumSchemaVersion: 25
+      })
+    })
+    h.updater.start()
+    await settle()
+    expect(h.calls.download).toBe(0)
+  })
+
+  it('treats old feed metadata without a minimum as exact-schema compatibility', async () => {
+    const same = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 24,
+        minimumSchemaVersion: undefined
+      })
+    })
+    same.updater.start()
+    await settle()
+    expect(same.calls.download).toBe(1)
+
+    const newer = harness({
+      check: async () => ({
+        version: '1.1.0',
+        requiredSchemaVersion: 25,
+        minimumSchemaVersion: undefined
+      })
+    })
+    newer.updater.start()
+    await settle()
+    expect(newer.calls.download).toBe(0)
   })
 
   it('a local database that disagrees rejects even a matching build', async () => {
@@ -230,7 +303,13 @@ describe('schema gating', () => {
   })
 
   it('a non-newer version never downloads', async () => {
-    const h = harness({ check: async () => ({ version: '1.0.0', requiredSchemaVersion: 24 }) })
+    const h = harness({
+      check: async () => ({
+        version: '1.0.0',
+        requiredSchemaVersion: 24,
+        minimumSchemaVersion: 21
+      })
+    })
     h.updater.start()
     await settle()
     expect(h.calls.download).toBe(0)

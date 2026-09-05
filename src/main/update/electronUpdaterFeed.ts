@@ -2,17 +2,12 @@
 // only when shouldConstructUpdater allowed it: a packaged release build with
 // a declared GitHub Releases feed, outside the test harness.
 //
-// The feed is per schema version: the app reads latest.yml / latest-mac.yml
-// from the rolling `feed-schema-<n>` release of the feed repository (the
-// generic provider, so nothing depends on which release GitHub calls
-// "latest"), and each entry names the versioned release's assets by absolute
-// URL. Publishing a release for a newer schema therefore never hides later
-// maintenance releases from installations still on the old schema. Every
-// entry must still carry requiredSchemaVersion; its absence is surfaced as
-// null and the state machine rejects the update.
+// The app reads latest.yml / latest-mac.yml from the rolling `update-feed`
+// release. Each entry names versioned release assets by absolute URL and
+// declares both its target schema and the oldest schema it can migrate.
 
 import type { DistributionMetadata } from '../../shared/distribution'
-import { schemaFeedUrl } from '../../shared/distribution'
+import { updateFeedUrl } from '../../shared/distribution'
 import type { UpdateFeed, UpdateFeedInfo } from './updater'
 
 /** Squirrel.Mac staging at quit is bounded so a wedged updater cannot hold the quit. */
@@ -21,6 +16,7 @@ const MAC_STAGING_TIMEOUT_MS = 30_000
 interface ElectronUpdateInfo {
   version: string
   requiredSchemaVersion?: unknown
+  minimumSchemaVersion?: unknown
 }
 
 interface ElectronAutoUpdater {
@@ -42,8 +38,8 @@ interface NativeMacUpdater {
   removeListener(event: 'update-downloaded' | 'error', listener: () => void): unknown
 }
 
-function requiredSchemaOf(info: ElectronUpdateInfo): number | null {
-  const declared = info.requiredSchemaVersion
+function positiveInteger(value: unknown): number | null {
+  const declared = value
   if (typeof declared === 'number' && Number.isSafeInteger(declared) && declared > 0) return declared
   // latest.yml round-trips unknown keys as strings in some builder versions.
   if (typeof declared === 'string' && /^[0-9]+$/.test(declared)) return Number.parseInt(declared, 10)
@@ -81,7 +77,7 @@ function stageForQuit(autoUpdater: ElectronAutoUpdater): Promise<void> {
 }
 
 /** Build the production feed. The metadata has already passed the gate. */
-export function createElectronUpdaterFeed(metadata: DistributionMetadata, schemaVersion: number): UpdateFeed {
+export function createElectronUpdaterFeed(metadata: DistributionMetadata): UpdateFeed {
   // Deferred require keeps electron-updater wholly out of personal, dev, and
   // e2e processes — no module side effects, no cache probes, no feed traffic.
   const { autoUpdater } = require('electron-updater') as { autoUpdater: ElectronAutoUpdater }
@@ -92,14 +88,18 @@ export function createElectronUpdaterFeed(metadata: DistributionMetadata, schema
   // the cached download; the library's own quit hook would skip that check.
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowDowngrade = false
-  autoUpdater.setFeedURL({ provider: 'generic', url: schemaFeedUrl(feed, schemaVersion) })
+  autoUpdater.setFeedURL({ provider: 'generic', url: updateFeedUrl(feed) })
   return {
     check: async (): Promise<UpdateFeedInfo | null> => {
       const result = await autoUpdater.checkForUpdates()
       if (!result || result.isUpdateAvailable === false) return null
       return {
         version: result.updateInfo.version,
-        requiredSchemaVersion: requiredSchemaOf(result.updateInfo)
+        requiredSchemaVersion: positiveInteger(result.updateInfo.requiredSchemaVersion),
+        minimumSchemaVersion:
+          result.updateInfo.minimumSchemaVersion === undefined
+            ? undefined
+            : positiveInteger(result.updateInfo.minimumSchemaVersion)
       }
     },
     download: async (): Promise<void> => {

@@ -450,7 +450,7 @@ async function initialize(): Promise<void> {
   })
   if (shouldConstructUpdater(distribution, app.isPackaged, Boolean(testUserData))) {
     appUpdater = new AppUpdater({
-      feed: createElectronUpdaterFeed(distribution, CURRENT_SCHEMA_VERSION),
+      feed: createElectronUpdaterFeed(distribution),
       currentVersion: version,
       schemaVersion: CURRENT_SCHEMA_VERSION,
       localSchemaVersion: () => openedSchemaVersion,

@@ -61,14 +61,10 @@ follow-up below, and T40 requires its resolution before sign-off.
 
 ## Global rules (carried from M3, still binding)
 
-1. **No runtime compatibility-migration framework.** `src/main/db/schema.ts` is the single snapshot and
-   every schema change bumps `CURRENT_SCHEMA_VERSION`, currently 25 after T35's durable-ordering review
-   fix. T34 and T35 introduced versions 23 and 24; the follow-up ordering fix introduces version 25. Each
-   publishes its dogfood DDL in its section. A real dogfood profile gets the manual additive upgrade in
-   AGENTS.md. T39 permits automatic updates only
-   within one schema version; a schema-changing release needs a separate upgrade procedure. The DDL in
-   this plan starts from schema 22, preserving `thread_mailboxes`, `mailbox_cursor`, and the current FTS
-   indexes. Profiles still on 21 first need the separate manual PR #98 upgrade in M3-PLAN.
+1. **Every schema change has a runtime migration.** `src/main/db/schema.ts` is the new-profile snapshot.
+   Every edit bumps `CURRENT_SCHEMA_VERSION` and appends one immutable, contiguous step to
+   `src/main/db/migrations.ts`. The retained path starts at schema 21 and includes the historical changes
+   recorded below.
 2. **IPC has three parts:** main handler, preload bridge, and the typed channel map in `src/shared/`. All in
    the same commit.
 3. **Mail content is untrusted**, incoming and outgoing alike. In M4 this extends to LLM output: an AI draft
@@ -928,7 +924,7 @@ The unit matrix is green and the Windows manual check is ticked in the T40 check
 
 ## T39: auto-update, signing, and notarization
 
-**Status: code parts shipped (2026-08-31, `8ace1ab`); publishing workflow and About surface shipped 2026-09-04; operator-credential parts open.** The state machine, gating, distribution metadata, and `package:verify --release` are in and tested. The 2026-09-04 follow-up added the `Release` workflow (`.github/workflows/release.yml`: tag-driven, signs and notarizes on the two OS runners, verifies with `--release`, stamps `requiredSchemaVersion` into `latest*.yml` through `scripts/stamp-update-feed.mjs`, and publishes draft-then-live to the feed named by the `ATTN_RELEASE_FEED` repository variable, runs the full `npm run verify` on the release commit first, requires the commit to be on `main`, and runs its credentialed jobs in the `release` GitHub environment; the PR #114 review then made the feed per schema — installed apps read the rolling `feed-schema-<n>` release through electron-updater's generic provider, so a newer-schema release never hides maintenance releases from older installations — and routed the ordinary quit through the same re-validation as the explicit restart by disabling the library's install-on-quit), the mode-aware `electron-builder.cjs` that replaces the YAML config so personal and release signing cannot drift, and Settings → About (version, schema, build kind, feed, last check, `Check for updates`, `Restart to update`, plus the `Check for updates` palette command) backed by `update:check` and `app:getInfo`. [RELEASE.md](RELEASE.md) is the runbook. Still operator work, recorded in T40: the Apple/Windows signing credentials and the feed-repository decision — this repository is private, and electron-updater reads a feed anonymously, so the feed must be a public repository (this one made public, or a releases-only one).
+**Status: code parts shipped (2026-08-31, `8ace1ab`); publishing workflow and About surface shipped 2026-09-04; migration support followed in PR #114; operator-credential parts open.** The state machine, distribution metadata, and `package:verify --release` are in and tested. The Release workflow verifies, signs, notarizes, stamps the target and minimum migratable schemas into `latest*.yml`, publishes the versioned assets, and updates the rolling `update-feed`. It also maintains the current `feed-schema-<n>` as a bridge for clients with the former exact-schema updater. The ordinary quit and explicit restart both revalidate the cached release before installation. Settings → About shows the version, schema, build kind, feed, last check, and update actions. [RELEASE.md](RELEASE.md) is the runbook. The Apple and Windows signing credentials and the public feed-repository decision remain operator work recorded in T40.
 
 **Depends on:** operator-supplied credentials (below) · **Unblocks:** T40 · **Spec:** §6 Packaging
 
@@ -964,16 +960,11 @@ auto-update from GitHub Releases.
   quit applies the update. Construct the updater only in packaged, non-seeded release builds. Personal,
   dev, and e2e builds neither check nor install a cached update. Route update restarts through the existing
   awaited shutdown so draft mirroring and sending quiesce before the installer takes over.
-- **Automatic updates never cross a schema version.** `openDatabase` rejects a different nonzero
-  `user_version`; downloading a new binary is not a database upgrade. Publish separate feeds for each
-  `CURRENT_SCHEMA_VERSION` and include the required schema version in update metadata. Before download
-  and again before installation, require an exact match among the running build, the local database,
-  and the target release. Missing or mismatched metadata rejects the update, including cached downloads.
-  The release verifier checks that feed metadata agrees with the packaged schema, so a schema-changing
-  artifact cannot enter the prior schema's feed. Existing installations stay on their compatible feed.
-  Moving to a new schema requires a separate, explicit upgrade procedure with backup and data-preservation
-  checks; it never deletes the profile, tokens, drafts, queued sends, or reminders automatically. This
-  task does not add a runtime migration framework.
+- **Automatic updates carry schema migrations.** The rolling feed declares the target schema and the
+  oldest schema that release can migrate. Before download and again before installation, require the open
+  database to fall inside that range. `openDatabase` then applies every ordered step in one transaction
+  and checks database integrity before commit. Missing metadata, migration gaps, unsupported old profiles,
+  and databases newer than the binary fail without deleting the profile or local-only state.
 - **Verification follows the build mode.** `npm run package:verify` retains runtime-asset and native-module
   checks for every build, including unpacked `package:dir` smoke tests. The release workflow additionally
   invokes `npm run package:verify -- --release`, which requires release metadata, a valid Developer ID

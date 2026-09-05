@@ -4,7 +4,7 @@ import { access, readdir, readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listPackage, statFile } from '@electron/asar'
-import { packagedSchemaVersion } from './write-distribution-metadata.mjs'
+import { packagedSchemaVersions } from './write-distribution-metadata.mjs'
 
 const projectDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outputDir = join(projectDir, 'dist')
@@ -120,11 +120,16 @@ async function verifyDistributionMetadata(archive) {
   } catch {
     throw new Error(`${relative(projectDir, archive)} has no readable distribution.json beside app.asar`)
   }
-  const schemaVersion = packagedSchemaVersion()
-  if (metadata?.metadataVersion !== 1) throw new Error(`${path}: unknown metadataVersion`)
+  const { schemaVersion, minimumSchemaVersion } = packagedSchemaVersions()
+  if (metadata?.metadataVersion !== 2) throw new Error(`${path}: unknown metadataVersion`)
   if (metadata.schemaVersion !== schemaVersion) {
     throw new Error(
       `${path}: declares schema v${metadata.schemaVersion}, packaged build is v${schemaVersion}`
+    )
+  }
+  if (metadata.minimumSchemaVersion !== minimumSchemaVersion) {
+    throw new Error(
+      `${path}: declares minimum schema v${metadata.minimumSchemaVersion}, packaged build is v${minimumSchemaVersion}`
     )
   }
   if (releaseMode) {
