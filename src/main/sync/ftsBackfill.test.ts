@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { fakeSchedulerTime } from '../testing/fakes'
 import { searchMessageIndex } from './fts'
-import { type FtsBackfillProgress, planFtsBackfillStart, runFtsBackfill } from './ftsBackfill'
+import { type FtsBackfillProgress, runFtsBackfill } from './ftsBackfill'
 import { persistThread } from './persist'
 
 const ACCOUNT = 'account@example.test'
@@ -35,18 +35,6 @@ function cursor(db: Db): string | null {
     | undefined
   return row?.fts_cursor ?? null
 }
-
-describe('planFtsBackfillStart', () => {
-  it('maps the cursor grammar to start plans', () => {
-    expect(planFtsBackfillStart(null)).toEqual({ kind: 'run' })
-    expect(planFtsBackfillStart(undefined)).toEqual({ kind: 'run' })
-    expect(planFtsBackfillStart('fts')).toEqual({ kind: 'run' })
-    expect(planFtsBackfillStart('fts:m-17')).toEqual({ kind: 'run', afterMessageId: 'm-17' })
-    expect(planFtsBackfillStart('done')).toEqual({ kind: 'skip' })
-    expect(() => planFtsBackfillStart('lifetime:oops')).toThrow('Invalid FTS backfill cursor')
-    expect(() => planFtsBackfillStart('fts:')).toThrow('Invalid FTS backfill cursor')
-  })
-})
 
 describe('runFtsBackfill', () => {
   it('indexes pre-index rows to done, creating the missing sync_state row', async () => {

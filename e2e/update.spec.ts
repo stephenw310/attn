@@ -76,20 +76,14 @@ test('About shows the running version and build kind, and a ready update offers 
   // is the repository's, not Electron's.
   const version = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version as string
   expect(version).toMatch(/^\d+\.\d+\.\d+/)
-  const schemaVersion = await page.evaluate(() =>
-    window.attn.app.getInfo().then((info) => info.schemaVersion)
-  )
-  expect(schemaVersion).toBeGreaterThan(0)
 
   await page.keyboard.press('ControlOrMeta+,')
   const about = page.getByTestId('settings-view').getByTestId('settings-about')
   await expect(about).toBeVisible()
-  await expect(about.getByTestId('settings-app-version')).toHaveText(`Attn ${version}`)
+  await expect(about.getByTestId('settings-app-version')).toHaveText(`Attn v${version}`)
   // The harness runs the unpackaged build: no feed, no updater, and the
   // surface says so rather than offering a check that could never run.
-  await expect(about.getByTestId('settings-app-build')).toHaveText(
-    `Development build · database schema v${schemaVersion}`
-  )
+  await expect(about.getByTestId('settings-app-build')).toHaveText('Development build')
   await expect(about.getByTestId('settings-update-status')).toContainText('Development builds never check')
   await expect(about.getByTestId('settings-update-check')).toHaveCount(0)
   await expect(about.getByTestId('settings-update-restart')).toHaveCount(0)

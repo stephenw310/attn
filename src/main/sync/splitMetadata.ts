@@ -40,14 +40,6 @@ export interface SplitMetadataResult {
   threadsRefreshed: number
 }
 
-export type SplitMetadataStartPlan = { kind: 'skip' } | { kind: 'run'; pageToken?: string }
-
-export function planSplitMetadataStart(rawCursor: string | null | undefined): SplitMetadataStartPlan {
-  const plan = planCursorStart(CURSOR_PHASE, rawCursor, 'split metadata')
-  if (plan.kind === 'skip') return plan
-  return { kind: 'run', ...(plan.token === undefined ? {} : { pageToken: plan.token }) }
-}
-
 /**
  * Re-fetch stored Inbox threads in full format and persist them through the
  * normal authoritative write path. Each Gmail listing page advances the

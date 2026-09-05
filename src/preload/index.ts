@@ -208,7 +208,6 @@ const api = {
       invoke(IPC_CHANNELS.mailSnooze, { threadIds, dueAt }),
     markReadOnOpen: (threadId: string): Promise<void> => invoke(IPC_CHANNELS.mailMarkReadOnOpen, threadId),
     undo: (): Promise<TriageResult | null> => invoke(IPC_CHANNELS.mailUndo),
-    getPendingActionCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetPendingActionCount),
     getActionQueueStatus: () => invoke(IPC_CHANNELS.mailGetActionQueueStatus),
     onChanged: (
       cb: (serverSearchRequestId: string | null, reason: MailChangeReason | null) => void

@@ -610,31 +610,6 @@ export function notificationEnabledSplitIds(db: Db, accountId: string): string[]
     .map((rule) => rule.id)
 }
 
-export function countNotificationEnabledUnread(db: Db, accountId: string): number {
-  const enabledIds = notificationEnabledSplitIds(db, accountId)
-  if (enabledIds.length === 0) return 0
-  const assignment = splitAssignmentForAccount(db, accountId)
-  const placeholders = enabledIds.map(() => '?').join(', ')
-  return (
-    db
-      .prepare(
-        // Badge work runs on every mail change, so classification starts from
-        // the INBOX label index: scanning `threads` for the visible flag would
-        // cost the whole account on every write, however small the Inbox is.
-        `WITH classified AS (
-           SELECT ${assignment.sql} AS split_id, t.is_unread
-           FROM thread_labels inbox INDEXED BY idx_thread_labels_label
-           JOIN threads t ON t.account_id = inbox.account_id AND t.id = inbox.thread_id
-           WHERE inbox.account_id = ? AND inbox.label_id = 'INBOX' AND t.is_inbox_visible = 1
-         )
-         SELECT COALESCE(SUM(is_unread), 0) AS count
-         FROM classified
-         WHERE split_id IN (${placeholders})`
-      )
-      .get(...assignment.params, accountId, ...enabledIds) as { count: number }
-  ).count
-}
-
 function splitIdForThread(db: Db, accountId: string, threadId: string): string | null {
   const assignment = splitAssignmentForAccount(db, accountId)
   const row = db

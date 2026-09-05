@@ -4,10 +4,10 @@ import { type Db, openDatabase } from './db'
 import { listInboxThreads } from './db/queries'
 import {
   canonicalListId,
-  countNotificationEnabledUnread,
   deleteSplit,
   ensureSplitSetup,
   getSplitState,
+  notificationEnabledSplitIds,
   reorderSplits,
   restoreSplitPreset,
   saveSplit,
@@ -189,7 +189,7 @@ describe('split inbox', () => {
     expect(listInboxThreads(recording, 'account', 10, null, 'fallback:other').map((row) => row.id)).toEqual([
       'other'
     ])
-    expect(countNotificationEnabledUnread(recording, 'account')).toBe(0)
+    expect(notificationEnabledSplitIds(recording, 'account')).toEqual([IMPORTANT_SPLIT_ID])
     expect(splitLocationForThread(recording, 'account', 'other')).toEqual({
       splitId: 'fallback:other',
       revision: 1
@@ -216,7 +216,7 @@ describe('split inbox', () => {
     expect(restored.restorablePresetIds).toEqual(['preset:calendar'])
   })
 
-  it('skips malformed stored rules and counts unread mail only in notifying splits', () => {
+  it('skips malformed stored rules and preserves notification preferences', () => {
     insertThread('github', 200, [{ id: 'github-message', from: 'updates@github.com' }], true)
     insertThread('important', 100, [{ id: 'important-message', labels: ['IMPORTANT'] }], true)
     getSplitState(db, 'account')
@@ -229,7 +229,7 @@ describe('split inbox', () => {
     expect(listInboxThreads(db, 'account', 10, null, 'fallback:other').map((row) => row.id)).toEqual([
       'github'
     ])
-    expect(countNotificationEnabledUnread(db, 'account')).toBe(1)
+    expect(notificationEnabledSplitIds(db, 'account')).toEqual([IMPORTANT_SPLIT_ID])
     expect(getSplitState(db, 'account').restorablePresetIds).toContain('preset:github')
     expect(restoreSplitPreset(db, 'account', 'preset:github').restorablePresetIds).not.toContain(
       'preset:github'

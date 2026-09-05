@@ -13,15 +13,6 @@ import { FTS_BACKFILL_BATCH_PAUSE_MS, FTS_BACKFILL_BATCH_SIZE } from './tuning'
 
 const CURSOR_PHASE = 'fts'
 
-export type FtsBackfillStartPlan = { kind: 'skip' } | { kind: 'run'; afterMessageId?: string }
-
-/** Same `phase` / `phase:checkpoint` / `done` grammar as the other three cursors. */
-export function planFtsBackfillStart(rawCursor: string | null | undefined): FtsBackfillStartPlan {
-  const plan = planCursorStart(CURSOR_PHASE, rawCursor, 'FTS backfill')
-  if (plan.kind === 'skip') return plan
-  return { kind: 'run', ...(plan.token === undefined ? {} : { afterMessageId: plan.token }) }
-}
-
 export interface FtsBackfillProgress {
   messagesIndexed: number
   reason: 'running' | 'foreground-yield'

@@ -37,7 +37,6 @@ import {
   actionQueueStatus,
   dropOutboxSendUndo,
   isTriageAction,
-  pendingActionCount,
   performTriage,
   recordOutboxSendUndo,
   snoozeThreads,
@@ -1150,10 +1149,6 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     return result
   })
   handle(IPC_CHANNELS.accountsGetStatuses, () => context.accountStatuses())
-  handle(IPC_CHANNELS.mailGetPendingActionCount, () => {
-    const account = context.currentAccountId()
-    return account ? pendingActionCount(context.db, account) : 0
-  })
   handle(IPC_CHANNELS.mailGetActionQueueStatus, () => {
     const account = context.currentAccountId()
     return account ? actionQueueStatus(context.db, account) : { pending: 0, paused: 0, authPaused: false }

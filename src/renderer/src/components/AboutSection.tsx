@@ -47,9 +47,7 @@ export function AboutSection(): React.JSX.Element {
   }
 
   const buildLine = info
-    ? `${BUILD_LABELS[info.distribution]} · database schema v${info.schemaVersion}${
-        info.feed ? ` · updates from ${info.feed}` : ''
-      }`
+    ? `${BUILD_LABELS[info.distribution]}${info.feed ? ` · updates from ${info.feed}` : ''}`
     : 'Loading…'
 
   return (
@@ -57,7 +55,7 @@ export function AboutSection(): React.JSX.Element {
       <div className={`mt-2 ${ROW}`}>
         <span className="flex min-w-0 flex-col">
           <span data-testid="settings-app-version" className="text-sm text-ink">
-            Attn {info?.version ?? ''}
+            Attn {info ? `v${info.version}` : ''}
           </span>
           <span data-testid="settings-app-build" className={NOTE}>
             {buildLine}

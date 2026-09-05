@@ -130,7 +130,6 @@ export const IPC_CHANNELS = {
   mailSnooze: 'mail:snooze',
   mailMarkReadOnOpen: 'mail:markReadOnOpen',
   mailUndo: 'mail:undo',
-  mailGetPendingActionCount: 'mail:getPendingActionCount',
   mailGetActionQueueStatus: 'mail:getActionQueueStatus',
   mailChanged: 'mail:changed',
   mailRemoteImagesChanged: 'mail:remoteImagesChanged',
@@ -368,7 +367,6 @@ export interface InvokeChannels {
   }
   [IPC_CHANNELS.mailMarkReadOnOpen]: { args: [threadId: string]; result: undefined }
   [IPC_CHANNELS.mailUndo]: { args: []; result: TriageResult | null }
-  [IPC_CHANNELS.mailGetPendingActionCount]: { args: []; result: number }
   [IPC_CHANNELS.mailGetActionQueueStatus]: { args: []; result: ActionQueueStatus }
   /**
    * The renderer's answer to a checkpoint request (B28): the open composer

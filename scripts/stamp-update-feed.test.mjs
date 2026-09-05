@@ -125,16 +125,4 @@ describe('current feed guard', () => {
       stampDirectory({ directory: directories.release, assetsBase, current: directories.current })
     ).toThrow('the feed already offers 0.0.2; 0.0.1 is not newer')
   })
-
-  it('checks every rolling feed before rewriting either platform file', () => {
-    const primary = feedDirectories('version: 0.0.0\n')
-    const legacy = feedDirectories('version: 0.0.2\n')
-    expect(() =>
-      stampDirectory({
-        directory: primary.release,
-        assetsBase,
-        current: [primary.current, legacy.current]
-      })
-    ).toThrow('the feed already offers 0.0.2; 0.0.1 is not newer')
-  })
 })

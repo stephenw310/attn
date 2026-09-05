@@ -18,7 +18,7 @@ import { AiAutocompletePlugin } from './AiAutocompletePlugin'
 import { AiDraftPlugin } from './AiDraftPlugin'
 import { BodyEditingShortcutsPlugin, ComposerCommandPlugin } from './bodyEditing'
 import { ComposerBodyHintPlugin } from './ComposerBodyHintPlugin'
-import { ComposerEnvelope, ComposerHeader } from './ComposerChrome'
+import { ComposerEnvelope, ComposerHeader, composerTitle } from './ComposerChrome'
 import { ComposerFooter } from './ComposerFooter'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { editorConfig } from './editorConfig'
@@ -49,13 +49,6 @@ interface ComposerProps {
 
 export interface ComposerHandle {
   exitConversation: (afterExit?: () => void) => void
-}
-
-function composerTitle(kind: Draft['kind']): string {
-  if (kind === 'reply') return 'Reply'
-  if (kind === 'replyAll') return 'Reply all'
-  if (kind === 'forward') return 'Forward'
-  return 'New message'
 }
 
 /**
@@ -184,23 +177,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         savedRevision={savedRevision}
         saveStatus={saveStatus}
         closeAndSave={closeAndSave}
-        to={to}
-        setTo={setTo}
-        cc={cc}
-        setCc={setCc}
-        bcc={bcc}
-        setBcc={setBcc}
-        toFieldRef={toFieldRef}
-        ccFieldRef={ccFieldRef}
-        bccFieldRef={bccFieldRef}
-        showCopies={showCopies}
-        setShowCopies={setShowCopies}
-        subject={subject}
-        setSubject={setSubject}
-        updateFields={updateFields}
-        notePendingRecipientChange={notePendingRecipientChange}
-        sendError={sendError}
-        hasPreservedContent={hasPreservedContent}
       />
 
       <div
@@ -214,11 +190,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           draft={draft}
           mode={mode}
           attaching={attaching}
-          closing={closing}
-          localRevision={localRevision}
-          savedRevision={savedRevision}
-          saveStatus={saveStatus}
-          closeAndSave={closeAndSave}
           to={to}
           setTo={setTo}
           cc={cc}

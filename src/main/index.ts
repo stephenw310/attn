@@ -193,8 +193,8 @@ const roster = new AccountRoster({
 function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   const shouldShow = options.show ?? true
   const win = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: 1440,
+    height: 900,
     minWidth: 900,
     minHeight: 600,
     icon: appIcon,
@@ -591,11 +591,11 @@ let quitPreparation: Promise<void> | null = null
  * installer calls app.quit(), so it skips the staging), and then the workers
  * stop. Runs once; a second caller joins the first.
  */
-function prepareQuit(options: { installReadyUpdate: boolean }): Promise<void> {
+function prepareQuit(): Promise<void> {
   if (quitPreparation) return quitPreparation
   quitPreparation = (async () => {
     await checkpointComposers().catch(() => {})
-    if (options.installReadyUpdate) await appUpdater?.installOnQuit().catch(() => {})
+    await appUpdater?.installOnQuit().catch(() => {})
     await teardown()
   })().finally(() => {
     quitPrepared = true
@@ -612,7 +612,7 @@ else {
     // A preparation already under way (a second quit, or the explicit
     // restart's) quits on its own when it finishes.
     if (quitPreparation) return
-    void prepareQuit({ installReadyUpdate: true }).finally(() => app.quit())
+    void prepareQuit().finally(() => app.quit())
   })
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(async () => {

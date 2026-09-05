@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
-import type { MailActionProvider } from '../sync/provider'
+import { fakeMailProvider } from '../testing/fakes'
 import { type SchedulerTime, systemTime, type TimerHandle } from '../time'
 import { saveDraft } from './drafts'
 import { DraftMirrorRowError, type drainDraftMirrors } from './mirror'
@@ -120,7 +120,7 @@ it('stops retrying a permanently rejected draft until the user edits it', async 
   )
   const laterId = saveDraft(db, 'user@example.com', { ...emptyDraftInput(), subject: 'Later draft' }, 20)
   const attempted: string[] = []
-  const saveRemote = vi.fn(async ({ raw }: { id: string | null; raw: string }) => {
+  const saveRemote = vi.fn(async ({ raw }: { raw: string }) => {
     const message = Buffer.from(raw, 'base64url').toString()
     const subject = message.includes('Subject: Rejected draft') ? 'rejected' : 'later'
     attempted.push(subject)
@@ -131,7 +131,7 @@ it('stops retrying a permanently rejected draft until the user edits it', async 
   const executor = new DraftMirrorExecutor(
     db,
     () => 'user@example.com',
-    () => ({ saveDraft: saveRemote }) as unknown as MailActionProvider,
+    () => fakeMailProvider({ createDraft: saveRemote }),
     { time }
   )
 
@@ -169,8 +169,8 @@ it('stops retrying a permanently rejected draft until the user edits it', async 
 
 it('keeps the provider paired with its account when authentication changes mid-drain', async () => {
   const time = new ManualTime()
-  const providerA = {} as MailActionProvider
-  const providerB = {} as MailActionProvider
+  const providerA = fakeMailProvider()
+  const providerB = fakeMailProvider()
   let activeAccount = 'account-a'
   let activeProvider = providerA
   let attempt = 0

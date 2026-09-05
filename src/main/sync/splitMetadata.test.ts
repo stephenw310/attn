@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import type { GmailThread } from '../gmail/parse'
 import { fakeMailProvider } from '../testing/fakes'
-import { planSplitMetadataStart, runSplitMetadataRebuild, type SplitMetadataCallbacks } from './splitMetadata'
+import { runSplitMetadataRebuild, type SplitMetadataCallbacks } from './splitMetadata'
 
 const ACCOUNT = 'upgrade@example.com'
 const NO_PAUSE = { requestIntervalMs: 0, pagePauseMs: 0, foregroundYieldMs: 0 }
@@ -67,14 +67,6 @@ function refreshedThread(): GmailThread {
 afterEach(() => vi.useRealTimers())
 
 describe('split metadata cursor routing', () => {
-  it('routes fresh, resumed, and completed cursors', () => {
-    expect(planSplitMetadataStart(null)).toEqual({ kind: 'run' })
-    expect(planSplitMetadataStart('split-metadata')).toEqual({ kind: 'run' })
-    expect(planSplitMetadataStart('split-metadata:page-2')).toEqual({ kind: 'run', pageToken: 'page-2' })
-    expect(planSplitMetadataStart('done')).toEqual({ kind: 'skip' })
-    expect(() => planSplitMetadataStart('attachments')).toThrow(/Invalid split metadata cursor/)
-  })
-
   it('defaults new profiles to done because the bodies stage already writes split metadata', () => {
     const db = openDatabase(':memory:')
     db.prepare('INSERT INTO accounts (id, email) VALUES (?, ?)').run(ACCOUNT, ACCOUNT)

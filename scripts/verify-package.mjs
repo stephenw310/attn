@@ -98,7 +98,7 @@ async function verifyArchive(archive) {
   }
 
   await access(join(dirname(archive), 'app.asar.unpacked', nativeRelativePath))
-  await verifyDistributionMetadata(archive)
+  await verifyDistributionMetadata(archive, releaseMode)
   if (releaseMode) verifyReleaseSignature(archive, platform)
 
   console.log(`[package] verified ${relative(projectDir, archive)} (${platform}-${arch})`)
@@ -112,7 +112,7 @@ async function verifyArchive(archive) {
  * personal. The runtime treats missing metadata as personal — this check is
  * what keeps missing metadata from shipping in the first place.
  */
-async function verifyDistributionMetadata(archive) {
+export async function verifyDistributionMetadata(archive, release = false) {
   const path = join(dirname(archive), 'distribution.json')
   let metadata
   try {
@@ -132,7 +132,7 @@ async function verifyDistributionMetadata(archive) {
       `${path}: declares minimum schema v${metadata.minimumSchemaVersion}, packaged build is v${minimumSchemaVersion}`
     )
   }
-  if (releaseMode) {
+  if (release) {
     if (metadata.mode !== 'release') {
       throw new Error(`${path}: a personal artifact cannot be published — --release requires mode "release"`)
     }
@@ -209,11 +209,13 @@ function findSigntool() {
   throw new Error('signtool.exe not found on PATH or under the Windows 10 SDK; install the Windows SDK')
 }
 
-const archives = await findAppArchives(outputDir)
-if (archives.length === 0) {
-  throw new Error(`No packaged app.asar files found under ${outputDir}`)
-}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const archives = await findAppArchives(outputDir)
+  if (archives.length === 0) {
+    throw new Error(`No packaged app.asar files found under ${outputDir}`)
+  }
 
-for (const archive of archives) {
-  await verifyArchive(archive)
+  for (const archive of archives) {
+    await verifyArchive(archive)
+  }
 }

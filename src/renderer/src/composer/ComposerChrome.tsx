@@ -5,7 +5,7 @@ import { modKeyLabel } from '../platform'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
 import type { ComposerDraftController } from './useComposerDraft'
 
-interface ComposerChromeProps {
+interface ComposerHeaderProps {
   draft: Draft
   mode: 'full' | 'inline'
   attaching: boolean
@@ -14,6 +14,12 @@ interface ComposerChromeProps {
   savedRevision: number
   saveStatus: ComposerDraftController['saveStatus']
   closeAndSave: () => void
+}
+
+interface ComposerEnvelopeProps {
+  draft: Draft
+  mode: 'full' | 'inline'
+  attaching: boolean
   to: MailAddress[]
   setTo: React.Dispatch<React.SetStateAction<MailAddress[]>>
   cc: MailAddress[]
@@ -33,14 +39,14 @@ interface ComposerChromeProps {
   hasPreservedContent: boolean
 }
 
-function composerTitle(kind: Draft['kind']): string {
+export function composerTitle(kind: Draft['kind']): string {
   if (kind === 'reply') return 'Reply'
   if (kind === 'replyAll') return 'Reply all'
   if (kind === 'forward') return 'Forward'
   return 'New message'
 }
 
-export function ComposerHeader(props: ComposerChromeProps): React.JSX.Element {
+export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
   const { draft, mode } = props
   return (
     <header
@@ -114,7 +120,7 @@ export function ComposerHeader(props: ComposerChromeProps): React.JSX.Element {
   )
 }
 
-export function ComposerEnvelope(props: ComposerChromeProps): React.JSX.Element {
+export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Element {
   const { draft, mode } = props
   return (
     <>

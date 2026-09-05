@@ -269,7 +269,7 @@ Undo stack (module state in main): array of `{ label, undo: TriageAction[] }`, c
 **IPC (all three layers):**
 - `mail:triage(action: TriageAction)` → `{ label: string }` — applies, enqueues, broadcasts `mail:changed`, pushes undo.
 - `mail:undo()` → `{ label: string } | null`.
-- `mail:getPendingActionCount()` → `number` — this is a real product surface (local-first visibility), not a test hook: the footer shows `· N pending` when > 0. The e2e suite asserts on it.
+- `mail:getActionQueueStatus()` → `{ pending, paused, authPaused }` — the footer shows `· N pending` when `pending > 0`. The e2e suite asserts this local-first status.
 
 **Renderer:**
 - **Command registry — `src/renderer/src/commands.ts`** (the F5 groundwork): `{ id, title, shortcut, context: 'list' | 'overlay' | 'global', run(ctx) }`, plus `register…`/`listCommands()`/`matchKey(e, context)`. Refactor the existing keydown handler in `App.tsx` to dispatch through it (J/K/Enter/Esc become registered commands too). The M3 palette will render `listCommands()`.

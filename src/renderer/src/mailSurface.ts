@@ -888,10 +888,6 @@ export function mailPresentationForHtml(html: string | null): MailPresentation {
   return { surface, layout }
 }
 
-export function mailSurfaceForHtml(html: string | null): MailSurface {
-  return mailPresentationForHtml(html).surface
-}
-
 /**
  * HTML mail is rendered on an intentionally light canvas. Chromium evaluates
  * sender-authored color-scheme media queries against the dark host app, so
