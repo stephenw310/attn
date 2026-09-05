@@ -1,8 +1,9 @@
+import { buffer } from 'node:stream/consumers'
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import type { GmailPart } from '../gmail/parse'
-import type { MailActionProvider, ProviderDraft } from '../sync/provider'
+import type { ProviderDraft } from '../sync/provider'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import {
   draftContentFingerprint,
@@ -14,7 +15,7 @@ import {
   remoteDraftKind,
   syncRemoteDrafts
 } from './draftSync'
-import { loadDraftMimeAttachments } from './mirror'
+import { prepareDraftMimeAttachments } from './mirror'
 
 describe('draft conflict planning', () => {
   const base = {
@@ -242,14 +243,16 @@ describe('draft synchronization identity', () => {
     const getAttachmentData = vi.fn(async (_messageId: string, attachmentId: string) =>
       Buffer.from(attachmentId === 'new-regular' ? 'regular' : 'inline').toString('base64url')
     )
-    const loaded = await loadDraftMimeAttachments(
+    const loaded = await prepareDraftMimeAttachments(
       'draft',
       refreshed.map((attachment) => ({ ...attachment, spoolPath: '' })),
-      { getAttachmentData } as unknown as MailActionProvider,
+      { getAttachmentData },
       null
     )
     expect(
-      loaded.map((attachment) => [attachment.filename, Buffer.from(attachment.content).toString()])
+      await Promise.all(
+        loaded.map(async (attachment) => [attachment.filename, (await buffer(attachment.open())).toString()])
+      )
     ).toEqual([
       ['report.pdf', 'regular'],
       ['pasted.png', 'inline']
@@ -792,12 +795,7 @@ describe('draft synchronization identity', () => {
     const getAttachmentData = vi.fn(async (_messageId: string, _attachmentId: string) =>
       Buffer.from('data').toString('base64url')
     )
-    await loadDraftMimeAttachments(
-      'local-draft',
-      [refreshed[0]],
-      { getAttachmentData } as unknown as MailActionProvider,
-      null
-    )
+    await prepareDraftMimeAttachments('local-draft', [refreshed[0]], { getAttachmentData }, null)
     expect(getAttachmentData).toHaveBeenCalledWith('message-new', 'attachment-new', undefined)
   })
 })

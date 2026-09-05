@@ -6,10 +6,9 @@ import { errorMessage } from '../../shared/error'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { isPathInside } from '../pathSafety'
-import type { MailActionProvider, ProviderDraft } from '../sync/provider'
+import type { DraftProvider, ProviderDraft } from '../sync/provider'
 import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draftAttachments'
 import {
-  type DraftMimeAttachment,
   type DraftMimeInput,
   type DraftMimeStreamAttachment,
   draftMimeByteLength,
@@ -85,40 +84,36 @@ function nextPending(
 }
 
 export async function saveDraftCheckpoint(
-  provider: Pick<MailActionProvider, 'saveDraft'>,
+  provider: Pick<DraftProvider, 'createDraft' | 'updateDraft'>,
   id: string | null,
   raw: string,
   onRemoteMissing: () => boolean,
   threadId: string | null = null,
   signal?: AbortSignal
 ): Promise<string | null> {
-  const saveDraft = provider.saveDraft?.bind(provider)
-  if (!saveDraft) return null
-  const request = threadId ? { id, raw, threadId } : { id, raw }
-  const save = (next: typeof request): Promise<string> =>
-    signal ? saveDraft(next, { signal }) : saveDraft(next)
+  const request = threadId ? { raw, threadId } : { raw }
+  const options = { signal, priority: 'foreground' as const }
+  if (!id) return provider.createDraft(request, options)
   try {
-    return await save(request)
+    return await provider.updateDraft({ ...request, id }, options)
   } catch (error) {
-    if (!(id && error instanceof GmailApiError && error.status === 404)) throw error
+    if (!(error instanceof GmailApiError && error.status === 404)) throw error
     if (!onRemoteMissing()) return null
-    return save(threadId ? { id: null, raw, threadId } : { id: null, raw })
+    return provider.createDraft(request, options)
   }
 }
 
 export async function deleteDraftCheckpoint(
-  provider: Pick<MailActionProvider, 'deleteDraft'>,
+  provider: Pick<DraftProvider, 'deleteDraft'>,
   id: string,
   signal?: AbortSignal
-): Promise<boolean> {
-  if (!provider.deleteDraft) return false
+): Promise<void> {
   try {
     if (signal) await provider.deleteDraft(id, { signal })
     else await provider.deleteDraft(id)
   } catch (error) {
     if (!(error instanceof GmailApiError && error.status === 404)) throw error
   }
-  return true
 }
 
 /**
@@ -132,7 +127,7 @@ async function refreshRemoteAttachmentIds(
   db: Db,
   accountId: string,
   row: DraftMirrorRow,
-  provider: MailActionProvider,
+  provider: DraftProvider,
   signal?: AbortSignal
 ): Promise<StoredDraftAttachment[]> {
   const attachments = parseStoredDraftAttachments(row.attachments_json)
@@ -143,7 +138,7 @@ async function refreshRemoteAttachmentIds(
       attachment.remoteAttachmentId &&
       !attachment.remoteInlineData
   )
-  if (!remoteOnly || !row.gmail_draft_id || !provider.getDraft) return attachments
+  if (!remoteOnly || !row.gmail_draft_id) return attachments
   let remote: ProviderDraft
   try {
     remote = await provider.getDraft(row.gmail_draft_id, { signal })
@@ -181,15 +176,13 @@ async function streamDraftCheckpoint(
   db: Db,
   accountId: string,
   row: DraftMirrorRow,
-  provider: MailActionProvider,
+  provider: DraftProvider,
   body: Omit<DraftMimeInput, 'attachments'>,
   attachments: readonly StoredDraftAttachment[],
   spoolRoot: string | null,
   onRemoteMissing: () => boolean,
   signal?: AbortSignal
 ): Promise<string | null> {
-  const updateDraft = provider.updateDraft?.bind(provider)
-  if (!updateDraft) return null
   const prepared = await prepareDraftMimeAttachments(row.id, attachments, provider, spoolRoot, signal)
   const message: DraftMimeInput<DraftMimeStreamAttachment> = { ...body, attachments: prepared }
   const upload = {
@@ -226,13 +219,13 @@ async function streamDraftCheckpoint(
   if (!id) return null
   const request = row.thread_id ? { id, mime: upload, threadId: row.thread_id } : { id, mime: upload }
   try {
-    return await updateDraft(request, { signal })
+    return await provider.updateDraft(request, { signal })
   } catch (error) {
     if (!(error instanceof GmailApiError && error.status === 404)) throw error
     if (!onRemoteMissing()) return null
     const recreated = await create()
     if (!recreated) return null
-    return updateDraft(
+    return provider.updateDraft(
       row.thread_id
         ? { id: recreated, mime: upload, threadId: row.thread_id }
         : { id: recreated, mime: upload },
@@ -245,11 +238,10 @@ async function mirrorComposing(
   db: Db,
   accountId: string,
   row: DraftMirrorRow,
-  provider: MailActionProvider,
+  provider: DraftProvider,
   spoolRoot: string | null,
   signal?: AbortSignal
 ): Promise<boolean> {
-  if (!provider.saveDraft) return false
   const mirroredAttachments = await refreshRemoteAttachmentIds(db, accountId, row, provider, signal)
   const content = outboxDraftContent(row)
   // The MIME body carries authored content only: attachments are prepared
@@ -267,10 +259,9 @@ async function mirrorComposing(
   }
   // Streaming keeps a 25 MB attachment out of memory, but Gmail's upload
   // endpoint is PUT-only, so a draft with no id yet is created from its body
-  // alone and the bytes follow. Providers without `updateDraft` (test doubles
-  // predating the upload path) keep the buffered encoder.
+  // alone and the bytes follow.
   const gmailDraftId =
-    provider.updateDraft && mirroredAttachments.length > 0
+    mirroredAttachments.length > 0
       ? await streamDraftCheckpoint(
           db,
           accountId,
@@ -285,16 +276,7 @@ async function mirrorComposing(
       : await saveDraftCheckpoint(
           provider,
           row.gmail_draft_id,
-          encodeDraftMessage({
-            ...body,
-            attachments: await loadDraftMimeAttachments(
-              row.id,
-              mirroredAttachments,
-              provider,
-              spoolRoot,
-              signal
-            )
-          }),
+          encodeDraftMessage(body),
           onRemoteMissing,
           row.thread_id,
           signal
@@ -315,29 +297,6 @@ async function mirrorComposing(
     await deleteDraftCheckpoint(provider, gmailDraftId, signal)
   }
   return true
-}
-
-export async function loadDraftMimeAttachments(
-  draftId: string,
-  attachments: readonly StoredDraftAttachment[],
-  provider: MailActionProvider,
-  spoolRoot: string | null,
-  signal?: AbortSignal
-): Promise<DraftMimeAttachment[]> {
-  const prepared = await prepareDraftMimeAttachments(draftId, attachments, provider, spoolRoot, signal)
-  return Promise.all(
-    prepared.map(async (attachment) => {
-      const chunks: Buffer[] = []
-      for await (const chunk of attachment.open()) chunks.push(Buffer.from(chunk))
-      return {
-        filename: attachment.filename,
-        mimeType: attachment.mimeType,
-        content: Buffer.concat(chunks),
-        ...(attachment.contentId ? { contentId: attachment.contentId } : {}),
-        ...(attachment.inline ? { inline: true } : {})
-      }
-    })
-  )
 }
 
 function bufferSource(content: Uint8Array): () => AsyncIterable<Uint8Array> {
@@ -397,7 +356,7 @@ function fileSource(path: string, filename: string, expectedBytes: number): () =
 export async function prepareDraftMimeAttachments(
   draftId: string,
   attachments: readonly StoredDraftAttachment[],
-  provider: MailActionProvider,
+  provider: Pick<DraftProvider, 'getAttachmentData'>,
   spoolRoot: string | null,
   signal?: AbortSignal
 ): Promise<MimeStreamAttachment[]> {
@@ -430,11 +389,7 @@ export async function prepareDraftMimeAttachments(
         let content: Buffer
         if (attachment.remoteInlineData) {
           content = Buffer.from(attachment.remoteInlineData, 'base64url')
-        } else if (
-          attachment.remoteMessageId &&
-          attachment.remoteAttachmentId &&
-          provider.getAttachmentData
-        ) {
+        } else if (attachment.remoteMessageId && attachment.remoteAttachmentId) {
           const data = await provider.getAttachmentData(
             attachment.remoteMessageId,
             attachment.remoteAttachmentId,
@@ -469,11 +424,12 @@ async function deleteDiscarded(
   db: Db,
   accountId: string,
   row: DraftMirrorRow,
-  provider: MailActionProvider | null,
+  provider: DraftProvider | null,
   signal?: AbortSignal
 ): Promise<boolean> {
   if (row.gmail_draft_id) {
-    if (!provider || !(await deleteDraftCheckpoint(provider, row.gmail_draft_id, signal))) return false
+    if (!provider) return false
+    await deleteDraftCheckpoint(provider, row.gmail_draft_id, signal)
   }
   db.prepare("DELETE FROM outbox WHERE account_id = ? AND id = ? AND state = 'discarding'").run(
     accountId,
@@ -486,7 +442,7 @@ async function deleteDiscarded(
 export async function drainDraftMirrors(
   db: Db,
   accountId: string,
-  provider: MailActionProvider | null,
+  provider: DraftProvider | null,
   shouldContinue: () => boolean = () => true,
   spoolRoot: string | null = null,
   signal?: AbortSignal,

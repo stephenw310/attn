@@ -253,7 +253,7 @@ not page one) after the active account's chain runs. Spec F2, F18, §9 #21(b)(g)
   quiesce covers whichever account's checkpoint is in flight (there is at most one — single in-flight
   rule). `SnoozeScheduler` arms one timer for the earliest due reminder **across accounts** and wakes the
   owning account's return path.
-- Badge: `countNotificationEnabledUnread` summed across the roster.
+- Badge: unread counts from notification-enabled splits, summed across the roster by `ServiceRuntime`.
 - Seed format: `dev/seed.ts` accepts either the current single `account` fixture or
   `accounts: [{ account, labels, threads, … }]`; `loadSeed` returns the roster. Existing fixtures stay
   valid unchanged. Test seams that resolve `currentAccountId()` gain an optional explicit account

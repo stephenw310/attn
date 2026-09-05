@@ -560,17 +560,16 @@ export function useMailData(
       })
         .then(async () => {
           if (cancelled) return
-          const [nextLabels, unread, pending, actionStatus] = await Promise.all([
+          const [nextLabels, unread, actionStatus] = await Promise.all([
             bridge.mail.listLabels(),
             bridge.mail.getUnreadCount(),
-            bridge.mail.getPendingActionCount(),
             bridge.mail.getActionQueueStatus()
           ])
           if (cancelled) return
           setLabels((current) => reuseLabels(current, nextLabels))
           refreshMailboxCounts()
           setRealUnreadTotal(unread)
-          setPendingActionCount(pending)
+          setPendingActionCount(actionStatus.pending)
           setPausedActionCount(actionStatus.paused)
         })
         .catch(() => {})

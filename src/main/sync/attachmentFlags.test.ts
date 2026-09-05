@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { fakeMailProvider } from '../testing/fakes'
-import {
-  type AttachmentFlagCallbacks,
-  planAttachmentFlagStart,
-  runAttachmentFlagWalk
-} from './attachmentFlags'
+import { type AttachmentFlagCallbacks, runAttachmentFlagWalk } from './attachmentFlags'
 
 const ACCOUNT = 'me@example.com'
 
@@ -50,14 +46,6 @@ function callbacks(): AttachmentFlagCallbacks & {
 const NO_PAUSE = { pagePauseMs: 0, foregroundYieldMs: 0 }
 
 describe('attachment flag cursor routing', () => {
-  it('routes fresh, resumed, and completed cursors', () => {
-    expect(planAttachmentFlagStart(null)).toEqual({ kind: 'run' })
-    expect(planAttachmentFlagStart('attachments')).toEqual({ kind: 'run' })
-    expect(planAttachmentFlagStart('attachments:page-2')).toEqual({ kind: 'run', pageToken: 'page-2' })
-    expect(planAttachmentFlagStart('done')).toEqual({ kind: 'skip' })
-    expect(() => planAttachmentFlagStart('lifetime:page-2')).toThrow(/Invalid attachment flag cursor/)
-  })
-
   it('costs nothing once the pass is done', async () => {
     const db = store([{ id: 't1' }], 'done')
     const listThreadIds = vi.fn()

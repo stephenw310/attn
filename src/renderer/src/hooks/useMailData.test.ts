@@ -107,8 +107,7 @@ describe('useMailData mailbox refreshes', () => {
         getMailboxCounts: () =>
           Promise.resolve({ inbox: 2, allMail: 2, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }),
         getUnreadCount: () => Promise.resolve(0),
-        getPendingActionCount: () => Promise.resolve(0),
-        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+        getActionQueueStatus: () => Promise.resolve({ pending: 3, paused: 1 }),
         onChanged: (listener: (requestId: string | null, reason: null) => void) => {
           mailChangedListeners.push(listener)
           return stop
@@ -165,6 +164,8 @@ describe('useMailData mailbox refreshes', () => {
     })
     expect(currentState().loadedInboxSplitId).toBe('preset:github')
     expect(currentState().inboxBackfillReady).toBe(false)
+    expect(currentState().pendingActionCount).toBe(3)
+    expect(currentState().pausedActionCount).toBe(1)
 
     activeSplitId = 'fallback:other'
     await act(async () => {
@@ -233,7 +234,6 @@ describe('useMailData mailbox refreshes', () => {
         getMailboxCounts: () =>
           Promise.resolve({ inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }),
         getUnreadCount: () => Promise.resolve(0),
-        getPendingActionCount: () => Promise.resolve(0),
         getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
         onChanged: () => stop
       },
@@ -330,7 +330,6 @@ describe('useMailData mailbox refreshes', () => {
               trash: 0
             }),
           getUnreadCount: () => Promise.resolve(0),
-          getPendingActionCount: () => Promise.resolve(0),
           getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
           onChanged: (listener: () => void) => {
             mailListeners.add(listener)
@@ -435,7 +434,6 @@ describe('useMailData mailbox refreshes', () => {
         getMailboxCounts: () =>
           Promise.resolve({ inbox: 1, allMail: 1, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }),
         getUnreadCount: () => Promise.resolve(0),
-        getPendingActionCount: () => Promise.resolve(0),
         getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
         onChanged: () => stop
       },
@@ -504,7 +502,6 @@ describe('useMailData mailbox refreshes', () => {
         getMailboxCounts: () =>
           Promise.resolve({ inbox: 0, allMail: 0, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 }),
         getUnreadCount: () => Promise.resolve(0),
-        getPendingActionCount: () => Promise.resolve(0),
         getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
         onChanged: () => stop
       },
@@ -581,7 +578,6 @@ describe('useMailData mailbox refreshes', () => {
         listLabels: () => Promise.resolve([]),
         getMailboxCounts,
         getUnreadCount: () => Promise.resolve(0),
-        getPendingActionCount: () => Promise.resolve(0),
         getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
         onChanged: () => stop
       },

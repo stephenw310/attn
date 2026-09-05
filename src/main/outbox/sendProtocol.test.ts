@@ -8,7 +8,6 @@ import { executeDraftSendProtocol, isRetryableOutboxPreflightError, verifyKnownD
 function provider(overrides: Partial<MailProvider> = {}): MailProvider {
   return fakeMailProvider({
     getDraft: vi.fn(async (id) => ({ id, message: { id: `message-${id}`, threadId: 'thread-1' } })),
-    saveDraft: vi.fn(async ({ id }) => id ?? 'created-draft'),
     createDraft: vi.fn(async () => 'created-draft'),
     updateDraft: vi.fn(async ({ id }) => id),
     sendDraft: vi.fn(async () => ({ id: 'sent-message', threadId: 'sent-thread' })),

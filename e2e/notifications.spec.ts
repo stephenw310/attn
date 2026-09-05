@@ -51,7 +51,9 @@ test('focus-thread safely leaves an open Snoozed conversation before opening Inb
   await expect(rows).toHaveCount(5)
   await rows.filter({ hasText: 'Your receipt' }).click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Your receipt')
-  const pendingBefore = await page.evaluate(() => window.attn.mail.getPendingActionCount())
+  const pendingBefore = await page.evaluate(() =>
+    window.attn.mail.getActionQueueStatus().then((status) => status.pending)
+  )
 
   await emitFocusThread(app, 't-travel')
 
@@ -60,5 +62,7 @@ test('focus-thread safely leaves an open Snoozed conversation before opening Inb
     'true'
   )
   await expect(page.getByTestId('conversation-subject')).toHaveText('Flight options')
-  await expect.poll(() => page.evaluate(() => window.attn.mail.getPendingActionCount())).toBe(pendingBefore)
+  await expect
+    .poll(() => page.evaluate(() => window.attn.mail.getActionQueueStatus().then((status) => status.pending)))
+    .toBe(pendingBefore)
 })

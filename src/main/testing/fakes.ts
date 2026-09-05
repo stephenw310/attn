@@ -15,6 +15,9 @@ import { type SchedulerTime, systemTime, type TimerFactory, type TimerHandle } f
 export function fakeMailProvider(overrides: Partial<MailProvider> = {}): MailProvider {
   return {
     modifyThread: vi.fn(async () => {}),
+    createDraft: vi.fn(async () => 'created-draft'),
+    updateDraft: vi.fn(async (draft) => draft.id),
+    deleteDraft: vi.fn(async () => {}),
     getProfile: vi.fn(async () => ({ emailAddress: 'test@example.com', historyId: '101' })),
     listLabels: vi.fn(async () => []),
     listThreadIds: vi.fn(async () => ({ threadIds: [] })),

@@ -1,58 +1,72 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { buffer } from 'node:stream/consumers'
 import { describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
 import { type Db, openDatabase } from '../db'
 import { GmailApiError } from '../gmail/client'
-import type { MailActionProvider } from '../sync/provider'
+import type { DraftProvider } from '../sync/provider'
+import { fakeMailProvider } from '../testing/fakes'
 import type { StoredDraftAttachment } from './draftAttachments'
 import { closeDraft, saveDraft } from './drafts'
 import {
   deleteDraftCheckpoint,
   drainDraftMirrors,
   isRetryableAttachmentFilesystemError,
-  loadDraftMimeAttachments,
   prepareDraftMimeAttachments,
   saveDraftCheckpoint
 } from './mirror'
 
 describe('draft mirror recovery', () => {
   it('clears a Gmail-deleted id and recreates the draft', async () => {
-    const saveDraft = vi
-      .fn()
-      .mockRejectedValueOnce(new GmailApiError(404, 'gone'))
-      .mockResolvedValueOnce('replacement-id')
+    const updateDraft = vi.fn().mockRejectedValueOnce(new GmailApiError(404, 'gone'))
+    const createDraft = vi.fn(async () => 'replacement-id')
     const onRemoteMissing = vi.fn(() => true)
 
-    await expect(saveDraftCheckpoint({ saveDraft }, 'deleted-id', 'raw', onRemoteMissing)).resolves.toBe(
-      'replacement-id'
-    )
+    await expect(
+      saveDraftCheckpoint({ createDraft, updateDraft }, 'deleted-id', 'raw', onRemoteMissing)
+    ).resolves.toBe('replacement-id')
     expect(onRemoteMissing).toHaveBeenCalledOnce()
-    expect(saveDraft).toHaveBeenNthCalledWith(1, { id: 'deleted-id', raw: 'raw' })
-    expect(saveDraft).toHaveBeenNthCalledWith(2, { id: null, raw: 'raw' })
+    expect(updateDraft).toHaveBeenCalledWith(
+      { id: 'deleted-id', raw: 'raw' },
+      { signal: undefined, priority: 'foreground' }
+    )
+    expect(createDraft).toHaveBeenCalledWith({ raw: 'raw' }, { signal: undefined, priority: 'foreground' })
   })
 
   it('does not recreate a remotely deleted draft after local discard wins the race', async () => {
-    const saveDraft = vi.fn().mockRejectedValue(new GmailApiError(404, 'gone'))
-    await expect(saveDraftCheckpoint({ saveDraft }, 'deleted-id', 'raw', () => false)).resolves.toBeNull()
-    expect(saveDraft).toHaveBeenCalledOnce()
+    const updateDraft = vi.fn().mockRejectedValue(new GmailApiError(404, 'gone'))
+    const createDraft = vi.fn()
+    await expect(
+      saveDraftCheckpoint({ createDraft, updateDraft }, 'deleted-id', 'raw', () => false)
+    ).resolves.toBeNull()
+    expect(updateDraft).toHaveBeenCalledOnce()
+    expect(createDraft).not.toHaveBeenCalled()
   })
 
   it('propagates cancellation to the active Gmail checkpoint', async () => {
-    const saveDraft = vi.fn(async () => 'draft-id')
+    const createDraft = vi.fn(async () => 'draft-id')
     const controller = new AbortController()
-
-    await saveDraftCheckpoint({ saveDraft }, null, 'raw', () => true, null, controller.signal)
-
-    expect(saveDraft).toHaveBeenCalledWith({ id: null, raw: 'raw' }, { signal: controller.signal })
+    await saveDraftCheckpoint(
+      fakeMailProvider({ createDraft }),
+      null,
+      'raw',
+      () => true,
+      null,
+      controller.signal
+    )
+    expect(createDraft).toHaveBeenCalledWith(
+      { raw: 'raw' },
+      { signal: controller.signal, priority: 'foreground' }
+    )
   })
 
   it('treats an already-deleted Gmail draft as a successful discard', async () => {
     const provider = {
       deleteDraft: vi.fn().mockRejectedValue(new GmailApiError(404, 'gone'))
-    } satisfies Pick<MailActionProvider, 'deleteDraft'>
-    await expect(deleteDraftCheckpoint(provider, 'deleted-id')).resolves.toBe(true)
+    } satisfies Pick<DraftProvider, 'deleteDraft'>
+    await expect(deleteDraftCheckpoint(provider, 'deleted-id')).resolves.toBeUndefined()
   })
 })
 
@@ -77,7 +91,7 @@ describe('draft mirror attachments', () => {
     await writeFile(outside, 'nope')
 
     await expect(
-      loadDraftMimeAttachments('draft-1', [attachment(outside)], {} as MailActionProvider, root)
+      prepareDraftMimeAttachments('draft-1', [attachment(outside)], fakeMailProvider(), root)
     ).rejects.toThrow('escaped its draft')
   })
 
@@ -88,15 +102,10 @@ describe('draft mirror attachments', () => {
     await mkdir(draftRoot)
     await writeFile(path, 'data')
 
-    const loaded = await loadDraftMimeAttachments(
-      'draft-1',
-      [attachment(path)],
-      {} as MailActionProvider,
-      root
-    )
+    const loaded = await prepareDraftMimeAttachments('draft-1', [attachment(path)], fakeMailProvider(), root)
     expect(loaded).toHaveLength(1)
     expect(loaded[0].inline).toBeUndefined()
-    expect(Buffer.from(loaded[0].content).toString()).toBe('data')
+    expect((await buffer(loaded[0].open())).toString()).toBe('data')
   })
 
   it('keeps main-owned spool paths out of missing-file errors before and during streaming', async () => {
@@ -108,7 +117,7 @@ describe('draft mirror attachments', () => {
     const missingError = await prepareDraftMimeAttachments(
       'draft-1',
       [attachment(path)],
-      {} as MailActionProvider,
+      fakeMailProvider(),
       root
     ).catch((error: unknown) => error)
     expect(String(missingError)).toContain('local attachment unavailable: notes.pdf')
@@ -118,7 +127,7 @@ describe('draft mirror attachments', () => {
     const [prepared] = await prepareDraftMimeAttachments(
       'draft-1',
       [attachment(path)],
-      {} as MailActionProvider,
+      fakeMailProvider(),
       root
     )
     await rm(path)
@@ -145,13 +154,7 @@ describe('draft mirror attachments', () => {
       remoteAttachmentId: 'attachment-1'
     }
 
-    await loadDraftMimeAttachments(
-      'draft-1',
-      [remote],
-      { getAttachmentData } as unknown as MailActionProvider,
-      null,
-      controller.signal
-    )
+    await prepareDraftMimeAttachments('draft-1', [remote], { getAttachmentData }, null, controller.signal)
 
     expect(getAttachmentData).toHaveBeenCalledWith('message-1', 'attachment-1', {
       signal: controller.signal
@@ -204,7 +207,7 @@ describe('draft mirror attachments', () => {
       })
     } as unknown as Db
 
-    const saveDraft = vi.fn(async (_draft: { id: string | null; raw: string }) => 'gmail-1')
+    const createDraft = vi.fn(async (_draft: { raw: string }) => 'gmail-1')
     let uploaded = Buffer.alloc(0)
     let idPersistedBeforeUpload = false
     const updateDraft = vi.fn(
@@ -219,17 +222,11 @@ describe('draft mirror attachments', () => {
       }
     )
 
-    await drainDraftMirrors(
-      db,
-      'account',
-      { saveDraft, updateDraft } as unknown as MailActionProvider,
-      () => true,
-      root
-    )
+    await drainDraftMirrors(db, 'account', fakeMailProvider({ createDraft, updateDraft }), () => true, root)
 
     // The create mints an id from the body alone; the bytes follow over PUT.
-    expect(saveDraft).toHaveBeenCalledOnce()
-    const createdRaw = Buffer.from(String(saveDraft.mock.calls[0]?.[0].raw), 'base64url').toString()
+    expect(createDraft).toHaveBeenCalledOnce()
+    const createdRaw = Buffer.from(String(createDraft.mock.calls[0]?.[0].raw), 'base64url').toString()
     expect(createdRaw).not.toContain('notes.pdf')
     expect(updateDraft).toHaveBeenCalledOnce()
     expect(idPersistedBeforeUpload).toBe(true)
@@ -304,18 +301,22 @@ describe('draft mirror selection', () => {
       }
     }))
     const getAttachmentData = vi.fn(async () => Buffer.from('data').toString('base64url'))
-    const saveDraft = vi.fn(async () => 'gmail-1')
+    const updateDraft = vi.fn(async () => 'gmail-1')
 
-    await drainDraftMirrors(db, 'account', {
-      saveDraft,
-      getDraft,
-      getAttachmentData
-    } as unknown as MailActionProvider)
+    await drainDraftMirrors(
+      db,
+      'account',
+      fakeMailProvider({
+        updateDraft,
+        getDraft,
+        getAttachmentData
+      })
+    )
 
     expect(getDraft).toHaveBeenCalledWith('gmail-1', { signal: undefined })
     expect(getAttachmentData).toHaveBeenCalledWith('new-message', 'new-attachment', undefined)
     expect(getAttachmentData).not.toHaveBeenCalledWith('old-message', 'old-attachment')
-    expect(saveDraft).toHaveBeenCalledOnce()
+    expect(updateDraft).toHaveBeenCalledOnce()
   })
 
   it('keeps an untouched crash-recovered reply out of Gmail until the user contributes', async () => {
@@ -337,15 +338,23 @@ describe('draft mirror selection', () => {
       const id = saveDraft(db, 'user@example.com', planned, 10)
       const saveRemote = vi.fn(async () => 'gmail-untouched')
 
-      await drainDraftMirrors(db, 'user@example.com', {
-        saveDraft: saveRemote
-      } as unknown as MailActionProvider)
+      await drainDraftMirrors(
+        db,
+        'user@example.com',
+        fakeMailProvider({
+          createDraft: saveRemote
+        })
+      )
       expect(saveRemote).not.toHaveBeenCalled()
 
       saveDraft(db, 'user@example.com', { ...planned, id, bodyHtml: '<p>Thanks</p>', bodyText: 'Thanks' }, 20)
-      await drainDraftMirrors(db, 'user@example.com', {
-        saveDraft: saveRemote
-      } as unknown as MailActionProvider)
+      await drainDraftMirrors(
+        db,
+        'user@example.com',
+        fakeMailProvider({
+          createDraft: saveRemote
+        })
+      )
       expect(saveRemote).toHaveBeenCalledOnce()
     } finally {
       db.close()
@@ -372,10 +381,14 @@ describe('draft mirror selection', () => {
         return 'gmail-orphan'
       })
 
-      await drainDraftMirrors(db, 'user@example.com', {
-        saveDraft: saveRemote,
-        deleteDraft
-      } as unknown as MailActionProvider)
+      await drainDraftMirrors(
+        db,
+        'user@example.com',
+        fakeMailProvider({
+          createDraft: saveRemote,
+          deleteDraft
+        })
+      )
 
       expect(saveRemote).toHaveBeenCalledOnce()
       expect(deleteDraft).toHaveBeenCalledWith('gmail-orphan')
@@ -418,14 +431,11 @@ describe('draft mirror selection', () => {
         sql.includes('SELECT id, state, kind') ? { all: pending } : { run: update }
       )
     } as unknown as Db
-    const saveDraft = vi.fn(
-      async (_draft: { id: string | null; raw: string; threadId?: string | null }) => 'gmail-html-only'
-    )
+    const createDraft = vi.fn(async (_draft: { raw: string; threadId?: string | null }) => 'gmail-html-only')
 
-    await drainDraftMirrors(db, 'account', { saveDraft } as unknown as MailActionProvider)
+    await drainDraftMirrors(db, 'account', fakeMailProvider({ createDraft }))
 
-    expect(saveDraft).toHaveBeenCalledOnce()
-    expect(saveDraft.mock.calls[0]?.[0].id).toBeNull()
+    expect(createDraft).toHaveBeenCalledOnce()
     expect(update).toHaveBeenCalledOnce()
   })
 })

@@ -109,11 +109,11 @@ export function stampUpdateInfo(text, { version, schemaVersion, minimumSchemaVer
 }
 
 function parseArguments(argv) {
-  const options = { directory: null, assetsBase: null, current: [] }
+  const options = { directory: null, assetsBase: null, current: null }
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index]
     if (argument === '--assets-base') options.assetsBase = argv[++index]
-    else if (argument === '--current') options.current.push(argv[++index])
+    else if (argument === '--current') options.current = argv[++index]
     else if (options.directory === null) options.directory = argument
     else throw new Error(`unexpected argument ${argument}`)
   }
@@ -137,9 +137,8 @@ export function stampDirectory({ directory, assetsBase, current }) {
     for (const asset of feedAssetNames(text)) {
       if (!siblings.has(asset)) throw new Error(`${name} names ${asset}, which is not in ${directory}`)
     }
-    const currentDirectories = current ? (Array.isArray(current) ? current : [current]) : []
-    for (const currentDirectory of currentDirectories) {
-      const currentPath = join(currentDirectory, name)
+    if (current) {
+      const currentPath = join(current, name)
       if (!existsSync(currentPath)) throw new Error(`current feed is missing ${name}`)
       const published = feedVersion(readFileSync(currentPath, 'utf8'))
       if (published === null || !isReleaseVersion(published)) {
@@ -161,6 +160,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   stampDirectory({
     directory: resolve(options.directory),
     assetsBase: options.assetsBase,
-    current: options.current.map((directory) => resolve(directory))
+    current: options.current ? resolve(options.current) : null
   })
 }

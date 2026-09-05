@@ -4,7 +4,7 @@ import { retryDelayMs } from '../actions/execute'
 import type { Db } from '../db'
 import { GracefulDrainer } from '../drain'
 import { GmailApiError } from '../gmail/client'
-import type { MailActionProvider } from '../sync/provider'
+import type { DraftProvider } from '../sync/provider'
 import { type SchedulerTime, systemTime } from '../time'
 import { DraftMirrorRowError, drainDraftMirrors } from './mirror'
 
@@ -48,7 +48,7 @@ export class DraftMirrorExecutor {
   constructor(
     private readonly db: Db,
     private readonly accountId: () => string | null,
-    private readonly provider: () => MailActionProvider | null,
+    private readonly provider: () => DraftProvider | null,
     options: DraftMirrorExecutorOptions = {}
   ) {
     this.drainDrafts = options.drainDrafts ?? drainDraftMirrors

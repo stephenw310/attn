@@ -41,16 +41,7 @@ export interface AttachmentFlagResult {
   threadsFlagged: number
 }
 
-export type AttachmentFlagStartPlan = { kind: 'skip' } | { kind: 'run'; pageToken?: string }
-
 const CURSOR_PHASE = 'attachments'
-
-/** Same `phase` / `phase:pageToken` / `done` grammar as the sweep's own cursor. */
-export function planAttachmentFlagStart(rawCursor: string | null | undefined): AttachmentFlagStartPlan {
-  const plan = planCursorStart(CURSOR_PHASE, rawCursor, 'attachment flag')
-  if (plan.kind === 'skip') return plan
-  return { kind: 'run', ...(plan.token === undefined ? {} : { pageToken: plan.token }) }
-}
 
 /**
  * Walk `has:attachment` ids and raise the flag on threads already stored. The

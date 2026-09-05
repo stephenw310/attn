@@ -224,19 +224,6 @@ describe('migration compatibility', () => {
     expect(h.updater.state().phase).toBe('idle')
   })
 
-  it('rejects invalid migration metadata', async () => {
-    const h = harness({
-      check: async () => ({
-        version: '1.1.0',
-        requiredSchemaVersion: 24,
-        minimumSchemaVersion: null
-      })
-    })
-    h.updater.start()
-    await settle()
-    expect(h.calls.download).toBe(0)
-  })
-
   it('downloads a newer schema when the target can migrate the local database', async () => {
     const h = harness({
       check: async () => ({

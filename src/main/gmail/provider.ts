@@ -46,22 +46,6 @@ export class GmailMailProvider implements MailProvider {
     )
   }
 
-  async saveDraft(
-    draft: { id: string | null; raw: string; threadId?: string | null },
-    options?: ProviderRequestOptions
-  ): Promise<string> {
-    const body = { message: { raw: draft.raw, ...(draft.threadId ? { threadId: draft.threadId } : {}) } }
-    const requestOptions = {
-      retryTransient: false,
-      signal: options?.signal,
-      priority: options?.priority ?? 'foreground'
-    }
-    const result = draft.id
-      ? await this.client.put<{ id: string }>(`/drafts/${encodeURIComponent(draft.id)}`, body, requestOptions)
-      : await this.client.post<{ id: string }>('/drafts', body, requestOptions)
-    return result.id
-  }
-
   async createDraft(
     draft: { raw: string; threadId?: string | null },
     options?: ProviderRequestOptions

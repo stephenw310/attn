@@ -151,7 +151,7 @@ export async function executeDraftSendProtocol(
   input: DraftSendProtocolInput,
   signal?: AbortSignal
 ): Promise<DraftSendProtocolResult> {
-  if (!provider.createDraft || !provider.updateDraft || !provider.sendDraft) {
+  if (!provider.sendDraft) {
     throw new Error('Gmail draft sending is unavailable')
   }
   let gmailDraftId = input.gmailDraftId
@@ -577,7 +577,7 @@ export class OutboxSender {
   }
 
   private async send(row: SendRow, provider: MailProvider, signal: AbortSignal): Promise<void> {
-    if (!provider.createDraft || !provider.updateDraft || !provider.sendDraft) {
+    if (!provider.sendDraft) {
       throw new OutboxNoRemoteMutationError(new Error('Gmail draft sending is unavailable'))
     }
     let prepared: { raw: string; updateMime?: ProviderMimeUpload }

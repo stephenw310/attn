@@ -14,8 +14,8 @@ export interface AppUpdateApi {
 /**
  * The About surface's view of this build and its updater (F15, T39). Subscribes
  * before reading so a state change that lands between mount and the read is
- * never missed; a manual check applies its own answer, since main only
- * broadcasts phase changes and an up-to-date check ends where it began.
+ * never missed. Main broadcasts each completed check after the checking phase;
+ * applying a check's response here could overwrite a newer pushed state.
  */
 export function useAppUpdate(): AppUpdateApi {
   const [info, setInfo] = useState<AppInfo | null>(null)
@@ -51,12 +51,8 @@ export function useAppUpdate(): AppUpdateApi {
     }
   }, [])
 
-  const check = useCallback(async (): Promise<UpdateState> => {
-    const attn = window.attn
-    if (!attn) return UPDATE_STATE_IDLE
-    const next = await attn.update.check()
-    setState(next)
-    return next
+  const check = useCallback((): Promise<UpdateState> => {
+    return window.attn?.update.check() ?? Promise.resolve(UPDATE_STATE_IDLE)
   }, [])
 
   const restart = useCallback((): Promise<boolean> => {

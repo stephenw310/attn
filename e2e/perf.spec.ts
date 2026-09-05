@@ -188,7 +188,6 @@ async function measureLocalMailRefresh(page: Page): Promise<number> {
       window.attn.mail.listLabels(),
       window.attn.mail.getMailboxCounts(),
       window.attn.mail.getUnreadCount(),
-      window.attn.mail.getPendingActionCount(),
       window.attn.mail.getActionQueueStatus()
     ])
     return performance.now() - started

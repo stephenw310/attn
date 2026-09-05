@@ -95,43 +95,7 @@ describe('GmailMailProvider.listThreadIds', () => {
   })
 })
 
-describe('GmailMailProvider.saveDraft', () => {
-  it('creates a Gmail draft for checkpointing or the outbox sender', async () => {
-    const post = vi.fn(async () => ({ id: 'gmail-draft-1' }))
-    const provider = new GmailMailProvider({ post } as unknown as GmailClient)
-
-    await expect(provider.saveDraft({ id: null, raw: 'cmF3' })).resolves.toBe('gmail-draft-1')
-    expect(post).toHaveBeenCalledWith(
-      '/drafts',
-      { message: { raw: 'cmF3' } },
-      { retryTransient: false, signal: undefined, priority: 'foreground' }
-    )
-  })
-
-  it('updates the known Gmail draft id', async () => {
-    const put = vi.fn(async () => ({ id: 'gmail-draft-1' }))
-    const provider = new GmailMailProvider({ put } as unknown as GmailClient)
-
-    await expect(provider.saveDraft({ id: 'gmail-draft-1', raw: 'bmV4dA' })).resolves.toBe('gmail-draft-1')
-    expect(put).toHaveBeenCalledWith(
-      '/drafts/gmail-draft-1',
-      { message: { raw: 'bmV4dA' } },
-      { retryTransient: false, signal: undefined, priority: 'foreground' }
-    )
-  })
-
-  it('keeps a reply checkpoint attached to its Gmail thread', async () => {
-    const post = vi.fn(async () => ({ id: 'gmail-draft-1' }))
-    const provider = new GmailMailProvider({ post } as unknown as GmailClient)
-
-    await provider.saveDraft({ id: null, raw: 'cmF3', threadId: 'thread-1' })
-    expect(post).toHaveBeenCalledWith(
-      '/drafts',
-      { message: { raw: 'cmF3', threadId: 'thread-1' } },
-      { retryTransient: false, signal: undefined, priority: 'foreground' }
-    )
-  })
-
+describe('GmailMailProvider draft checkpoints', () => {
   it('deletes a mirrored Gmail draft', async () => {
     const deleteRequest = vi.fn(async () => {})
     const provider = new GmailMailProvider({ delete: deleteRequest } as unknown as GmailClient)
@@ -145,13 +109,13 @@ describe('GmailMailProvider.saveDraft', () => {
   })
 })
 
-describe('GmailMailProvider.saveDraft', () => {
+describe('GmailMailProvider.createDraft', () => {
   it('propagates shutdown cancellation to a single checkpoint request', async () => {
     const post = vi.fn(async () => ({ id: 'gmail-draft-1' }))
     const provider = new GmailMailProvider({ post } as unknown as GmailClient)
     const controller = new AbortController()
 
-    await provider.saveDraft({ id: null, raw: 'cmF3' }, { signal: controller.signal })
+    await provider.createDraft({ raw: 'cmF3' }, { signal: controller.signal, priority: 'foreground' })
 
     expect(post).toHaveBeenCalledWith(
       '/drafts',
