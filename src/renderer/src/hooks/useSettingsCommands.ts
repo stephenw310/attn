@@ -33,6 +33,9 @@ export function useSettingsCommands(options: Options): void {
   useLayoutEffect(
     () =>
       registerCommands([
+        createCommand('app.closeWindow', () => {
+          void window.attn?.app.closeWindow().catch(() => showToast('Could not close the window'))
+        }),
         createCommand('settings.open', () => openSettings(null)),
         createCommand('settings.reorderAccounts', () => openSettings('accounts')),
         createCommand('settings.syncLimit', () => openSettings('syncLimit')),

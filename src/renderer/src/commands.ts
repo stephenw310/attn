@@ -142,6 +142,11 @@ export const COMMAND_SPECS = {
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
   'settings.unreadBadge': { title: 'Toggle unread app badge', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
+  'app.closeWindow': {
+    title: 'Close window and keep Attn running',
+    context: 'global',
+    allowInComposer: true
+  },
   'settings.menuBarIcon': { title: 'Toggle macOS menu-bar icon', context: 'global' },
   'notifications.pauseHour': {
     title: 'Pause notifications for 1 hour',
@@ -176,8 +181,6 @@ export const COMMAND_SPECS = {
     context: 'global',
     allowInComposer: true
   },
-  'theme.midnight': { title: 'Use Midnight theme', context: 'global', allowInComposer: true },
-  'theme.sand': { title: 'Use Sand theme', context: 'global', allowInComposer: true },
   'view.inbox': {
     title: 'Go to Inbox',
     shortcut: 'g i',

@@ -24,6 +24,7 @@ import {
   attachBackgroundWindow,
   type BackgroundEffects,
   initializeBackground,
+  showBackgroundWindow,
   showMainWindow
 } from './background'
 import { applyLoginItemSetting } from './backgroundSettings'
@@ -249,7 +250,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   )
   win.on('ready-to-show', () => {
     mailNotifier?.attachWindow(win)
-    if (shouldShow) win.show()
+    if (shouldShow) showBackgroundWindow(win)
   })
   win.on('focus', publishFocus)
   win.on('blur', publishFocus)

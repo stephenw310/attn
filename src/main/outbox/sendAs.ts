@@ -14,7 +14,7 @@ export const SEND_AS_SIGNATURE_TEXT_SETTING = 'sendAsSignatureText'
 export const ATTN_SIGNATURE_SETTING = 'attnSignatureEnabled'
 
 /** The footer element the composer's AttnFooterNode round-trips (F6/T32B).
-    The gray is a fixed mid tone so recipients and all four themes read it as
+    The gray is a fixed mid tone so recipients and both themes read it as
     secondary; the marker attribute is what identity survives on. */
 const ATTN_FOOTER_HTML =
   '<div data-attn-signature="footer"><br><span style="color:#888888">Sent with ' +
