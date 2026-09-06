@@ -32,7 +32,7 @@ import {
 import { validateAccountSettingUpdate } from '../../shared/settings'
 import type { ReorderSplitsInput, SaveSplitInput, SplitCondition, SplitPresetId } from '../../shared/splits'
 import { SPLIT_PRESET_IDS } from '../../shared/splits'
-import { isThemePreference } from '../../shared/theme'
+import { isThemePreference, normalizeThemePreference } from '../../shared/theme'
 import {
   actionQueueStatus,
   dropOutboxSendUndo,
@@ -427,7 +427,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.settingsGetTheme, () => {
     const stored = readSetting(context.db, 'theme')
-    return isThemePreference(stored) ? stored : 'system'
+    return normalizeThemePreference(stored)
   })
   handle(IPC_CHANNELS.settingsSetTheme, (_event, preference) => {
     if (!isThemePreference(preference)) throw new Error('invalid theme preference')

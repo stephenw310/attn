@@ -91,6 +91,7 @@ export const IPC_CHANNELS = {
   outboxChanged: 'outbox:changed',
   outboxProgress: 'outbox:progress',
   appGetInfo: 'app:getInfo',
+  appCloseWindow: 'app:closeWindow',
   updateGetState: 'update:getState',
   updateCheck: 'update:check',
   updateRestart: 'update:restart',
@@ -282,6 +283,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.outboxListPending]: { args: []; result: OutboxItem[] }
   // The About surface (F15): version, schema, and build kind, all main-owned.
   [IPC_CHANNELS.appGetInfo]: { args: []; result: AppInfo }
+  [IPC_CHANNELS.appCloseWindow]: { args: []; result: undefined }
   // T39 auto-update: main-owned; a personal, dev, or seeded build answers
   // idle, a check answers the same idle state, and restart resolves false —
   // there is no updater to talk to.

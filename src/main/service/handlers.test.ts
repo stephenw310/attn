@@ -3,6 +3,7 @@ import { IPC_CHANNELS } from '../../shared/ipc'
 import { openDatabase } from '../db'
 import { countSystemMailboxes } from '../db/queries'
 import type { GmailThread } from '../gmail/parse'
+import { writeSetting } from '../settings'
 import { getSplitState } from '../splits'
 import { ensureAccount, persistThread } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
@@ -84,6 +85,28 @@ const emptyProvider: ServerSearchProvider = {
   getThread: vi.fn(),
   getAttachmentData: vi.fn(async () => undefined)
 }
+
+describe('retired theme preferences', () => {
+  it('reads old saved themes as Light or Dark and rejects new writes of retired themes', async () => {
+    const db = openDatabase(':memory:')
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+    try {
+      for (const [oldTheme, theme] of [
+        ['sand', 'dispatch-light'],
+        ['midnight', 'dispatch-dark']
+      ]) {
+        writeSetting(db, 'theme', oldTheme)
+        await expect(handlers.invoke(IPC_CHANNELS.settingsGetTheme, [])).resolves.toBe(theme)
+        await expect(handlers.invoke(IPC_CHANNELS.settingsSetTheme, [oldTheme])).rejects.toThrow(
+          'invalid theme preference'
+        )
+      }
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})
 
 describe('message-specific reply service handler', () => {
   it('returns unavailable if the selected message disappears while waiting for the conversation', async () => {

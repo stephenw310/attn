@@ -1,0 +1,22 @@
+{
+  "account": "seed@attn.test",
+  "labels": [],
+  "threads": [
+    {
+      "id": "t-scrollbar",
+      "historyId": "1000",
+      "messages": [
+        {
+          "id": "m-scrollbar",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "from": "Sender <sender@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Sender scrollbar styles",
+          "bodyText": "Scrollbar test",
+          "bodyHtml": "<style>\n:root { --attn-scrollbar-thumb: red !important; --attn-scrollbar-thumb-hover: red !important; scrollbar-width: none !important; scrollbar-color: red blue !important; }\nhtml::-webkit-scrollbar { display: none !important; width: 80px !important; height: 80px !important; }\nhtml::-webkit-scrollbar-thumb { background: red !important; border: 0 !important; border-radius: 0 !important; }\nhtml::-webkit-scrollbar-track { background: blue !important; }\n@layer sender { html::-webkit-scrollbar { width: 90px !important; } }\n</style><div style=\"width:1800px\">Sender content wider than the reading pane.</div>"
+        }
+      ]
+    }
+  ]
+}

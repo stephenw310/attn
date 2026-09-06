@@ -1,5 +1,6 @@
 @import "@fontsource-variable/inter";
 @import "tailwindcss";
+@import "./scrollbars.css";
 
 /* F14 theme tokens. Components consume the semantic Tailwind names; only this
    file knows the palette values. Sender-authored mail colors are separate. */
@@ -123,72 +124,6 @@
     --attn-label-6-bg: #e2e8f7;
     --attn-label-6-edge: #929fc4;
     --attn-label-6-ink: #3b4d82;
-    color-scheme: light;
-  }
-
-  :root[data-theme="midnight"] {
-    --attn-ground: #08111f;
-    --attn-raised: #0e1a2b;
-    --attn-active: #16273c;
-    --attn-edge: #263b55;
-    --attn-ink: #e6f0ff;
-    --attn-ink-dim: #a3b5ce;
-    --attn-ink-faint: #768aa5;
-    --attn-accent: #62a8ff;
-    --attn-star: #ffd166;
-    --attn-danger: #ff7b86;
-    --attn-on-danger: #08111f;
-    --attn-status-live: #4fd1a1;
-    --attn-status-offline: #718198;
-    --attn-overlay: rgb(2 7 15 / 76%);
-    --attn-mail-link: #7db7ff;
-    --attn-login-glow:
-      radial-gradient(circle at 50% 38%, rgb(98 168 255 / 13%), transparent 29%),
-      radial-gradient(circle at 12% 100%, rgb(51 94 151 / 18%), transparent 34%);
-  }
-
-  :root[data-theme="sand"] {
-    --attn-ground: #f3eadb;
-    --attn-raised: #fffaf1;
-    --attn-active: #eadcc6;
-    --attn-edge: #d7c6aa;
-    --attn-ink: #30271f;
-    --attn-ink-dim: #66584b;
-    --attn-ink-faint: #7d6d5f;
-    --attn-accent: #a33f19;
-    --attn-star: #9a5900;
-    --attn-danger: #a62c2b;
-    --attn-on-danger: #fffaf1;
-    --attn-status-live: #34734b;
-    --attn-status-offline: #766d63;
-    --attn-overlay: rgb(57 42 27 / 42%);
-    --attn-mail-link: #8d381d;
-    --attn-shadow-menu: 0 12px 32px rgb(80 50 25 / 19%);
-    --attn-shadow-dialog: 0 24px 64px rgb(80 50 25 / 26%);
-    --attn-shadow-toast: 0 12px 40px rgb(80 50 25 / 26%);
-    --attn-shadow-footer: 0 -8px 24px rgb(80 50 25 / 11%);
-    --attn-shadow-composer: 0 18px 44px rgb(80 50 25 / 17%);
-    --attn-login-glow:
-      radial-gradient(circle at 50% 38%, rgb(163 63 25 / 12%), transparent 29%),
-      radial-gradient(circle at 12% 100%, rgb(155 113 66 / 12%), transparent 34%);
-    --attn-label-1-bg: #f1dcae;
-    --attn-label-1-edge: #c5963b;
-    --attn-label-1-ink: #5e3d00;
-    --attn-label-2-bg: #d8e9e5;
-    --attn-label-2-edge: #78a9a0;
-    --attn-label-2-ink: #215c55;
-    --attn-label-3-bg: #dfe8cc;
-    --attn-label-3-edge: #92a96c;
-    --attn-label-3-ink: #455f20;
-    --attn-label-4-bg: #eadde8;
-    --attn-label-4-edge: #ae8ba9;
-    --attn-label-4-ink: #633e5d;
-    --attn-label-5-bg: #f0d8d1;
-    --attn-label-5-edge: #bd8779;
-    --attn-label-5-ink: #713a2d;
-    --attn-label-6-bg: #dce1ee;
-    --attn-label-6-edge: #8d9ab7;
-    --attn-label-6-ink: #3b4a70;
     color-scheme: light;
   }
 

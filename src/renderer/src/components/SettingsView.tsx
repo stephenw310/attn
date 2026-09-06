@@ -638,7 +638,8 @@ export function SettingsView({
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm text-ink">Menu-bar icon</span>
                       <span className={NOTE}>
-                        Shows a compact Attn icon for opening the app and managing notification pauses.
+                        Keep the icon visible while the window is open. It always appears when you close the
+                        window.
                       </span>
                     </span>
                     <input

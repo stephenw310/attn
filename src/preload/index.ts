@@ -365,7 +365,8 @@ const api = {
     }
   },
   app: {
-    getInfo: (): Promise<AppInfo> => invoke(IPC_CHANNELS.appGetInfo)
+    getInfo: (): Promise<AppInfo> => invoke(IPC_CHANNELS.appGetInfo),
+    closeWindow: (): Promise<undefined> => invoke(IPC_CHANNELS.appCloseWindow)
   },
   update: {
     getState: (): Promise<UpdateState> => invoke(IPC_CHANNELS.updateGetState),

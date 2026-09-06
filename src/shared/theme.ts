@@ -1,4 +1,4 @@
-export const THEME_IDS = ['dispatch-dark', 'dispatch-light', 'midnight', 'sand'] as const
+export const THEME_IDS = ['dispatch-dark', 'dispatch-light'] as const
 
 export type ThemeId = (typeof THEME_IDS)[number]
 export type ThemePreference = 'system' | ThemeId
@@ -13,9 +13,7 @@ export interface ThemeOption {
 export const THEME_OPTIONS: readonly ThemeOption[] = [
   { id: 'system', label: 'System', appearance: 'system' },
   { id: 'dispatch-dark', label: 'Dark', appearance: 'dark' },
-  { id: 'dispatch-light', label: 'Light', appearance: 'light' },
-  { id: 'midnight', label: 'Midnight', appearance: 'dark' },
-  { id: 'sand', label: 'Sand', appearance: 'light' }
+  { id: 'dispatch-light', label: 'Light', appearance: 'light' }
 ]
 
 export function isThemePreference(value: unknown): value is ThemePreference {
@@ -28,5 +26,12 @@ export function resolveTheme(preference: ThemePreference, prefersDark: boolean):
 }
 
 export function themeAppearance(theme: ThemeId): ThemeAppearance {
-  return theme === 'dispatch-dark' || theme === 'midnight' ? 'dark' : 'light'
+  return theme === 'dispatch-dark' ? 'dark' : 'light'
+}
+
+/** Preserve the appearance of retired saved palettes without accepting new writes. */
+export function normalizeThemePreference(value: unknown): ThemePreference {
+  if (value === 'midnight') return 'dispatch-dark'
+  if (value === 'sand') return 'dispatch-light'
+  return isThemePreference(value) ? value : 'system'
 }

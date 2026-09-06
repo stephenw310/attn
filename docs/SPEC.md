@@ -558,11 +558,14 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 ### F14 — Themes
 
-Attn ships four curated palettes: Dark, Light, Midnight, and Sand. The default System preference follows the
+Attn ships two palettes: Dark and Light. The default System preference follows the
 OS and resolves to the dark/light pair; selecting a named palette pins it
 regardless of OS changes. Theme choices are available from the account menu and as palette commands. User-
 customizable palettes and accent colors remain post-v1. Every built-in uses D6's semantic token names rather
-than component-level color branches.
+than component-level color branches. Saved Midnight preferences resolve to Dark; saved Sand preferences resolve to Light.
+
+Scrollbars use narrow, rounded thumbs, transparent tracks, and theme-specific normal and hover colors.
+The same styling covers app panes, controls, and mail frames. Light sender canvases retain light scrollbars.
 
 All UI, including rendered HTML mail, must be legible in every palette. Light palettes evaluate color-scheme
 rules as light and preserve sender foreground and non-neutral canvas colors. Native mail clears neutral
@@ -585,7 +588,7 @@ Settings and the palette expose:
   Dock / Windows taskbar. Per-account split notification controls live in the Inbox header's split-rule
   manager.
 - Snippet manager and theme. The split-rule manager opens from its columns icon beside the Inbox splits.
-- Background behavior: launch at login and the optional macOS menu-bar icon (F16).
+- Background behavior: launch at login and the macOS menu-bar icon while the window is open (F16).
 - AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
 - Keyboard cheat sheet (`Mod+/`).
 
@@ -600,12 +603,16 @@ editor-timing constants remain development tuning rather than user controls.
 The app is present whenever the machine is awake, so snooze timers, polling, and notifications keep working (D2):
 
 - **Windows:** closing the window hides to the system tray. The tray icon is always present while running; its menu offers Open Inbox, Compose, Pause notifications (1h / until tomorrow), Quit. Double-click reopens the window.
-- **macOS:** closing the window leaves the app running (Dock and `Cmd+Tab`, standard platform convention). An optional menu-bar icon (default off) mirrors the tray menu. `Cmd+Q` / tray **Quit** exits fully on both platforms.
+- **macOS:** the close button and `Cmd+W` hide the window and remove Attn from the Dock and `Cmd+Tab`. Attn keeps running with a menu-bar icon. **Open Inbox**, app activation, and notification clicks restore the same window and Dock icon. The menu-bar setting controls visibility while the window is open, and defaults to off. The icon always appears while Attn runs with its window closed, including launch at login. `Cmd+Q` and menu **Quit** exit fully.
+- The command palette offers **Close window and keep Attn running** on both platforms.
 - **Launch at login** (default on) starts the app in the background — no window flash; the window appears on demand.
 - While backgrounded: polling at the 60s cadence, notifications fire, badges update.
 
 **Acceptance criteria**
 - Closing the window never stops snooze timers, polling, or notifications.
+- On macOS, closing and reopening preserves the open draft and view. The Dock icon returns when the window reopens.
+- A close immediately after reopening can take about one second to remove the Dock icon because of Electron's activation guard.
+- Disabling the macOS menu-bar setting never removes the reopen control while the window is closed.
 - Quitting (tray menu / `Cmd+Q`) stops everything — no orphaned background processes.
 - Login launch is windowless and adds < 1s to login.
 
@@ -701,7 +708,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - Fake-provider tests prove debounce, request caps, timeout, IME suppression, keyboard precedence, and
   rejection of stale results after editing, switching drafts/accounts, closing, sending, or disabling.
 - Settings and palette commands expose autocomplete enable/disable; the cheat sheet explains `Tab` and
-  `Esc` in the body editor. Suggestions remain legible in all four built-in themes without moving focus.
+  `Esc` in the body editor. Suggestions remain legible in both built-in themes without moving focus.
 
 ### F18 — Multiple accounts
 

@@ -20,6 +20,7 @@ import {
   normalizeNativeMailBackgrounds,
   normalizeNativeMailDocument
 } from './mailSurface'
+import scrollbarCss from './scrollbars.css?raw'
 
 /**
  * One mail frame — the shell its untrusted document is wrapped in, the
@@ -130,10 +131,18 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
 `
 }
 
+// Important declarations in the first, anonymous layer outrank sender styles,
+// including later named layers and !important rules. Keep this before sender CSS.
+const protectedScrollbarCss = `@layer {
+  ${scrollbarCss.replace(/([^{};]+):([^{};]+);/g, '$1:$2 !important;')}
+  :root, :root * { scrollbar-width: auto !important; scrollbar-color: auto !important; }
+  ::-webkit-scrollbar { display: block !important; }
+}`
+
 /** Wrap prepared body markup in the one scriptless `about:srcdoc` shell. */
 export function mailFrameShell(body: string, presentation: MailFramePresentation): string {
   const renderedAppearance = presentation.surface === 'light' ? 'light' : presentation.appearance
-  return `<!doctype html><html id="attn-mail-root"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${MAIL_FRAME_CSP}"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${frameReset(presentation)}</style></head><body id="attn-mail-body">${body}</body></html>`
+  return `<!doctype html><html id="attn-mail-root" data-theme-appearance="${renderedAppearance}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${MAIL_FRAME_CSP}"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${protectedScrollbarCss}${frameReset(presentation)}</style></head><body id="attn-mail-body">${body}</body></html>`
 }
 
 function freezeViewportHeightUnits(css: string): string {

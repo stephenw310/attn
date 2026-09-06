@@ -75,6 +75,11 @@ export function registerIpc(context: IpcContext): () => void {
     ipcMain.handle(channel, handler as Parameters<typeof ipcMain.handle>[1])
   }
   handle(IPC_CHANNELS.appGetInfo, () => context.appInfo())
+  handle(IPC_CHANNELS.appCloseWindow, (event, ...args) => {
+    if (args.length || !fromAppFrame(event)) throw new Error('window close requires the app frame')
+    BrowserWindow.fromWebContents(event.sender)?.close()
+    return undefined
+  })
   handle(IPC_CHANNELS.updateGetState, () => context.update.getState())
   handle(IPC_CHANNELS.updateCheck, () => context.update.check())
   handle(IPC_CHANNELS.updateRestart, () => context.update.restart())
