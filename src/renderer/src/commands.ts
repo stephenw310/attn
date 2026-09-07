@@ -121,7 +121,7 @@ export const COMMAND_SPECS = {
     shortcutAliases: ['ArrowRight'],
     context: 'list'
   },
-  'split.manage': { title: 'Manage inbox splits', context: 'global' },
+  'split.manage': { title: 'Manage inbox splits', shortcut: 'Mod+Shift+S', context: 'global' },
   'account.add': { title: 'Add account…', context: 'global' },
   'account.remove': { title: 'Sign out', context: 'global' },
   'settings.open': { title: 'Open settings', shortcut: 'Mod+,', context: 'global' },
@@ -244,6 +244,7 @@ export const COMMAND_SPECS = {
     allowInComposer: true,
     chordGuide: { label: 'Outbox', order: 90 }
   },
+  'layout.footer.toggle': { title: 'Hide keyboard hints', shortcut: 'Mod+Shift+B', context: 'global' },
   'layout.sidebar.toggle': {
     title: 'Toggle sidebar',
     shortcut: 'Mod+B',

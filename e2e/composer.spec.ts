@@ -903,8 +903,8 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect(showCopies).toBeVisible()
   await expect(showCopies).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByTestId('composer-discard')).toHaveAccessibleName('Discard draft')
-  await expect(page.getByTestId('composer-discard')).toHaveAttribute('title', /Discard draft \(.+⇧D\)/)
-  await expect(page.getByTestId('composer-attach')).toHaveAttribute('title', /Attach files \(.+⇧A\)/)
+  await expect(page.getByTestId('composer-discard')).toHaveAttribute('data-tooltip', /Discard draft \(.+⇧D\)/)
+  await expect(page.getByTestId('composer-attach')).toHaveAttribute('data-tooltip', /Attach files \(.+⇧A\)/)
 
   const toInput = composer.recipientField().locator('input')
   await expect.poll(() => toInput.evaluate((input) => document.activeElement === input)).toBe(true)
@@ -1527,7 +1527,7 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
-  await expect(page.getByTestId('conversation-back')).toContainText('Drafts')
+  await expect(page.getByTestId('conversation-back')).toHaveAttribute('aria-label', 'Back to Drafts')
 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('composer')).toHaveCount(0)
@@ -1560,7 +1560,7 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await page.getByTestId('draft-row').filter({ hasText: 'Fwd: Re: Q3 roadmap review' }).click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Re: Q3 roadmap review')
   await expect(page.getByTestId('message-card')).toContainText('Thanks — I added my notes.')
-  await expect(page.getByTestId('conversation-back')).toContainText('Drafts')
+  await expect(page.getByTestId('conversation-back')).toHaveAttribute('aria-label', 'Back to Drafts')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
 })
 

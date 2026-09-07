@@ -261,7 +261,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         <span
           data-testid="message-cursor"
           aria-hidden
-          className={`pointer-events-none absolute left-0 z-10 w-0.5 bg-accent/40 ${inlineComposer && inlineComposerSourceMessageId === message.id ? 'top-1.5 bottom-0 rounded-t-full' : 'inset-y-1.5 rounded-full'}`}
+          className="pointer-events-none absolute inset-y-1.5 left-0 z-10 w-0.5 rounded-full bg-accent/40"
         />
       )}
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
@@ -288,7 +288,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           message={message}
           account={account}
           active={activeMessageId === message.id}
-          hasInlineComposer={Boolean(inlineComposer && inlineComposerSourceMessageId === message.id)}
           bodyHydrationMessage={bodyHydrationStatusMessage(
             message.bodyState,
             online,
@@ -314,14 +313,8 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         data-testid="conversation-latest-item"
         data-composer-source-message-id={inlineComposerSourceMessageId ?? undefined}
         data-latest-conversation-item=""
-        className={sourceIndex >= 0 ? 'relative -mt-3.5' : undefined}
+        className="relative"
       >
-        {sourceIndex >= 0 && (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute top-0 bottom-1.5 left-0 z-10 w-0.5 rounded-b-full bg-accent/40"
-          />
-        )}
         {inlineComposer}
       </div>
     )
@@ -448,14 +441,6 @@ export const ConversationView = memo(function ConversationView(
   return (
     <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
       <div className="flex items-center gap-4 border-b border-edge px-6 pt-3 pb-3">
-        <button
-          type="button"
-          data-testid="conversation-back"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
-          onClick={onClose}
-        >
-          <span aria-hidden>←</span> {mailboxTitle}
-        </button>
         <h1
           data-testid="conversation-subject"
           className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-lg font-bold tracking-tight"
@@ -467,7 +452,16 @@ export const ConversationView = memo(function ConversationView(
             {selectedIndex + 1} of {threadCount}
             {threadCountExact ? '' : '+'}
           </span>{' '}
-          · <Kbd>Esc</Kbd>
+          <button
+            type="button"
+            data-testid="conversation-back"
+            aria-label={`Back to ${mailboxTitle}`}
+            data-tooltip={`Back to ${mailboxTitle} (Esc)`}
+            onClick={onClose}
+            className="cursor-pointer rounded-md px-2 py-1 hover:bg-active hover:text-ink"
+          >
+            <Kbd>Esc</Kbd>
+          </button>
         </span>
       </div>
       <div

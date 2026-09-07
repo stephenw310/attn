@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncStage, SyncState } from '../../../shared/mail'
 import { blurActive } from './blurActive'
 
-const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'drafts', 'all-mail', 'spam', 'trash', 'reconcile']
-
 function syncStageLabel(stage: SyncStage): string {
   if (stage === 'metadata') return 'Message list'
   if (stage === 'bodies') return 'Recent mail'
@@ -22,33 +20,6 @@ function lifetimeEta(etaMs: number | undefined): string {
   if (hours < 24) return ` · ${hours} hr remaining`
   const days = Math.ceil(hours / 24)
   return ` · ${days} day${days === 1 ? '' : 's'} remaining`
-}
-
-function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
-  const activeIndex = SYNC_STAGES.indexOf(stage)
-  return (
-    <span
-      data-testid="sync-progress"
-      role="progressbar"
-      aria-label={`Sync phase ${activeIndex + 1} of ${SYNC_STAGES.length}: ${syncStageLabel(stage)}`}
-      aria-valuemin={1}
-      aria-valuemax={SYNC_STAGES.length}
-      aria-valuenow={activeIndex + 1}
-      className="col-start-2 grid h-[3px] w-44 gap-[3px] overflow-hidden"
-      // One column per stage, derived from the list: a fixed `grid-cols-N` went
-      // stale when the pipeline grew from five stages to seven and clipped the
-      // last two segments into an invisible second row.
-      style={{ gridTemplateColumns: `repeat(${SYNC_STAGES.length}, minmax(0, 1fr))` }}
-    >
-      {SYNC_STAGES.map((item, index) => (
-        <i
-          key={item}
-          data-phase-state={index < activeIndex ? 'complete' : index === activeIndex ? 'active' : 'pending'}
-          className="app-sync-phase-segment overflow-hidden rounded-full bg-edge"
-        />
-      ))}
-    </span>
-  )
 }
 
 interface SyncStatusProps {
@@ -143,14 +114,14 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
     displayState === 'live'
       ? 'Live'
       : displayState === 'indexing'
-        ? 'Live · indexing older mail'
+        ? 'Indexing'
         : displayState === 'offline'
           ? 'Offline'
           : displayState === 'error'
             ? 'Error'
             : displayState === 'checking'
-              ? 'Checking mail'
-              : `Syncing · ${syncStageLabel(syncingStage)}`
+              ? 'Checking'
+              : 'Syncing'
   const detail =
     displayState === 'live'
       ? 'Up to date'
@@ -169,7 +140,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       : displayState === 'offline' && sync.phase === 'offline'
         ? sync.message
         : displayState === 'syncing' && sync.phase === 'syncing'
-          ? `${label} — ${sync.threadsDone} processed`
+          ? `${syncStageLabel(syncingStage)}: ${sync.threadsDone} processed`
           : displayState === 'indexing' && sync.phase === 'indexing'
             ? `${label} — ${lifetimeDetail}${quotaEvidence}${
                 sync.messagesTotal === undefined
@@ -188,36 +159,14 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
 
   const body = (
     <>
-      <span className="app-status-dot row-start-1 size-[7px] rounded-full" aria-hidden />
+      <span className="app-status-dot size-[7px] rounded-full" aria-hidden />
       <span
-        className={`row-start-1 whitespace-nowrap text-[11.5px] font-semibold ${
+        className={`whitespace-nowrap text-[11.5px] font-semibold ${
           displayState === 'error' ? 'text-danger' : 'text-ink-dim'
         }`}
       >
         {label}
       </span>
-      {displayState === 'syncing' && sync.phase === 'syncing' ? (
-        <SyncProgress stage={sync.stage} />
-      ) : displayState === 'indexing' && sync.phase === 'indexing' ? (
-        <span
-          data-testid="lifetime-progress"
-          role="progressbar"
-          aria-label={`Lifetime header index: ${lifetimeDetail}`}
-          aria-valuetext={lifetimeDetail}
-          {...(lifetimeTotal === undefined
-            ? {}
-            : {
-                'aria-valuemin': 0,
-                'aria-valuemax': lifetimeTotal,
-                'aria-valuenow': sync.threadsDone
-              })}
-          className="col-start-2 row-start-2 whitespace-nowrap text-[9.5px] leading-[10px] text-ink-faint"
-        >
-          {detail}
-        </span>
-      ) : (
-        <span className="col-start-2 row-start-2 text-[9.5px] leading-[10px] text-ink-faint">{detail}</span>
-      )}
     </>
   )
 
@@ -226,8 +175,8 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       ref={wrapRef}
       data-testid="status-note"
       data-status={displayState}
-      className="relative ml-auto flex min-w-[196px] flex-none justify-end"
-      title={title}
+      className="relative flex min-w-0 flex-none justify-end"
+      data-tooltip={title}
     >
       <span className="sr-only" aria-live="polite">
         {liveAnnouncement}
@@ -236,7 +185,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
         <button
           type="button"
           data-testid="status-error-button"
-          className="grid w-fit cursor-pointer grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2 text-left"
+          className="flex h-7 cursor-pointer items-center gap-2 text-left"
           aria-expanded={detailsOpen}
           aria-controls="sync-error-details"
           onClick={() => setDetailsOpen((open) => !open)}
@@ -244,21 +193,35 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           {body}
         </button>
       ) : (
-        <div
+        <button
+          type="button"
+          aria-expanded={detailsOpen}
+          aria-label={`${label}: show sync details`}
+          data-tooltip={title}
+          onClick={() => setDetailsOpen((open) => !open)}
           data-testid="status-content"
-          className="grid w-fit grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2"
+          className="flex h-7 cursor-pointer items-center gap-2"
         >
           {body}
-        </div>
+        </button>
       )}
 
+      {detailsOpen && sync.phase !== 'error' && (
+        <div
+          role="dialog"
+          aria-label="Sync details"
+          className="absolute right-0 top-full z-50 mt-2 w-72 rounded-[10px] border border-edge bg-raised p-3.5 text-xs text-ink-dim shadow-menu"
+        >
+          {title}
+        </div>
+      )}
       {detailsOpen && sync.phase === 'error' && (
         <div
           id="sync-error-details"
           data-testid="status-error-details"
           role="dialog"
           aria-label="Sync error details"
-          className="absolute right-0 bottom-full z-50 mb-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
+          className="absolute right-0 top-full z-50 mt-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
         >
           <div className="flex items-center gap-2 text-xs font-bold text-ink">
             <span className="text-danger" aria-hidden>

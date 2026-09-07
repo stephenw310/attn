@@ -7,6 +7,7 @@ import { readAccountView } from '../accountViewMemory'
 import type { MessageReplyTarget } from '../components/ConversationView'
 import type { SettingsControl } from '../components/SettingsView'
 import type { ComposerHandle } from '../composer/Composer'
+import { readFooterCollapsed, writeFooterCollapsed } from '../footerState'
 import {
   cachedThreadView,
   type DisplayThread,
@@ -87,6 +88,9 @@ export function useInboxController({
   const [pendingChord, setPendingChord] = useState<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [footerCollapsed, setFooterCollapsed] = useState(() => readFooterCollapsed())
+  useEffect(() => writeFooterCollapsed(footerCollapsed), [footerCollapsed])
+  const toggleFooter = useCallback(() => setFooterCollapsed((collapsed) => !collapsed), [])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed())
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [readerOpen, setReaderOpen] = useState(false)
@@ -758,6 +762,7 @@ export function useInboxController({
     view,
     searchOpen,
     searchBrowsing: searchOpen && search.keyboardTarget === 'results' && !readerOpen,
+    footerCollapsed,
     sidebarCollapsed,
     starOnRef,
     markUnreadOnRef,
@@ -774,6 +779,7 @@ export function useInboxController({
     openOutbox,
     closeOutbox,
     discardSelectedDraft: !searchOpen && view === 'drafts' ? drafting.discardSelectedDraft : null,
+    toggleFooter,
     toggleSidebar,
     openSearch,
     focusSearchQuery,
@@ -847,6 +853,7 @@ export function useInboxController({
     searchOpen,
     searchQuery,
     setSearchQuery,
+    footerCollapsed,
     sidebarCollapsed,
     selectedIndex,
     setSelectedIndex,
@@ -926,6 +933,7 @@ export function useInboxController({
     focusSearchQuery,
     openLabelView,
     openReply,
+    toggleFooter,
     toggleSidebar,
     openSettings,
     closeSettings,

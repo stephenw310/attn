@@ -84,7 +84,6 @@ interface MessageCardProps {
   account: string | null
   collapsed?: boolean
   active?: boolean
-  hasInlineComposer?: boolean
   onToggleCollapsed?: () => void
   trimExpanded?: boolean
   onToggleTrim: () => void
@@ -98,7 +97,6 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     account,
     collapsed = false,
     active = false,
-    hasInlineComposer = false,
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
@@ -146,7 +144,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className={`border border-edge ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-sm bg-active' : 'rounded-sm bg-ground'}`}
+        className={`border border-edge ${active ? 'rounded-sm bg-active' : 'rounded-sm bg-ground'}`}
       >
         <button
           type="button"
@@ -178,7 +176,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`border border-edge px-5 py-4 ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-[10px] bg-active/50' : 'rounded-[10px] bg-ground'}`}
+      className={`border border-edge px-5 py-4 ${active ? 'rounded-[10px] bg-active/50' : 'rounded-[10px] bg-ground'}`}
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}

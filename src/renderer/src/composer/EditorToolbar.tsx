@@ -121,7 +121,7 @@ export function EditorToolbar(): React.JSX.Element {
         type="button"
         className={button}
         aria-label="Bold"
-        title={`Bold (${modKeyLabel()}B)`}
+        data-tooltip={`Bold (${modKeyLabel()}B)`}
         onClick={() => format('bold')}
       >
         B
@@ -130,7 +130,7 @@ export function EditorToolbar(): React.JSX.Element {
         type="button"
         className={`${button} italic`}
         aria-label="Italic"
-        title={`Italic (${modKeyLabel()}I)`}
+        data-tooltip={`Italic (${modKeyLabel()}I)`}
         onClick={() => format('italic')}
       >
         I
@@ -139,7 +139,7 @@ export function EditorToolbar(): React.JSX.Element {
         type="button"
         className={`${button} underline`}
         aria-label="Underline"
-        title={`Underline (${modKeyLabel()}U)`}
+        data-tooltip={`Underline (${modKeyLabel()}U)`}
         onClick={() => format('underline')}
       >
         U
@@ -151,7 +151,7 @@ export function EditorToolbar(): React.JSX.Element {
           data-testid="composer-link"
           aria-label="Add link"
           aria-expanded={linkOpen}
-          title={`Add link (${modKeyLabel()}⇧K)`}
+          data-tooltip={`Add link (${modKeyLabel()}⇧K)`}
           onClick={openLink}
         >
           Link

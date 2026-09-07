@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from 'react'
-import type { SyncState } from '../../../shared/mail'
 import {
   type FooterContext,
   getCommandRegistrySnapshot,
@@ -9,7 +8,6 @@ import {
 } from '../commands'
 import { formatShortcutKey } from '../platform'
 import { Kbd } from './Kbd'
-import { SyncStatus } from './SyncStatus'
 
 function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
   const parts = shortcut.split('+')
@@ -80,20 +78,17 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
 interface MailFooterProps {
   context: FooterContext
   pendingChord: string | null
-  sync: SyncState
-  networkOnline: boolean
-  onRetry: () => void
-  onCopyError: (message: string) => void
 }
 
 export function MailFooter(props: MailFooterProps): React.JSX.Element {
-  const { context, pendingChord, sync, networkOnline, onRetry, onCopyError } = props
+  const { context, pendingChord } = props
   useSyncExternalStore(subscribeCommandRegistry, getCommandRegistrySnapshot)
   const hints = listFooterHints(context)
   return (
     <footer
+      id="mail-footer"
       data-testid="mail-footer"
-      className="relative z-40 flex min-h-11 items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
+      className="relative z-40 flex min-h-11 flex-none items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
     >
       <div
         key={`${context}:${pendingChord ?? 'default'}`}
@@ -106,7 +101,6 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
           hints.map((hint) => <FooterShortcut key={hint.id} {...hint} />)
         )}
       </div>
-      <SyncStatus sync={sync} networkOnline={networkOnline} onRetry={onRetry} onCopyError={onCopyError} />
     </footer>
   )
 }

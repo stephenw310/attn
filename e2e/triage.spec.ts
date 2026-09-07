@@ -323,7 +323,7 @@ test('derives bulk star and unread direction from the selected rows', async ({ p
 test('toggles star and unread, then trashes', async ({ page }) => {
   const first = page.getByTestId('thread-row').first()
   await expect(first).toHaveAttribute('data-unread', 'true')
-  await page.getByTestId('status-note').click()
+  await page.getByTestId('mail-footer').click()
   await page.keyboard.press('s')
   const star = first.getByTitle('Starred')
   await expect(star).toBeVisible()

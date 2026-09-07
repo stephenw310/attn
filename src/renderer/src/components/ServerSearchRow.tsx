@@ -46,7 +46,7 @@ export function ServerSearchRow({
       data-testid="search-all-gmail"
       data-search-state={offline ? 'offline' : phase}
       role="status"
-      className="flex h-9 flex-none items-center border-t border-edge px-7 text-left text-xs text-ink-faint"
+      className="flex min-w-0 items-center text-left text-xs text-ink-faint"
     >
       <span>{label}</span>
       {detail && <span className="ml-auto pl-4 text-[11px]">{detail}</span>}

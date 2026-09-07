@@ -183,7 +183,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await page.keyboard.press('Enter')
     await expect(page.getByTestId('conversation-view')).toBeVisible()
     await expect(page.getByTestId('thread-list')).toBeHidden()
-    await expect(page.getByTestId('conversation-back')).toHaveText('← Inbox')
+    await expect(page.getByTestId('conversation-back')).toHaveText('Esc')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
     await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
     await expect(page.getByTestId('footer-shortcut-reply')).toContainText('Rreply')

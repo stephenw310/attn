@@ -23,6 +23,7 @@ interface Options {
   view: MailView
   searchOpen: boolean
   searchBrowsing: boolean
+  footerCollapsed: boolean
   sidebarCollapsed: boolean
   /** Star/unread titles and payloads are read lazily for the same reason. */
   starOnRef: React.RefObject<boolean>
@@ -41,6 +42,7 @@ interface Options {
   openOutbox: () => void
   closeOutbox: () => void
   discardSelectedDraft: (() => void) | null
+  toggleFooter: () => void
   toggleSidebar: () => void
   openSearch: () => void
   focusSearchQuery: () => void
@@ -84,6 +86,7 @@ export function useInboxCommands(options: Options): void {
     view,
     searchOpen,
     searchBrowsing,
+    footerCollapsed,
     sidebarCollapsed,
     starOnRef,
     markUnreadOnRef,
@@ -100,6 +103,7 @@ export function useInboxCommands(options: Options): void {
     openOutbox,
     closeOutbox,
     discardSelectedDraft,
+    toggleFooter,
     toggleSidebar,
     openSearch,
     focusSearchQuery,
@@ -210,6 +214,9 @@ export function useInboxCommands(options: Options): void {
         createCommand('view.spam', () => switchView('spam')),
         createCommand('view.trash', () => switchView('trash')),
         createCommand('view.outbox', openOutbox),
+        createCommand('layout.footer.toggle', toggleFooter, {
+          title: footerCollapsed ? 'Show keyboard hints' : 'Hide keyboard hints'
+        }),
         createCommand('layout.sidebar.toggle', toggleSidebar, {
           title: sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
         }),
@@ -314,10 +321,12 @@ export function useInboxCommands(options: Options): void {
       searchAllEnabled,
       searchBrowsing,
       showToast,
+      footerCollapsed,
       sidebarCollapsed,
       splitCommands,
       starOnRef,
       switchView,
+      toggleFooter,
       toggleSidebar,
       toggleSelection,
       triageSelected,

@@ -59,10 +59,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
   return (
     <>
       {props.visibleAttachments.length > 0 && (
-        <div
-          className="flex shrink-0 flex-wrap gap-2 border-t border-edge px-4 py-2.5"
-          data-testid="composer-attachment-chips"
-        >
+        <div className="flex shrink-0 flex-wrap gap-2 px-4 py-2.5" data-testid="composer-attachment-chips">
           {props.visibleAttachments.map((attachment) => (
             <div
               key={attachment.id}
@@ -89,21 +86,10 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
       )}
       <footer
         data-testid="composer-footer"
-        className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4"
+        className="flex min-h-14 shrink-0 items-center justify-between gap-3 px-4"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible">
           <EditorToolbar />
-          <button
-            type="button"
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
-            data-testid="composer-attach"
-            aria-label="Attach files"
-            title={`Attach files (${modKeyLabel()}⇧A)`}
-            disabled={props.attaching || props.closing}
-            onClick={props.pickAttachments}
-          >
-            <PaperclipIcon title={`Attach files (${modKeyLabel()}⇧A)`} />
-          </button>
           {props.visibleAttachments.length > 0 && (
             <div
               className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
@@ -114,6 +100,17 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
+            data-testid="composer-attach"
+            aria-label="Attach files"
+            data-tooltip={`Attach files (${modKeyLabel()}⇧A)`}
+            disabled={props.attaching || props.closing}
+            onClick={props.pickAttachments}
+          >
+            <PaperclipIcon title={`Attach files (${modKeyLabel()}⇧A)`} />
+          </button>
           <FollowUpControl
             followUpAt={props.followUpAt}
             open={props.followUpOpen}
@@ -128,7 +125,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
             className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
             data-testid="composer-discard"
             aria-label="Discard draft"
-            title={`Discard draft (${modKeyLabel()}⇧D)`}
+            data-tooltip={`Discard draft (${modKeyLabel()}⇧D)`}
             disabled={props.attaching || props.closing}
             onClick={props.discard}
           >
@@ -139,7 +136,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
             data-testid="composer-send"
             disabled={props.attaching || props.closing}
             className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
-            title="Send message"
+            data-tooltip="Send message"
             onClick={props.send}
           >
             Send <span className="ml-1 opacity-65">{modKeyLabel()}↵</span>

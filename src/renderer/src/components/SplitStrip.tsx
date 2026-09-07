@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SplitSummary } from '../../../shared/splits'
+import { modKeyLabel } from '../platform'
 
 interface SplitStripProps {
   splits: readonly SplitSummary[]
@@ -47,10 +48,7 @@ export function SplitStrip({
 
   if (splits.length <= 1) return null
   return (
-    <div
-      data-testid="split-strip"
-      className="flex h-10 flex-none items-stretch border-b border-edge bg-raised/25 pl-[45px]"
-    >
+    <div data-testid="split-strip" className="flex h-full min-w-0 items-stretch">
       <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 overflow-x-auto">
         {visibleSplits.map((split) => {
           const active = split.id === activeSplitId
@@ -63,7 +61,7 @@ export function SplitStrip({
               data-split-id={split.id}
               data-active={active || undefined}
               aria-selected={active}
-              title={`${split.total.toLocaleString()} conversations`}
+              data-tooltip={`${split.total.toLocaleString()} conversations`}
               className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-3 text-xs font-semibold transition-colors ${
                 active
                   ? 'border-accent text-ink'
@@ -94,7 +92,7 @@ export function SplitStrip({
         type="button"
         data-testid="split-rules-settings"
         aria-label="Manage Inbox splits"
-        title="Manage Inbox splits"
+        data-tooltip={`Manage Inbox splits (${modKeyLabel()}⇧S)`}
         onClick={onManage}
         className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center rounded-md text-ink-faint hover:bg-active hover:text-ink"
       >
@@ -118,7 +116,7 @@ export function SplitStrip({
             data-testid="split-strip-overflow"
             aria-label="More inbox splits"
             aria-expanded={overflowOpen}
-            title="More inbox splits"
+            data-tooltip="More inbox splits"
             onClick={() => setOverflowOpen((open) => !open)}
             className="app-no-drag flex h-full w-11 cursor-pointer items-center justify-center border-l border-edge text-base tracking-widest text-ink-faint hover:bg-active hover:text-ink"
           >
