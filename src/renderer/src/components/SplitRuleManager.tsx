@@ -364,12 +364,14 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
         className="relative isolate flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col px-7 py-6"
       >
         <ScrapEdge />
-        <header className="flex h-14 flex-none items-center border-b border-edge px-5">
+        <header className="flex flex-none items-baseline pb-3">
           <div>
-            <h2 id="split-rules-title" className="text-sm font-semibold text-ink">
-              Split inbox
+            <h2 id="split-rules-title" className="font-serif text-[26px] leading-none text-ink">
+              Inbox splits
             </h2>
-            <p className="text-[11px] text-ink-faint">First matching split wins. Other is always last.</p>
+            <p className="font-letter mt-1 text-[15px] text-ink-faint italic">
+              First matching split wins. Other is always last.
+            </p>
           </div>
           <button
             type="button"
@@ -507,7 +509,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               Inbox metadata in the background. Reading a split never starts a network request.
             </p>
             {error && (
-              <p role="alert" className="mt-3 text-xs text-danger">
+              <p role="alert" className="font-letter mt-3 text-[15px] text-danger italic">
                 {error}
               </p>
             )}
@@ -523,7 +525,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               <button
                 type="submit"
                 disabled={busy}
-                className="h-9 cursor-pointer bg-accent px-4 text-xs font-semibold text-on-accent disabled:opacity-50"
+                className="cursor-pointer px-1 py-1 text-[15.5px] font-bold text-accent underline decoration-1 underline-offset-4 disabled:opacity-50"
               >
                 Save split
               </button>
@@ -611,7 +613,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   data-testid="split-rule-restore"
                   disabled={busy}
                   onClick={() => void run(() => onRestore(id))}
-                  className="h-9 cursor-pointer border border-edge px-3 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+                  className="cursor-pointer px-1 py-1 text-[15.5px] text-ink-dim underline decoration-1 underline-offset-4 hover:text-ink"
                 >
                   Restore {PRESET_NAMES[id]}
                 </button>

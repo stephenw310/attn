@@ -92,7 +92,10 @@ message is written straight onto the sheet with a rule above it rather than insi
 the keyboard is on is marked in the margin instead of tinted. Messages already read collapse to one dim
 ruled line each.
 
-A sender's own page keeps the light document it was designed for, and is presented as a printed enclosure:
+A letter that is only text with structure is written on our sheet in our ink in either palette, with its
+headings, lists, tables, quotations and links set the way the rest of the page is set. A sender's own page
+keeps the light document it was designed for, is named as a printed enclosure before it appears, and is
+presented as one:
 square corners and a hard shadow, so it reads as something that arrived in the post rather than as part of
 the letter around it. Ours is torn; theirs is cut.
 

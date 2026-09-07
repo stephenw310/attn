@@ -111,9 +111,11 @@ test('light mail uses sender colors and dark mail offers the original rendering'
   await page.getByTestId('thread-row').filter({ hasText: 'Your receipt' }).click()
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-appearance', 'light')
   await expect(page.getByTestId('mail-original-toggle')).toHaveCount(0)
+  // The default ink of a native letter is ours in either palette; the sender's
+  // own colours are asserted below, and those still win where they are set.
   await expect(page.frameLocator('[data-testid="html-body-frame"]').locator('body')).toHaveCSS(
     'color',
-    'rgb(32, 33, 36)'
+    'rgb(42, 32, 21)'
   )
 
   await page.keyboard.press('Escape')

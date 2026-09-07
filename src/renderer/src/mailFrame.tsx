@@ -69,25 +69,78 @@ export interface MailFramePresentation {
 function frameReset({ surface, layout, appearance, scrollable }: MailFramePresentation): string {
   const senderCanvas = surface === 'light'
   const light = senderCanvas || appearance === 'light'
+  // A page the sender designed keeps their stock and their sans. A letter that
+  // is only text with structure is written on our sheet, in our ink, in the
+  // same serif the reader sets everything else in. The frame is its own
+  // document and cannot read the app's tokens, so the palette is passed in.
+  const ink = appearance === 'light' ? '#2a2015' : '#e9e4d8'
+  const dim = appearance === 'light' ? '#54432f' : '#b8b2a5'
+  const rubric = appearance === 'light' ? '#a02e15' : '#e86d4c'
+  const indigo = appearance === 'light' ? '#3f4f7c' : '#93a8db'
+  const rule = appearance === 'light' ? '#c9b791' : '#2c303b'
   return `
   :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
     margin: 0;
     padding: 0;
     background: ${senderCanvas ? '#fff' : 'transparent'};
-    color: ${light ? '#202124' : '#e9e4d8'};
+    color: ${senderCanvas ? '#202124' : ink};
   }
   html { overflow-x: auto; overflow-y: ${scrollable ? 'auto' : 'hidden'}; }
   body { overflow: visible; }
   body {
     font: ${
-      light
+      senderCanvas
         ? '14px/1.6 Arial, Helvetica, sans-serif'
         : '17px/1.62 Alegreya, "Iowan Old Style", Georgia, serif'
     };
     overflow-wrap: break-word;
     box-sizing: border-box;
     padding: 0;
+  }
+  ${
+    senderCanvas
+      ? ''
+      : `
+  /* Structure the sender wrote, set the way the rest of the page is set. */
+  #attn-mail-body :is(h1, h2, h3, h4) {
+    font-family: "Alegreya Sans", system-ui, sans-serif;
+    font-weight: 700;
+    line-height: 1.3;
+    margin: 1.1em 0 .4em;
+    color: ${ink};
+  }
+  #attn-mail-body h1 { font-size: 21px; }
+  #attn-mail-body h2 { font-size: 19px; }
+  #attn-mail-body :is(h3, h4) { font-size: 17px; }
+  #attn-mail-body :is(ul, ol) { padding-left: 22px; }
+  #attn-mail-body li { margin: 0 0 3px; }
+  #attn-mail-body table:not([role="presentation"]) {
+    border-collapse: collapse;
+    font-family: "Alegreya Sans", system-ui, sans-serif;
+    font-size: 15px;
+  }
+  #attn-mail-body table:not([role="presentation"]) th {
+    text-align: left;
+    padding: 0 14px 4px 0;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    font-variant-caps: all-small-caps;
+    color: ${rubric};
+  }
+  #attn-mail-body table:not([role="presentation"]) td {
+    padding: 5px 14px 5px 0;
+    border-top: 1px solid ${rule};
+    color: ${dim};
+  }
+  #attn-mail-body :is(blockquote, .gmail_quote) {
+    margin-inline: 0;
+    padding-left: 16px;
+    border-left: 2px solid ${rubric};
+    font-style: italic;
+  }
+  #attn-mail-body hr { border: 0; border-top: 1px solid ${rule}; }`
   }
   ${
     senderCanvas && layout === 'centered'
@@ -110,14 +163,15 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
   }`
   }
   ${
-    light
+    senderCanvas
       ? ''
       : `
   #attn-mail-body :is(blockquote, .gmail_quote) {
-    color: #b8b2a5;
+    color: ${dim};
   }
   #attn-mail-body a {
-    color: #93a8db !important;
+    color: ${indigo} !important;
+    text-underline-offset: 3px;
   }`
   }
   img { max-width: 100%; height: auto; }

@@ -98,7 +98,7 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(details).toContainText('priya@example.com')
   await expect(details).toContainText('daniel@example.com')
   await expect(details).toContainText('maya+roadmap@example.com')
-  await expect(details).toContainText('Date')
+  await expect(details).toContainText('Sent')
   const timezone = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
     .formatToParts(new Date(1_754_800_000_000))
     .find((part) => part.type === 'timeZoneName')?.value

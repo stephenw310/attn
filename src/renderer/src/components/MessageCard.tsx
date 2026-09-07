@@ -61,17 +61,17 @@ function RecipientLine({
       {open && (
         <div
           data-testid="recipient-details"
-          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border border-edge bg-active/60 p-3 text-xs text-ink-faint"
+          className="mt-3 grid grid-cols-[88px_1fr] gap-x-4 gap-y-1 text-[14.5px] text-ink-dim"
         >
           {groups
             .filter((group) => group.addresses.length > 0)
             .map((group) => (
               <div key={group.label} className="contents">
-                <span className="font-medium text-ink-dim">{group.label}</span>
+                <span className="app-small-caps text-[13px] text-accent">{group.label}</span>
                 <span className="min-w-0 break-words">{group.addresses.map(fullAddress).join(', ')}</span>
               </div>
             ))}
-          <span className="font-medium text-ink-dim">Date</span>
+          <span className="app-small-caps text-[13px] text-accent">Sent</span>
           <span>{message.fullDate}</span>
         </div>
       )}
@@ -232,6 +232,17 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           </button>
         )}
       </div>
+      {/* A page the sender designed is named as what it is before it appears, so
+          the white stock below reads as an enclosure rather than a change of
+          surface halfway down the letter. */}
+      {htmlSurface && (
+        <div
+          data-testid="enclosure-caption"
+          className="app-small-caps mb-2 flex items-baseline gap-3 text-[13px] text-ink-faint"
+        >
+          <span>{`Printed enclosure · ${message.fromEmail.split('@').pop() ?? ''}`}</span>
+        </div>
+      )}
       <div
         data-testid="message-content"
         className={`min-w-0 ${htmlSurface ? 'app-enclosure overflow-hidden bg-mail-light-ground' : ''}`}
@@ -252,7 +263,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         />
         <p
           data-testid="body-hydration-status"
-          className={bodyHydrationMessage ? 'mt-3 text-xs text-ink-faint' : 'sr-only'}
+          className={bodyHydrationMessage ? 'font-letter mt-3 text-[15px] text-ink-faint italic' : 'sr-only'}
           aria-live="polite"
           aria-atomic="true"
         >
@@ -263,7 +274,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             data-testid="message-accessories"
             className={htmlSurface ? 'bg-mail-light-ground px-3 pb-3' : ''}
           >
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-col gap-1">
               {visibleAttachments.map((attachment) => (
                 <button
                   key={attachment.attachmentId}
@@ -273,19 +284,27 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                     download(attachment)
                     event.currentTarget.blur()
                   }}
-                  className={`cursor-pointer border px-3 py-2 text-left text-xs ${
+                  className={`flex w-fit cursor-pointer items-center gap-2.5 py-0.5 text-left text-[14.5px] ${
                     htmlSurface
-                      ? 'border-mail-light-edge bg-mail-light-raised text-mail-light-ink-dim hover:border-mail-light-edge-hover hover:text-mail-light-ink'
-                      : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'
+                      ? 'text-mail-light-ink-dim hover:text-mail-light-ink'
+                      : 'text-ink-dim hover:text-ink'
                   }`}
                   title={`Download ${attachment.filename}`}
                 >
-                  <span className="mr-2" aria-hidden>
-                    📎
-                  </span>
-                  <span className="font-medium">{attachment.filename}</span>
+                  <svg
+                    aria-hidden="true"
+                    focusable="false"
+                    viewBox="0 0 24 24"
+                    className="size-[15px] flex-none fill-none stroke-current"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m19.4 11.1-7.3 7.3a4.2 4.2 0 0 1-6-6l8-8a2.8 2.8 0 0 1 4 4l-8 8a1.4 1.4 0 0 1-2-2l7.2-7.2" />
+                  </svg>
+                  <span>{attachment.filename}</span>
                   <span
-                    className={`ml-2 tabular-nums ${htmlSurface ? 'text-mail-light-ink-dim' : 'text-ink-faint'}`}
+                    className={`app-figures text-[13.5px] ${htmlSurface ? 'text-mail-light-ink-dim' : 'text-ink-faint'}`}
                   >
                     {formatBytes(attachment.sizeBytes)}
                   </span>

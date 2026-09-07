@@ -267,7 +267,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
         <div
           data-testid="trashed-message-marker"
-          className="flex items-center gap-2 border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
+          className="flex items-center gap-3 border border-edge border-dashed px-4 py-3 text-[14.5px] text-ink-faint"
         >
           This message was moved to Trash.
           <button

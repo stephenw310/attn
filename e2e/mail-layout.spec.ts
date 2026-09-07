@@ -170,9 +170,11 @@ for (const appearance of ['light', 'dark'] as const) {
       await expect(frame.locator(`#${id}`)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
       await expect(frame.locator(`#${id} > span`)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
     }
+    // A letter that is only text is written in our ink on our sheet in either
+    // palette; only a page the sender designed keeps their near-black.
     await expect(frame.locator('#apple-question')).toHaveCSS(
       'color',
-      appearance === 'light' ? 'rgb(32, 33, 36)' : 'rgb(233, 228, 216)'
+      appearance === 'light' ? 'rgb(42, 32, 21)' : 'rgb(233, 228, 216)'
     )
     await expect(frame.locator('#apple-question')).toContainText('Can we schedule a call?')
     if (appearance === 'dark') {
