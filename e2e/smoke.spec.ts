@@ -183,7 +183,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await page.keyboard.press('Enter')
     await expect(page.getByTestId('conversation-view')).toBeVisible()
     await expect(page.getByTestId('thread-list')).toBeHidden()
-    await expect(page.getByTestId('conversation-back')).toHaveText('← Inbox')
+    await expect(page.getByTestId('conversation-subject')).toBeVisible()
     await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
     await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
     await expect(page.getByTestId('footer-shortcut-reply')).toContainText('Rreply')
@@ -252,7 +252,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect.poll(() => selectedIndex(page)).toBe(0)
 
     await page.keyboard.press('Enter')
-    await page.getByTestId('conversation-back').click()
+    await page.keyboard.press('Escape')
     await expect(page.getByTestId('conversation-view')).toHaveCount(0)
     await expect(page.getByTestId('thread-list')).toBeVisible()
     await expect.poll(() => selectedIndex(page)).toBe(0)

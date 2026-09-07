@@ -70,19 +70,6 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           <path d="M8.5 4v16" strokeWidth="1.75" />
         </svg>
       </button>
-      {/* The account has one home, beside the sidebar control, so it never
-          moves when the sidebar opens or closes. */}
-      <AccountMenu
-        placement="header"
-        status={status}
-        accountStatuses={accountStatuses}
-        onSwitchAccount={onSwitchAccount}
-        onAddAccount={onAddAccount}
-        onRemoveAccount={onRemoveAccount}
-        onOpenSettings={onOpenSettings}
-        onOpenCheatSheet={onOpenCheatSheet}
-        accountActionsBlocked={accountActionsBlocked}
-      />
       <div className="app-no-drag ml-auto flex items-center gap-5">
         {!composerOpen && selectionCount > 0 && (
           <span data-testid="selection-count" className="app-figures text-[15px] font-semibold text-accent">
@@ -95,6 +82,19 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           outbox={outboxCount}
           onReconnect={onReconnectActions}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
+        />
+        {/* The account keeps one home, at the top right, clear of the torn edge
+            the sidebar's band leaves down the left. */}
+        <AccountMenu
+          placement="header"
+          status={status}
+          accountStatuses={accountStatuses}
+          onSwitchAccount={onSwitchAccount}
+          onAddAccount={onAddAccount}
+          onRemoveAccount={onRemoveAccount}
+          onOpenSettings={onOpenSettings}
+          onOpenCheatSheet={onOpenCheatSheet}
+          accountActionsBlocked={accountActionsBlocked}
         />
       </div>
     </header>

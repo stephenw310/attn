@@ -64,7 +64,6 @@ interface SettingsViewProps {
   onAddAccount: () => void
   onReconnect: () => void
   onSignOut: () => void
-  onClose: () => void
   focusControl: SettingsControl | null
 }
 
@@ -180,7 +179,6 @@ export function SettingsView({
   onAddAccount,
   onReconnect,
   onSignOut,
-  onClose,
   focusControl
 }: SettingsViewProps): React.JSX.Element {
   const onToast = useShowToast()
@@ -271,14 +269,6 @@ export function SettingsView({
   return (
     <div ref={rootRef} data-testid="settings-view" className="flex min-w-0 flex-1 flex-col">
       <div className="flex h-[44px] flex-none items-center gap-3 pr-7 pl-[60px]">
-        <button
-          type="button"
-          data-testid="settings-back"
-          onClick={onClose}
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
-        >
-          <span aria-hidden>←</span> Back
-        </button>
         <h1 className="font-serif text-[27px] leading-none text-ink">
           <ViewTitle title="Settings" />
         </h1>

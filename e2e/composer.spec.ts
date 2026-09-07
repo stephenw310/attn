@@ -1163,7 +1163,7 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect(page.getByTestId('conversation-content').getByTestId('composer')).toBeVisible()
   await expect(page.getByTestId('message-card')).toHaveCount(2)
-  await expect(page.getByTestId('conversation-back')).toBeEnabled()
+  await expect(page.getByTestId('conversation-subject')).toBeVisible()
   await composer.expectRecipients(['maya+roadmap@example.com'])
   await expect
     .poll(async () => {
@@ -1231,7 +1231,7 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await expect(page.getByTestId('composer-quote-toggle')).toBeVisible()
   await composer.typeBody('Forward this roadmap context')
   await composer.expectSaved()
-  await page.getByTestId('conversation-back').click()
+  await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
@@ -1529,12 +1529,12 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
-  await expect(page.getByTestId('conversation-back')).toContainText('Drafts')
+  await expect(page.locator('[data-testid="sidebar-mailbox"][data-active="true"]')).toContainText('Drafts')
 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('composer')).toHaveCount(0)
   await expect(page.getByTestId('draft-list')).toBeVisible()
-  await expect(page.getByTestId('view-title')).toHaveText('Drafts')
+  await expect(page.locator('[data-testid="sidebar-mailbox"][data-active="true"]')).toContainText('Drafts')
   await page.keyboard.press('g')
   await page.keyboard.press('i')
   await expect(page.getByTestId('thread-list')).toBeVisible()
@@ -1542,7 +1542,7 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
   await page.getByTestId('composer-close').click()
   await expect(page.getByTestId('composer')).toHaveCount(0)
-  await page.getByTestId('conversation-back').click()
+  await page.keyboard.press('Escape')
   const archivedError = await app.evaluate(
     ({ ipcMain }, args) =>
       new Promise<string | undefined>((resolve) => ipcMain.emit(args.channel, {}, args.remote, resolve)),
@@ -1562,7 +1562,7 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await page.getByTestId('draft-row').filter({ hasText: 'Fwd: Re: Q3 roadmap review' }).click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Re: Q3 roadmap review')
   await expect(page.getByTestId('message-card')).toContainText('Thanks — I added my notes.')
-  await expect(page.getByTestId('conversation-back')).toContainText('Drafts')
+  await expect(page.locator('[data-testid="sidebar-mailbox"][data-active="true"]')).toContainText('Drafts')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
 })
 
@@ -1597,7 +1597,7 @@ test('preserves a newsletter surface and CID resources in a forward draft', asyn
   await composer.editor.click()
   await composer.typeBody('Sharing this long read.')
   await composer.expectSaved()
-  await page.getByTestId('conversation-back').click()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await page.getByTestId('thread-subject').getByText('This week in focus', { exact: true }).click()
   await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
@@ -2583,7 +2583,7 @@ test('keeps a reply signature and quoted history collapsed with empty lines besi
   await expect(composer.root).toHaveCount(0)
   // This imported draft has no known source. Reopen that saved draft instead
   // of asking R to start a reply to the currently selected message.
-  await page.getByTestId('conversation-back').click()
+  await page.keyboard.press('Escape')
   await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
   await expect(composer.root).toHaveAttribute('data-draft-id', savedId ?? '')
   await composer.expectSignatureAndQuoteCollapsed()

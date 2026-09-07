@@ -261,7 +261,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         <span
           data-testid="message-cursor"
           aria-hidden
-          className="pointer-events-none absolute top-[26px] left-0 z-10 h-[18px] w-[3px] bg-accent"
+          className="pointer-events-none absolute top-[42px] left-0 z-10 h-[19px] w-[3px] bg-accent"
         />
       )}
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
@@ -326,7 +326,6 @@ interface ConversationViewProps {
   selectedIndex: number
   threadCount: number
   threadCountExact: boolean
-  mailboxTitle: string
   conversation: DisplayConversation | null
   account: string | null
   online: boolean
@@ -335,7 +334,6 @@ interface ConversationViewProps {
   inlineComposer: ReactNode | null
   inlineComposerDraftId: string | null
   inlineComposerSourceMessageId: string | null
-  onClose: () => void
   onReply: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
@@ -347,7 +345,6 @@ export const ConversationView = memo(function ConversationView(
     selectedIndex,
     threadCount,
     threadCountExact,
-    mailboxTitle,
     conversation,
     account,
     online,
@@ -356,7 +353,6 @@ export const ConversationView = memo(function ConversationView(
     inlineComposer,
     inlineComposerDraftId,
     inlineComposerSourceMessageId,
-    onClose,
     onReply
   } = props
 
@@ -440,14 +436,6 @@ export const ConversationView = memo(function ConversationView(
   return (
     <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col">
       <div className="flex items-baseline gap-4 px-6 pt-4 pb-3">
-        <button
-          type="button"
-          data-testid="conversation-back"
-          className="app-no-drag flex cursor-pointer items-baseline gap-1.5 px-1 text-[15px] text-ink-dim hover:text-ink"
-          onClick={onClose}
-        >
-          <span aria-hidden>←</span> {mailboxTitle}
-        </button>
         <h1
           data-testid="conversation-subject"
           className="font-serif min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[30px] leading-none text-ink"

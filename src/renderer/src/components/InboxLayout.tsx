@@ -82,7 +82,6 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
                 onAddAccount={c.accounts.addAccount}
                 onReconnect={c.accounts.reconnectActions}
                 onSignOut={c.accounts.requestRemoveAccount}
-                onClose={c.closeSettings}
                 focusControl={c.settingsFocus}
               />
             )}
@@ -95,9 +94,9 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             </div>
           </div>
 
-          {/* A full-window composer replaces the footer with its own, so this
-              one leaves the page rather than lingering hidden behind it. */}
-          {!c.fullWindowComposerDraft && (
+          {/* A full-window composer brings its own footer, and Settings is not a
+              mailbox: neither wants the list's shortcuts or its sync line. */}
+          {!c.fullWindowComposerDraft && !c.settingsOpen && (
             <MailFooter
               context={
                 c.inlineComposerDraft
@@ -264,7 +263,6 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
           selectedIndex={c.conversationSelectedIndex}
           threadCount={c.conversationThreadCount}
           threadCountExact={c.conversationThreadCountExact}
-          mailboxTitle={c.searchOpen ? 'Search' : c.activeViewTitle}
           conversation={c.conversation}
           account={c.activeAccount}
           online={c.online}
@@ -274,7 +272,6 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
           inlineComposerDraftId={c.inlineComposerDraft?.id ?? null}
           inlineComposerSourceMessageId={c.inlineComposerDraft?.sourceMessageId ?? null}
           onReply={c.openReply}
-          onClose={c.closeReader}
         />
       )}
     </div>
