@@ -1,3 +1,8 @@
+/**
+ * A key, lettered rather than boxed. The shortcut hints in the footer, the
+ * sidebar and the menus all read as marginalia in red, which keeps a row of
+ * them from fencing off the text beside it.
+ */
 export function Kbd({
   children,
   compact = false
@@ -6,11 +11,7 @@ export function Kbd({
   compact?: boolean
 }): React.JSX.Element {
   return (
-    <kbd
-      className={`rounded-[5px] border border-edge bg-active py-px font-medium text-ink-dim ${
-        compact ? 'px-1 text-[10px]' : 'px-1.5 text-[10.5px]'
-      }`}
-    >
+    <kbd className={`app-small-caps font-semibold text-accent ${compact ? 'text-[11px]' : 'text-[11.5px]'}`}>
       {children}
     </kbd>
   )

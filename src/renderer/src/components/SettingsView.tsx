@@ -26,6 +26,7 @@ import { AiSettingsSection } from './AiSettingsSection'
 import { Kbd } from './Kbd'
 import { SnippetManager } from './SnippetManager'
 import { ACTION_BUTTON, NOTE, ROW, SECTION_TITLE, SELECT } from './settingsStyles'
+import { ViewTitle } from './ViewTitle'
 
 /** A control the palette can deep-link to (`Set undo send delay…` etc.). */
 export type SettingsControl =
@@ -178,16 +179,18 @@ export function SettingsView({
 
   return (
     <div ref={rootRef} data-testid="settings-view" className="flex min-w-0 flex-1 flex-col">
-      <div className="flex h-[44px] flex-none items-center gap-3 border-b border-edge pr-7 pl-[53px]">
+      <div className="flex h-[44px] flex-none items-center gap-3 pr-7 pl-[60px]">
         <button
           type="button"
           data-testid="settings-back"
           onClick={onClose}
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+          className="app-no-drag flex cursor-pointer items-center gap-1.5 px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
         >
           <span aria-hidden>←</span> Back
         </button>
-        <h1 className="text-base font-semibold text-ink">Settings</h1>
+        <h1 className="font-serif text-[27px] leading-none text-ink">
+          <ViewTitle title="Settings" />
+        </h1>
         <span className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-faint">
           <Kbd>Esc</Kbd> closes
         </span>
@@ -196,7 +199,7 @@ export function SettingsView({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[840px] flex-col gap-8 px-7 py-7">
           <section data-testid="settings-accounts" aria-label="Accounts">
-            <h2 className="text-lg font-semibold text-ink">Accounts</h2>
+            <h2 className="font-serif text-[21px] text-ink">Accounts</h2>
             <p className={`mt-1.5 ${NOTE}`}>
               The order below is the switcher order — {modKeyLabel()}1…9 follow it, and so does the account
               menu.
@@ -237,7 +240,7 @@ export function SettingsView({
                           type="button"
                           data-testid="settings-account-reconnect"
                           onClick={onReconnect}
-                          className="cursor-pointer rounded-md px-2 py-1 text-xs font-medium text-accent hover:bg-active"
+                          className="cursor-pointer px-2 py-1 text-xs font-medium text-accent hover:bg-active"
                         >
                           Reconnect
                         </button>
@@ -295,10 +298,10 @@ export function SettingsView({
           <section
             data-testid="settings-account-scope"
             aria-label={`Settings for ${activeEmail ?? 'this account'}`}
-            className="rounded-xl border border-edge bg-ground/45 p-4"
+            className="border border-edge bg-ground/45 p-4"
           >
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-ink">This account</h2>
+              <h2 className="font-serif text-[21px] text-ink">This account</h2>
               <p className={`mt-1 ${NOTE}`}>
                 These settings apply only to {activeEmail ?? 'the active account'}.
               </p>
@@ -345,7 +348,7 @@ export function SettingsView({
                         aria-label="Custom stored email history limit"
                         value={customLimitValue}
                         onChange={(event) => setLimitDraft({ mode: 'custom', custom: event.target.value })}
-                        className="w-32 rounded-md border border-edge bg-ground px-2.5 py-1.5 text-right text-sm text-ink tabular-nums outline-none focus:border-accent"
+                        className="w-32 border border-edge bg-ground px-2.5 py-1.5 text-right text-sm text-ink tabular-nums outline-none focus:border-accent"
                       />
                       <button
                         type="button"
@@ -366,7 +369,7 @@ export function SettingsView({
                 {confirmAllMail && (
                   <div
                     data-testid="settings-sync-limit-confirm"
-                    className="mx-3 mt-1 rounded-md border border-accent/40 bg-accent/10 px-3 py-2"
+                    className="mx-3 mt-1 border border-accent/40 bg-accent/10 px-3 py-2"
                   >
                     <p className="text-[12px] leading-relaxed text-ink-dim">
                       Sync all mail for {activeEmail ?? 'this account'}? A large account can require
@@ -381,7 +384,7 @@ export function SettingsView({
                           setLimitDraft(null)
                           onUpdateAccountSetting('lifetimeThreadCap', LIFETIME_THREAD_CAP_ALL_MAIL)
                         }}
-                        className="cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20"
+                        className="cursor-pointer border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20"
                       >
                         Sync all mail
                       </button>
@@ -431,10 +434,10 @@ export function SettingsView({
           <section
             data-testid="settings-all-accounts-scope"
             aria-label="Settings for all accounts"
-            className="rounded-xl border border-edge bg-ground/45 p-4"
+            className="border border-edge bg-ground/45 p-4"
           >
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-ink">All accounts</h2>
+              <h2 className="font-serif text-[21px] text-ink">All accounts</h2>
               <p className={`mt-1 ${NOTE}`}>These settings apply to every signed-in account and mailbox.</p>
             </div>
             <div className="flex flex-col gap-7">
@@ -556,7 +559,7 @@ export function SettingsView({
                         type="button"
                         data-testid="settings-pause-resume"
                         onClick={() => onUpdateSetting('notificationsPausedUntil', null)}
-                        className="cursor-pointer rounded-md px-2 py-1 text-xs font-medium text-accent hover:bg-active"
+                        className="cursor-pointer px-2 py-1 text-xs font-medium text-accent hover:bg-active"
                       >
                         Resume
                       </button>

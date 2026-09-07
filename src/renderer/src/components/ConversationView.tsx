@@ -267,7 +267,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
         <div
           data-testid="trashed-message-marker"
-          className="flex items-center gap-2 rounded-lg border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
+          className="flex items-center gap-2 border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
         >
           This message was moved to Trash.
           <button
@@ -451,7 +451,7 @@ export const ConversationView = memo(function ConversationView(
         <button
           type="button"
           data-testid="conversation-back"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+          className="app-no-drag flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
           onClick={onClose}
         >
           <span aria-hidden>←</span> {mailboxTitle}
@@ -466,8 +466,8 @@ export const ConversationView = memo(function ConversationView(
           <span data-testid="conversation-position" className="tabular-nums">
             {selectedIndex + 1} of {threadCount}
             {threadCountExact ? '' : '+'}
-          </span>{' '}
-          · <Kbd>Esc</Kbd>
+          </span>
+          <Kbd>Esc</Kbd>
         </span>
       </div>
       <div

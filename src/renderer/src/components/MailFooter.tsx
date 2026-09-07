@@ -8,6 +8,7 @@ import {
   subscribeCommandRegistry
 } from '../commands'
 import { formatShortcutKey } from '../platform'
+import { TornRule } from './Hand'
 import { Kbd } from './Kbd'
 import { SyncStatus } from './SyncStatus'
 
@@ -93,8 +94,11 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
   return (
     <footer
       data-testid="mail-footer"
-      className="relative z-40 flex min-h-11 items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
+      className="relative z-40 flex min-h-11 items-center gap-4 py-1.5 pr-7 pl-[60px] text-[13px] text-ink-faint"
     >
+      <span className="absolute top-0 right-7 left-[60px] block">
+        <TornRule />
+      </span>
       <div
         key={`${context}:${pendingChord ?? 'default'}`}
         data-testid="footer-shortcuts"

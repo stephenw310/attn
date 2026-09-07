@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SplitSummary } from '../../../shared/splits'
+import { TornRule } from './Hand'
 
 interface SplitStripProps {
   splits: readonly SplitSummary[]
@@ -47,10 +48,7 @@ export function SplitStrip({
 
   if (splits.length <= 1) return null
   return (
-    <div
-      data-testid="split-strip"
-      className="flex h-10 flex-none items-stretch border-b border-edge bg-raised/25 pl-[45px]"
-    >
+    <div data-testid="split-strip" className="flex h-10 flex-none items-stretch pl-[60px]">
       <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 overflow-x-auto">
         {visibleSplits.map((split) => {
           const active = split.id === activeSplitId
@@ -64,10 +62,10 @@ export function SplitStrip({
               data-active={active || undefined}
               aria-selected={active}
               title={`${split.total.toLocaleString()} conversations`}
-              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-3 text-xs font-semibold transition-colors ${
-                active
-                  ? 'border-accent text-ink'
-                  : 'border-transparent text-ink-dim hover:bg-active/60 hover:text-ink'
+              // Every tab keeps one weight: the rule and the ink mark the
+              // active split, and a weight change would move the tabs beside it.
+              className={`app-no-drag relative flex flex-none cursor-pointer items-baseline gap-2 px-3 pt-2 pb-2.5 text-[15px] font-medium ${
+                active ? 'text-ink' : 'text-ink-dim hover:text-ink'
               }`}
               onClick={(event) => {
                 onSelect(split.id)
@@ -75,17 +73,18 @@ export function SplitStrip({
               }}
             >
               <span>{split.name}</span>
-              <span className="w-10 flex-none text-center">
+              <span className="app-figures w-8 flex-none text-left text-[13px] text-ink-faint">
                 {split.unread > 0 && (
-                  <span
-                    data-testid="split-unread-count"
-                    data-count={split.unread}
-                    className="inline-block min-w-5 rounded-full bg-active px-1.5 py-0.5 text-[10px] leading-none font-semibold tabular-nums text-accent"
-                  >
+                  <span data-testid="split-unread-count" data-count={split.unread}>
                     {split.unread > 999 ? '999+' : split.unread}
                   </span>
                 )}
               </span>
+              {active && (
+                <span className="absolute right-2 bottom-0.5 left-2 block">
+                  <TornRule />
+                </span>
+              )}
             </button>
           )
         })}
@@ -96,7 +95,7 @@ export function SplitStrip({
         aria-label="Manage Inbox splits"
         title="Manage Inbox splits"
         onClick={onManage}
-        className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center rounded-md text-ink-faint hover:bg-active hover:text-ink"
+        className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center text-ink-faint hover:text-ink"
       >
         <svg
           aria-hidden
@@ -120,14 +119,14 @@ export function SplitStrip({
             aria-expanded={overflowOpen}
             title="More inbox splits"
             onClick={() => setOverflowOpen((open) => !open)}
-            className="app-no-drag flex h-full w-11 cursor-pointer items-center justify-center border-l border-edge text-base tracking-widest text-ink-faint hover:bg-active hover:text-ink"
+            className="app-no-drag flex h-full w-11 cursor-pointer items-center justify-center text-base tracking-widest text-ink-faint hover:text-ink"
           >
             ···
           </button>
           {overflowOpen && (
             <div
               data-testid="split-overflow-menu"
-              className="absolute top-full right-1 z-50 mt-1 min-w-48 rounded-lg border border-edge bg-raised p-1.5 shadow-menu"
+              className="absolute top-full right-1 z-50 mt-1 min-w-48 border border-edge bg-raised p-1.5 shadow-menu"
             >
               {overflowSplits.map((split) => (
                 <button
@@ -141,7 +140,7 @@ export function SplitStrip({
                     setOverflowOpen(false)
                     onSelect(split.id)
                   }}
-                  className="flex w-full cursor-pointer items-center justify-between gap-4 rounded-md px-2.5 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+                  className="flex w-full cursor-pointer items-center justify-between gap-4 px-2.5 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
                 >
                   <span>{split.name}</span>
                   {split.unread > 0 && <span className="tabular-nums text-accent">{split.unread}</span>}

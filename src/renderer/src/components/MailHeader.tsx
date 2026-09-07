@@ -8,7 +8,7 @@ import { AccountHealthLine } from './AccountHealthLine'
 import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
 
-const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
+const CHIP_CLASS = 'app-no-drag px-1 py-1 text-[13px] text-ink-faint'
 
 function MailActivity({
   pendingActions,
@@ -25,10 +25,14 @@ function MailActivity({
 }): React.JSX.Element | null {
   if (pendingActions === 0 && pausedActions === 0 && outbox === 0) return null
   return (
-    <div data-testid="mail-activity" className="flex items-center gap-3 text-xs text-ink-faint">
+    <div data-testid="mail-activity" className="flex items-center gap-4 text-[13px] text-ink-faint">
       {pendingActions > 0 && (
-        <span data-testid="pending-count" className="font-medium tabular-nums">
-          {pendingActions} pending
+        <span
+          data-testid="pending-count"
+          title="Changes waiting to reach Gmail"
+          className="app-figures font-medium"
+        >
+          {pendingActions === 1 ? '1 letter waiting' : `${pendingActions} letters waiting`}
         </span>
       )}
       {outbox > 0 && (
@@ -36,7 +40,7 @@ function MailActivity({
           type="button"
           data-testid="outbox-count"
           disabled={!onOpenOutbox}
-          className="cursor-pointer rounded px-1 py-0.5 hover:bg-active hover:text-ink-dim disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit"
+          className="app-figures cursor-pointer px-1 py-0.5 hover:text-ink disabled:cursor-default disabled:hover:text-inherit"
           onClick={onOpenOutbox}
         >
           {outbox} in Outbox
@@ -50,10 +54,11 @@ function MailActivity({
           type="button"
           data-testid="action-reconnect"
           onClick={onReconnect}
-          title="Google authorization expired; reconnect to retry paused changes"
+          title="Google authorization expired; reconnect to retry held changes"
           className="cursor-pointer font-medium text-accent hover:underline"
         >
-          <span data-testid="paused-count">{pausedActions} paused</span> · Reconnect Google
+          <span data-testid="paused-count" className="app-figures">{`${pausedActions} held.`}</span> Reconnect
+          Google
         </button>
       )}
     </div>
@@ -119,24 +124,20 @@ function AccountMenu({
       <button
         type="button"
         data-attention={chipAttention ? 'true' : undefined}
-        className={`${CHIP_CLASS} flex cursor-pointer items-center gap-1.5 hover:border-accent hover:text-ink-dim`}
+        className={`${CHIP_CLASS} flex cursor-pointer items-center gap-1.5 hover:text-ink`}
         onClick={() => (open ? closeMenu() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="menu"
       >
         {chipAttention && (
-          <span
-            aria-hidden
-            title="An account needs attention"
-            className="size-1.5 flex-none rounded-full bg-accent"
-          />
+          <span aria-hidden title="An account needs attention" className="size-1.5 flex-none bg-accent" />
         )}
         {status.email ?? 'signed in'} <span className="text-[8px]">▾</span>
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute top-full right-0 z-50 mt-2 w-[250px] rounded-lg border border-edge bg-raised p-1.5 shadow-menu"
+          className="absolute top-full right-0 z-50 mt-2 w-[250px] border border-edge bg-raised p-1.5 shadow-menu"
         >
           {status.accounts.map((account, index) => {
             const active = account.id === status.activeAccountId
@@ -155,7 +156,7 @@ function AccountMenu({
                   closeMenu()
                   if (!active) onSwitchAccount(account.id)
                 }}
-                className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-[13px] hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent ${
+                className={`flex w-full cursor-pointer items-center justify-between gap-2 px-2.5 py-1.5 text-[13px] hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent ${
                   active ? 'text-ink' : 'text-ink-dim'
                 }`}
               >
@@ -185,19 +186,19 @@ function AccountMenu({
               closeMenu()
               onAddAccount()
             }}
-            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
+            className="flex w-full cursor-pointer items-center justify-between px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           >
             Add account…
           </button>
           <hr className="my-1.5 border-edge" />
-          <label className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim">
+          <label className="flex w-full items-center justify-between gap-3 px-2.5 py-1.5 text-[13px] text-ink-dim">
             <span>Theme</span>
             <select
               data-testid="theme-picker"
               aria-label="Theme"
               value={preference}
               onChange={(event) => setPreference(event.target.value as ThemePreference)}
-              className="min-w-0 cursor-pointer rounded-md border border-edge bg-ground px-2 py-1 text-xs text-ink outline-none focus:border-accent"
+              className="min-w-0 cursor-pointer border border-edge bg-ground px-2 py-1 text-xs text-ink outline-none focus:border-accent"
             >
               {THEME_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -219,7 +220,7 @@ function AccountMenu({
               closeMenu()
               onOpenSettings()
             }}
-            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
+            className="flex w-full cursor-pointer items-center justify-between px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           >
             Settings <Kbd>{`${modKeyLabel()} ,`}</Kbd>
           </button>
@@ -230,7 +231,7 @@ function AccountMenu({
               closeMenu()
               onOpenCheatSheet()
             }}
-            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
+            className="flex w-full cursor-pointer items-center justify-between px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
           >
             Keyboard shortcuts <Kbd>{`${modKeyLabel()} /`}</Kbd>
           </button>
@@ -247,7 +248,7 @@ function AccountMenu({
               blockedTitle ??
               "Removes this account's sign-in and stops its sync; you choose what happens to its local mail"
             }
-            className="flex w-full cursor-pointer items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
+            className="flex w-full cursor-pointer items-center justify-between px-2.5 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45 disabled:hover:bg-transparent"
           >
             Sign out
           </button>
@@ -302,7 +303,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   return (
     <header
       data-testid="mail-header"
-      className="app-drag app-titlebar-safe-area flex h-11 flex-none items-center gap-6 border-b border-edge"
+      className="app-drag app-titlebar-safe-area flex h-11 flex-none items-center gap-6"
     >
       <button
         type="button"
@@ -317,7 +318,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           onToggleSidebar()
           event.currentTarget.blur()
         }}
-        className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="app-no-drag flex size-7 cursor-pointer items-center justify-center text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
           <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
@@ -328,7 +329,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         {!composerOpen && selectionCount > 0 && (
           <span
             data-testid="selection-count"
-            className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent tabular-nums"
+            className="app-figures px-1 py-1 text-[13px] font-semibold text-accent"
           >
             {selectionCount} selected
           </span>

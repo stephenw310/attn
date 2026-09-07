@@ -37,7 +37,7 @@ for (const appearance of ['light', 'dark'] as const) {
     await expect(authoredBody.locator('#current-answer')).toContainText('configuration changes')
     await expect(authoredBody.locator('#current-answer')).toHaveCSS(
       'color',
-      appearance === 'light' ? 'rgb(32, 33, 36)' : 'rgb(233, 234, 238)'
+      appearance === 'light' ? 'rgb(32, 33, 36)' : 'rgb(233, 228, 216)'
     )
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await expect(quote).toBeHidden()

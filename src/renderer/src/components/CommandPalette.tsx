@@ -215,7 +215,7 @@ export function CommandPalette({
         aria-label="Command palette"
         data-testid="command-palette"
         data-usage-loaded={usageLoaded ? 'true' : 'false'}
-        className="fixed top-[15vh] left-1/2 z-[90] flex max-h-[70vh] w-[min(640px,92vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-[15vh] left-1/2 z-[90] flex max-h-[70vh] w-[min(640px,92vw)] -translate-x-1/2 flex-col overflow-hidden border border-edge bg-raised shadow-dialog"
         onKeyDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-edge px-4 py-3">
@@ -280,7 +280,7 @@ export function CommandPalette({
                 data-testid="command-palette-result"
                 data-command-id={result.command.id}
                 data-active={index === activeIndex || undefined}
-                className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${
+                className={`flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left text-sm ${
                   index === activeIndex
                     ? 'bg-active text-ink'
                     : 'text-ink-dim hover:bg-active/60 hover:text-ink'

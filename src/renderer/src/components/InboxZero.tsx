@@ -59,11 +59,8 @@ export function InboxZero({
       />
       <div className="app-inbox-zero-scrim absolute inset-0" aria-hidden="true" />
       <div className="app-inbox-zero-copy relative flex h-full items-center justify-center p-8 text-center">
-        <section
-          data-testid="inbox-zero-message"
-          className="app-inbox-zero-card w-full max-w-xl rounded-2xl px-8 py-9"
-        >
-          <p className="text-xs font-semibold tracking-[0.2em] uppercase">Inbox zero</p>
+        <section data-testid="inbox-zero-message" className="app-inbox-zero-card w-full max-w-xl px-8 py-9">
+          <p className="app-small-caps text-sm font-semibold">Inbox zero</p>
           <time
             className="mt-2 block text-5xl font-semibold tracking-tight tabular-nums"
             dateTime={now.toISOString()}
@@ -74,7 +71,7 @@ export function InboxZero({
 
           {remaining.length > 0 ? (
             <div className="mt-8 border-t border-current/20 pt-5">
-              <p className="app-inbox-zero-muted text-[11px] font-semibold tracking-[0.16em] uppercase">
+              <p className="app-inbox-zero-muted app-small-caps text-[13px] font-semibold">
                 Conversations elsewhere
               </p>
               <div data-testid="inbox-zero-remaining" className="mt-3 flex flex-wrap justify-center gap-2">

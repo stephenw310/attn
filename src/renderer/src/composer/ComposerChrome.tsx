@@ -58,7 +58,7 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
       {mode === 'full' ? (
         <button
           type="button"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
+          className="app-no-drag flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
           data-testid="composer-close"
           aria-label="Save draft and go back"
           disabled={props.attaching || props.closing}
@@ -106,7 +106,7 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
         ) : (
           <button
             type="button"
-            className="flex size-7 items-center justify-center rounded-md text-lg text-ink-faint hover:bg-active hover:text-ink"
+            className="flex size-7 items-center justify-center text-lg text-ink-faint hover:bg-active hover:text-ink"
             data-testid="composer-close"
             aria-label="Save and close draft"
             title="Save and close draft (Esc)"
@@ -148,7 +148,7 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
         {!props.showCopies && (
           <button
             type="button"
-            className="absolute right-3 top-1.5 inline-flex h-7 items-center gap-1 rounded-md border border-transparent px-2 text-xs text-ink-faint hover:border-edge hover:bg-active hover:text-ink"
+            className="absolute right-3 top-1.5 inline-flex h-7 items-center gap-1 border border-transparent px-2 text-xs text-ink-faint hover:border-edge hover:bg-active hover:text-ink"
             data-testid="composer-show-copies"
             aria-label="Show Cc and Bcc fields"
             aria-expanded="false"

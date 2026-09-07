@@ -131,7 +131,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? `flex w-full flex-none flex-col overflow-hidden border border-edge bg-raised ${attachedToMessage ? 'rounded-b-[10px]' : 'rounded-xl shadow-composer'}`
+          ? `flex w-full flex-none flex-col overflow-hidden border border-edge bg-raised ${attachedToMessage ? '' : ' shadow-composer'}`
           : 'flex min-h-0 flex-1 flex-col bg-raised/35'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}

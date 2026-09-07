@@ -63,7 +63,7 @@ export function FollowUpControl({
         <div
           ref={popoverRef}
           tabIndex={-1}
-          className="absolute bottom-full left-0 z-30 mb-2 flex w-72 flex-col gap-1 rounded-lg border border-edge bg-raised p-2 shadow-2xl outline-none"
+          className="absolute bottom-full left-0 z-30 mb-2 flex w-72 flex-col gap-1 border border-edge bg-raised p-2 shadow-2xl outline-none"
           data-composer-transient
           data-testid="follow-up-popover"
           onKeyDown={(event) => {
@@ -78,7 +78,7 @@ export function FollowUpControl({
           </p>
           <button
             type="button"
-            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+            className="cursor-pointer px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
             data-testid="follow-up-preset-3d"
             onClick={() => choose(preset(3))}
           >
@@ -86,7 +86,7 @@ export function FollowUpControl({
           </button>
           <button
             type="button"
-            className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+            className="cursor-pointer px-2 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
             data-testid="follow-up-preset-1w"
             onClick={() => choose(preset(7))}
           >
@@ -94,7 +94,7 @@ export function FollowUpControl({
           </button>
           <div className="flex items-center gap-1.5 px-1 pt-1">
             <input
-              className="h-8 min-w-0 flex-1 rounded-md border border-edge bg-canvas px-2 text-xs text-ink outline-none focus:border-accent"
+              className="h-8 min-w-0 flex-1 border border-edge bg-canvas px-2 text-xs text-ink outline-none focus:border-accent"
               data-testid="follow-up-custom-input"
               aria-label="Custom follow-up deadline"
               placeholder="e.g. next Friday"
@@ -109,7 +109,7 @@ export function FollowUpControl({
             />
             <button
               type="button"
-              className="h-8 rounded-md bg-accent/20 px-2.5 text-xs font-semibold text-accent disabled:opacity-45"
+              className="h-8 bg-accent/20 px-2.5 text-xs font-semibold text-accent disabled:opacity-45"
               data-testid="follow-up-custom-confirm"
               disabled={!customValid}
               onClick={() => parsedCustom !== null && choose(parsedCustom)}
@@ -125,7 +125,7 @@ export function FollowUpControl({
           {followUpAt !== null && (
             <button
               type="button"
-              className="cursor-pointer rounded-md px-2 py-1.5 text-left text-xs text-ink-faint hover:bg-active hover:text-ink"
+              className="cursor-pointer px-2 py-1.5 text-left text-xs text-ink-faint hover:bg-active hover:text-ink"
               data-testid="follow-up-clear"
               onClick={() => choose(null)}
             >

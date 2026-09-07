@@ -89,7 +89,7 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
         {recipients.map((recipient) => (
           <span
             key={recipient.email}
-            className="inline-flex max-w-full items-center gap-1 rounded-md border border-edge bg-active px-2 py-1 text-xs text-ink"
+            className="inline-flex max-w-full items-center gap-1 border border-edge bg-active px-2 py-1 text-xs text-ink"
             data-email={recipient.email}
             data-testid="recipient-chip"
           >
@@ -150,13 +150,13 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
       </div>
 
       {invalid && (
-        <div className="absolute left-13 top-full z-20 mt-1 rounded-md bg-danger px-2 py-1 text-[11px] text-on-danger">
+        <div className="absolute left-13 top-full z-20 mt-1 bg-danger px-2 py-1 text-[11px] text-on-danger">
           {invalid} is not a valid email address
         </div>
       )}
 
       {suggestions.length > 0 && query.trim() && !invalid && (
-        <div className="absolute left-12 right-4 top-full z-10 mt-1 overflow-hidden rounded-lg border border-edge bg-raised shadow-2xl">
+        <div className="absolute left-12 right-4 top-full z-10 mt-1 overflow-hidden border border-edge bg-raised shadow-2xl">
           {suggestions.map((suggestion, index) => (
             <button
               key={suggestion.email}

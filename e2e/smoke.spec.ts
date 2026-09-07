@@ -208,7 +208,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
     // Opening the reader still marks mail read, even without a title-bar meter.
     await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(initialUnread - 1)
-    await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+    await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
     await page
       .getByTestId('conversation-content')

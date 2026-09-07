@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SearchCoverage } from '../../../shared/searchQuery'
+import { Kbd } from './Kbd'
 
 interface SearchHeaderProps {
   inputRef: React.RefObject<HTMLInputElement | null>
@@ -62,11 +63,11 @@ export function SearchHeader({
           Searching…
         </span>
       )}
-      <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
-        {queryFocused ? 'Enter Search' : 'Esc Edit'}
+      <span className="app-small-caps text-[11.5px] text-ink-faint">
+        <Kbd>{queryFocused ? 'Enter' : 'Esc'}</Kbd> {queryFocused ? 'search' : 'edit'}
       </span>
-      <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
-        {queryFocused ? 'Esc Close' : 'Enter Open'}
+      <span className="app-small-caps text-[11.5px] text-ink-faint">
+        <Kbd>{queryFocused ? 'Esc' : 'Enter'}</Kbd> {queryFocused ? 'close' : 'open'}
       </span>
     </div>
   )
@@ -87,5 +88,5 @@ export function searchCoverageText(coverage: SearchCoverage, partial = false): s
   // never reaches its denominator told the reader less than the rule does.
   if (coverage.bodiesOnDemand) gaps.push('Older mail is searched by sender and subject until you open it')
   if (!coverage.attachmentFlagsComplete) gaps.push('Attachment coverage is still filling')
-  return gaps.length > 0 ? gaps.join(' · ') : 'Local search coverage is complete'
+  return gaps.length > 0 ? gaps.join('. ') : 'Local search coverage is complete'
 }

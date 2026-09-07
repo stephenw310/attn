@@ -60,7 +60,7 @@ function RecipientLine({
       {open && (
         <div
           data-testid="recipient-details"
-          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-edge bg-active/60 p-3 text-xs text-ink-faint"
+          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border border-edge bg-active/60 p-3 text-xs text-ink-faint"
         >
           {groups
             .filter((group) => group.addresses.length > 0)
@@ -146,7 +146,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className={`border border-edge ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-sm bg-active' : 'rounded-sm bg-ground'}`}
+        className={`border border-edge ${hasInlineComposer ? 'border-b-0 bg-raised' : active ? 'bg-active' : 'bg-ground'}`}
       >
         <button
           type="button"
@@ -178,7 +178,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`border border-edge px-5 py-4 ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-[10px] bg-active/50' : 'rounded-[10px] bg-ground'}`}
+      className={`border border-edge px-5 py-4 ${hasInlineComposer ? 'border-b-0 bg-raised' : active ? 'bg-active/50' : 'bg-ground'}`}
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
@@ -211,7 +211,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                 onToggleCollapsed()
                 event.currentTarget.blur()
               }}
-              className="cursor-pointer rounded px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
+              className="cursor-pointer px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
             >
               <span aria-hidden>▴</span>
             </button>
@@ -236,7 +236,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       </div>
       <div
         data-testid="message-content"
-        className={`min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
+        className={`min-w-0 ${htmlSurface ? 'overflow-hidden bg-mail-light-ground' : ''}`}
       >
         <MessageBody
           bodyText={message.text}
@@ -275,7 +275,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                     download(attachment)
                     event.currentTarget.blur()
                   }}
-                  className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
+                  className={`cursor-pointer border px-3 py-2 text-left text-xs ${
                     htmlSurface
                       ? 'border-mail-light-edge bg-mail-light-raised text-mail-light-ink-dim hover:border-mail-light-edge-hover hover:text-mail-light-ink'
                       : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'

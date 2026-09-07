@@ -107,8 +107,7 @@ export function EditorToolbar(): React.JSX.Element {
     [editor, format, openLink, patchStyle]
   )
 
-  const button =
-    'cursor-pointer rounded px-2 py-1 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink'
+  const button = 'cursor-pointer px-2 py-1 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink'
   const menuButton = `${button} text-left`
 
   return (
@@ -158,7 +157,7 @@ export function EditorToolbar(): React.JSX.Element {
         </button>
         {linkOpen && (
           <form
-            className="absolute bottom-full left-0 z-30 mb-2 flex w-80 items-start gap-2 rounded-lg border border-edge bg-raised p-2 shadow-2xl"
+            className="absolute bottom-full left-0 z-30 mb-2 flex w-80 items-start gap-2 border border-edge bg-raised p-2 shadow-2xl"
             data-composer-transient
             data-testid="composer-link-popover"
             onSubmit={(event) => {
@@ -176,7 +175,7 @@ export function EditorToolbar(): React.JSX.Element {
               Link URL
               <input
                 ref={linkInputRef}
-                className="mt-1 h-8 w-full rounded-md border border-edge bg-canvas px-2 text-xs text-ink outline-none focus:border-accent"
+                className="mt-1 h-8 w-full border border-edge bg-canvas px-2 text-xs text-ink outline-none focus:border-accent"
                 data-testid="composer-link-url"
                 aria-invalid={linkInvalid ? 'true' : undefined}
                 value={linkValue}
@@ -189,7 +188,7 @@ export function EditorToolbar(): React.JSX.Element {
             </label>
             <button
               type="submit"
-              className="mt-[17px] h-8 rounded-md bg-accent/20 px-3 text-xs font-semibold text-accent"
+              className="mt-[17px] h-8 bg-accent/20 px-3 text-xs font-semibold text-accent"
             >
               Apply
             </button>
@@ -216,7 +215,7 @@ export function EditorToolbar(): React.JSX.Element {
             tabIndex={-1}
             role="dialog"
             aria-label="More formatting"
-            className="absolute bottom-full left-0 z-30 mb-2 w-64 rounded-lg border border-edge bg-raised p-2 shadow-2xl"
+            className="absolute bottom-full left-0 z-30 mb-2 w-64 border border-edge bg-raised p-2 shadow-2xl"
             data-composer-transient
             data-testid="composer-format-menu"
             onKeyDown={(event) => {
@@ -264,7 +263,7 @@ export function EditorToolbar(): React.JSX.Element {
                 <select
                   data-testid="composer-font-family"
                   aria-label="Font family"
-                  className="mt-1 h-8 w-full rounded-md border border-edge bg-canvas px-2 text-xs text-ink-dim"
+                  className="mt-1 h-8 w-full border border-edge bg-canvas px-2 text-xs text-ink-dim"
                   defaultValue=""
                   onChange={(event) => patchStyle('font-family', event.target.value)}
                 >
@@ -281,7 +280,7 @@ export function EditorToolbar(): React.JSX.Element {
                 <select
                   data-testid="composer-font-size"
                   aria-label="Font size"
-                  className="mt-1 h-8 w-full rounded-md border border-edge bg-canvas px-2 text-xs text-ink-dim"
+                  className="mt-1 h-8 w-full border border-edge bg-canvas px-2 text-xs text-ink-dim"
                   defaultValue=""
                   onChange={(event) => patchStyle('font-size', event.target.value)}
                 >

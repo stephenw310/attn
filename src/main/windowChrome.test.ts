@@ -25,7 +25,7 @@ describe('window chrome', () => {
       titleBarStyle: 'hidden',
       titleBarOverlay: {
         color: '#00000000',
-        symbolColor: '#9da2ac',
+        symbolColor: '#b8b2a5',
         height: TITLE_BAR_HEIGHT
       }
     }
@@ -34,9 +34,9 @@ describe('window chrome', () => {
   })
 
   it('keeps overlay symbols legible when the app theme changes', () => {
-    expect(titleBarOverlayOptions('dispatch-light', true).symbolColor).toBe('#555b66')
-    expect(titleBarOverlayOptions('dispatch-dark', false).symbolColor).toBe('#9da2ac')
-    expect(titleBarOverlayOptions('system', false).symbolColor).toBe('#555b66')
-    expect(titleBarOverlayOptions('system', true).symbolColor).toBe('#9da2ac')
+    expect(titleBarOverlayOptions('dispatch-light', true).symbolColor).toBe('#54432f')
+    expect(titleBarOverlayOptions('dispatch-dark', false).symbolColor).toBe('#b8b2a5')
+    expect(titleBarOverlayOptions('system', false).symbolColor).toBe('#54432f')
+    expect(titleBarOverlayOptions('system', true).symbolColor).toBe('#b8b2a5')
   })
 })

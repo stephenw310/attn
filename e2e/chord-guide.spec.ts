@@ -186,19 +186,27 @@ test('cancels pending chords before overlays stop keyboard propagation', async (
 })
 
 test('keeps the footer height fixed when reader shortcuts overflow', async ({ app, page }) => {
+  // The window cannot go below its 900px minimum, and the hint row fits there.
+  // Zooming shrinks the CSS viewport instead, which is also how a real user
+  // reaches this state.
   await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.setContentSize(900, 420)
+    const window = BrowserWindow.getAllWindows()[0]
+    window?.setContentSize(900, 420)
+    window?.webContents.setZoomFactor(1.15)
   })
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
   const footer = page.getByTestId('mail-footer')
   const shortcuts = page.getByTestId('footer-shortcuts')
   const initialHeight = await footer.evaluate((element) => element.getBoundingClientRect().height)
+  // `toEqual` compares numbers with Object.is, and a fractional zoomed height
+  // minus an integer clientHeight rounds to -0. `|| 0` normalises that; a real
+  // scrollbar is at least one pixel and still fails.
 
   await expect
     .poll(() =>
       shortcuts.evaluate((element) => ({
         overflows: element.scrollWidth > element.clientWidth,
-        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
+        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight) || 0
       }))
     )
     .toEqual({ overflows: true, scrollbarHeight: 0 })
@@ -212,7 +220,7 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
     .poll(() =>
       shortcuts.evaluate((element) => ({
         overflows: element.scrollWidth > element.clientWidth,
-        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
+        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight) || 0
       }))
     )
     .toEqual({ overflows: false, scrollbarHeight: 0 })
@@ -229,7 +237,7 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
     .poll(() =>
       shortcuts.evaluate((element) => ({
         overflows: element.scrollWidth > element.clientWidth,
-        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
+        scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight) || 0
       }))
     )
     .toEqual({ overflows: true, scrollbarHeight: 0 })
@@ -241,4 +249,7 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('conversation-view')).toHaveCount(0)
   await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1)
+  })
 })

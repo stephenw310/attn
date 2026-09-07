@@ -169,7 +169,7 @@ export function MovePicker({
             {startsGroup && (
               <div
                 data-testid={`move-section-${option.group}`}
-                className={`px-3 pb-1 text-[10px] font-semibold tracking-[0.14em] text-ink-faint uppercase ${
+                className={`px-3 pb-1 app-small-caps text-[12px] font-semibold text-accent ${
                   index === 0 ? 'pt-1' : 'mt-1 border-t border-edge pt-2.5'
                 }`}
               >
@@ -190,7 +190,7 @@ export function MovePicker({
               disabled={option.disabled}
               onMouseEnter={() => highlight.setIndex(index)}
               onClick={() => onMove(option.destination)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
                 index === highlight.index ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
               }`}
             >

@@ -138,7 +138,7 @@ export function MessageBody(props: MessageBodyProps): React.JSX.Element {
       <div
         data-testid="mail-quoted-section"
         hidden={!expanded}
-        className="order-3 min-w-0 overflow-hidden rounded-[10px] bg-mail-light-ground"
+        className="order-3 min-w-0 overflow-hidden bg-mail-light-ground"
       >
         <SingleMessageBody
           {...props}
@@ -343,7 +343,7 @@ function SingleMessageBody({
       {remoteImagesBanner && (
         <div
           data-testid="remote-images-banner"
-          className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-1.5 text-xs ${
+          className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 border px-3 py-1.5 text-xs ${
             surface === 'light'
               ? 'border-mail-light-ink-dim/30 text-mail-light-ink-dim'
               : 'border-edge text-ink-faint'

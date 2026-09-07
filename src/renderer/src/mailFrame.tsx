@@ -75,7 +75,7 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
     margin: 0;
     padding: 0;
     background: ${senderCanvas ? '#fff' : 'transparent'};
-    color: ${light ? '#202124' : '#e9eaee'};
+    color: ${light ? '#202124' : '#e9e4d8'};
   }
   html { overflow-x: auto; overflow-y: ${scrollable ? 'auto' : 'hidden'}; }
   body { overflow: visible; }
@@ -110,10 +110,10 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
       ? ''
       : `
   #attn-mail-body :is(blockquote, .gmail_quote) {
-    color: #9da2ac;
+    color: #b8b2a5;
   }
   #attn-mail-body a {
-    color: #60a5fa !important;
+    color: #93a8db !important;
   }`
   }
   img { max-width: 100%; height: auto; }

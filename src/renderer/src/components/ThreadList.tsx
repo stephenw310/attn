@@ -2,45 +2,10 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import type { MailLabel, ThreadListView } from '../../../shared/mail'
 import { dateGroup } from '../dateGroup'
 import type { DisplayThread } from '../list/mailDisplay'
+import { TornRule, TornStrip } from './Hand'
 
-const LABEL_PALETTE = [
-  {
-    backgroundColor: 'var(--attn-label-1-bg)',
-    borderColor: 'var(--attn-label-1-edge)',
-    color: 'var(--attn-label-1-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-2-bg)',
-    borderColor: 'var(--attn-label-2-edge)',
-    color: 'var(--attn-label-2-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-3-bg)',
-    borderColor: 'var(--attn-label-3-edge)',
-    color: 'var(--attn-label-3-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-4-bg)',
-    borderColor: 'var(--attn-label-4-edge)',
-    color: 'var(--attn-label-4-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-5-bg)',
-    borderColor: 'var(--attn-label-5-edge)',
-    color: 'var(--attn-label-5-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-6-bg)',
-    borderColor: 'var(--attn-label-6-edge)',
-    color: 'var(--attn-label-6-ink)'
-  }
-] as const
-
-function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {
-  let hash = 0
-  for (const character of labelId) hash = (hash * 31 + character.charCodeAt(0)) | 0
-  return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length]
-}
+/** Two label names read at a glance. A third would crowd the subject out. */
+const LABELS_SHOWN = 2
 
 function ThreadLabels({
   labelIds,
@@ -51,27 +16,42 @@ function ThreadLabels({
   labelsById: ReadonlyMap<string, MailLabel>
   onOpenLabel: (labelId: string) => void
 }): React.JSX.Element {
+  const named = labelIds.flatMap((labelId) => {
+    const label = labelsById.get(labelId)
+    return label ? [{ id: labelId, name: label.name }] : []
+  })
+  const hidden = named.length - LABELS_SHOWN
   return (
     <>
-      {labelIds.map((labelId) => {
-        const label = labelsById.get(labelId)
-        return label ? (
-          <button
-            type="button"
-            key={labelId}
-            data-testid="label-chip"
-            title={label.name}
-            className="max-w-24 flex-none cursor-pointer truncate rounded-[4px] border px-1.5 py-0.5 text-[10px] font-semibold leading-none"
-            style={labelColor(labelId)}
-            onClick={(event) => {
-              event.stopPropagation()
-              onOpenLabel(labelId)
-            }}
-          >
-            {label.name}
-          </button>
-        ) : null
-      })}
+      {named.slice(0, LABELS_SHOWN).map((label) => (
+        <button
+          type="button"
+          key={label.id}
+          data-testid="label-chip"
+          title={label.name}
+          className="app-small-caps app-no-drag max-w-20 shrink cursor-pointer truncate text-[12.5px] text-indigo"
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenLabel(label.id)
+          }}
+        >
+          {label.name}
+        </button>
+      ))}
+      {hidden > 0 && (
+        <span data-testid="label-overflow" className="flex-none">
+          <span aria-hidden>{`+${hidden}`}</span>
+          {/* A count alone tells a screen reader nothing, and a `title` is not
+              announced. Name the labels it stands for; each one is still
+              reachable as a view from the sidebar. */}
+          <span className="sr-only">
+            {`${hidden} more label${hidden === 1 ? '' : 's'}: ${named
+              .slice(LABELS_SHOWN)
+              .map((label) => label.name)
+              .join(', ')}`}
+          </span>
+        </span>
+      )}
     </>
   )
 }
@@ -80,27 +60,17 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
   return (
     <>
       {thread.returned && (
-        <span
-          data-testid="chip-returned"
-          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
-        >
+        <span data-testid="chip-returned" className="flex-none text-indigo italic">
           Returned
         </span>
       )}
       {thread.followUpReturned && (
-        <span
-          data-testid="chip-follow-up"
-          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
-        >
+        <span data-testid="chip-follow-up" className="flex-none text-indigo italic">
           Follow up
         </span>
       )}
       {thread.dueAt !== undefined && (
-        <span
-          data-testid="chip-snooze-due"
-          title={thread.dueLabel}
-          className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
-        >
+        <span data-testid="chip-snooze-due" title={thread.dueLabel} className="flex-none text-indigo italic">
           {thread.dueLabel}
         </span>
       )}
@@ -109,13 +79,13 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           data-testid="chip-follow-up-due"
           data-follow-up-awaiting={thread.followUpAwaiting ?? undefined}
           title={`Follow up if no reply — ${thread.followUpDueLabel}`}
-          className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
+          className="flex-none text-indigo italic"
         >
           {`Follow up ${thread.followUpDueLabel}`}
           {thread.followUpAwaiting === 'origin'
-            ? ' · reply check pending'
+            ? ', reply check pending'
             : thread.followUpAwaiting === 'snooze'
-              ? ' · after snooze'
+              ? ', after snooze'
               : ''}
         </span>
       )}
@@ -412,52 +382,76 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-starred={thread.starred || undefined}
         data-done={done || undefined}
         data-exiting={exiting || undefined}
-        className={`flex h-[46px] cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
-          selectionShown ? 'border-l-accent' : 'border-l-transparent'
-        } ${checked ? 'bg-accent/[0.12]' : selectionShown ? 'bg-accent/[0.07]' : ''} ${
-          exiting ? 'app-thread-exit' : ''
-        }`}
+        className={`relative isolate flex h-[46px] cursor-default select-none items-center gap-3.5 pr-7 pl-[30px] ${
+          checked ? 'bg-active' : ''
+        } ${exiting ? 'app-thread-exit' : ''}`}
         onClick={(event) => (event.shiftKey ? onExtendSelection(index) : onOpen(index))}
       >
+        {selectionShown && <TornStrip />}
         <span className="flex size-4 flex-none items-center justify-center self-center" aria-hidden>
           {checked ? (
-            <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+            <span className="flex size-4 items-center justify-center bg-accent text-[11px] font-bold text-on-accent">
               ✓
             </span>
           ) : (
-            <span className="app-thread-unread-dot size-1.5 rounded-full" />
+            <span className="app-thread-unread-dot size-[6px]" />
           )}
         </span>
         <span
           data-testid="thread-sender"
-          className="app-thread-sender w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap"
+          className="app-thread-sender w-44 flex-none overflow-hidden text-ellipsis whitespace-nowrap"
         >
           {thread.from}
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
+        <span className="flex min-w-0 flex-1 items-baseline gap-2.5 text-[13.5px] text-ink-faint">
           {thread.hasDraft && (
-            <span
-              data-testid="chip-draft"
-              className="flex-none rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent"
-            >
+            <span data-testid="chip-draft" className="flex-none text-indigo italic">
               Draft
             </span>
           )}
-          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} onOpenLabel={onOpenLabel} />
-          <span className="app-thread-star flex-none text-star" title="Starred">
-            ★
-          </span>
+          <ThreadStatusChips thread={thread} />
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-            <span data-testid="thread-subject" className="app-thread-subject">
+            <span data-testid="thread-subject" className="app-thread-subject text-[14.5px]">
               {thread.subject}
             </span>
             <span data-testid="thread-snippet"> — {thread.snippet}</span>
           </span>
         </span>
-        <span className="flex flex-none items-center gap-2.5 text-xs">
-          <ThreadStatusChips thread={thread} />
-          {thread.hasAttachment && <span title="Has attachment">📎</span>}
-          <span data-testid="thread-time" className="app-thread-time min-w-[70px] text-right tabular-nums">
+        <span className="flex min-w-0 shrink-[3] items-baseline gap-2.5 overflow-hidden text-[12.5px] text-ink-faint">
+          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} onOpenLabel={onOpenLabel} />
+        </span>
+        <span className="flex flex-none items-center gap-2.5">
+          <span className="app-thread-star flex-none text-star" title="Starred">
+            <svg
+              aria-hidden="true"
+              focusable="false"
+              viewBox="0 0 12 12"
+              className="size-3 fill-none stroke-current"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            >
+              <path d="M6 1v10M1.7 3.5l8.6 5M10.3 3.5l-8.6 5" />
+            </svg>
+          </span>
+          {thread.hasAttachment && (
+            <span title="Has attachment">
+              <svg
+                aria-hidden="true"
+                focusable="false"
+                viewBox="0 0 24 24"
+                className="size-[15px] fill-none stroke-current"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m19.4 11.1-7.3 7.3a4.2 4.2 0 0 1-6-6l8-8a2.8 2.8 0 0 1 4 4l-8 8a1.4 1.4 0 0 1-2-2l7.2-7.2" />
+              </svg>
+            </span>
+          )}
+          <span
+            data-testid="thread-time"
+            className="app-thread-time app-figures min-w-[62px] text-right text-[13px]"
+          >
             {thread.at}
           </span>
           {view === 'allMail' && (
@@ -486,12 +480,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <div
           key={`group:${groupKey}`}
           data-testid="thread-date-group"
-          className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
+          className={`absolute right-0 left-0 flex h-[44px] items-end gap-3 pr-7 pb-2 pl-[30px] ${
             projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
           } ${groupRemoved ? 'app-thread-exit' : ''}`}
           style={{ top: projectedGroupTop ?? entry.top + entry.dividerHeight }}
         >
-          {group}
+          <span className="app-small-caps flex-none text-[12.5px] text-accent">{group}</span>
+          <TornRule className="mb-1.5 flex-1" />
         </div>
       )
     }
@@ -560,7 +555,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           <div
             data-testid="thread-section-divider"
             data-section="gmail"
-            className={`absolute right-0 left-0 flex h-[34px] items-center gap-3 px-7 text-[11px] font-semibold tracking-wide text-ink-faint uppercase ${
+            className={`app-small-caps absolute right-0 left-0 flex h-[34px] items-center gap-3 pr-7 pl-[30px] text-[12px] text-ink-faint ${
               projected?.dividerBeforeIndex !== undefined ? 'app-thread-position-shift' : ''
             }`}
             style={{
@@ -570,9 +565,9 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
                   : projected.layout[projected.dividerBeforeIndex]?.top
             }}
           >
-            <span className="h-px flex-1 bg-edge" />
-            <span>{sectionDivider.label}</span>
-            <span className="h-px flex-1 bg-edge" />
+            <TornRule className="flex-1" />
+            <span className="flex-none">{sectionDivider.label}</span>
+            <TornRule className="flex-1" />
           </div>
         )}
         {mountedEntries.flatMap(renderThread)}

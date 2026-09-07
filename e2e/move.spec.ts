@@ -42,7 +42,7 @@ test('moves from Inbox to a label, auto-advances, and moves that label to Done',
   await expect(rows).toHaveCount(7)
   await expect(rows.first()).toContainText('Your receipt')
   await expect(rows.first()).toHaveAttribute('data-selected', 'true')
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
   await page.getByTestId('sidebar-label').filter({ hasText: 'projects' }).click()
   const roadmap = rows.filter({ hasText: 'Q3 roadmap review' })
@@ -53,7 +53,7 @@ test('moves from Inbox to a label, auto-advances, and moves that label to Done',
   await expect(page.locator('[data-label-id="Label_2"]')).toHaveCount(0)
   await page.getByTestId('move-done').click()
   await expect(roadmap).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('2 letters waiting')
 })
 
 test('moves a frozen bulk selection and restores every prior label with one undo', async ({ page }) => {
@@ -66,11 +66,11 @@ test('moves a frozen bulk selection and restores every prior label with one undo
   await chooseMoveLabel(page, 'travel')
   await expect(rows).toHaveCount(5)
   await expect(page.getByTestId('selection-count')).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('3 letters waiting')
 
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(8)
-  await expect(page.getByTestId('pending-count')).toContainText('6 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('6 letters waiting')
   await expect(rows.filter({ hasText: 'Q3 roadmap review' }).getByTestId('label-chip')).toHaveCount(0)
   await expect(rows.filter({ hasText: 'Your receipt' }).getByTestId('label-chip')).toHaveText('receipts')
   await expect(rows.filter({ hasText: 'Design notes' }).getByTestId('label-chip')).toHaveText('projects')
@@ -98,7 +98,7 @@ test('keeps All Mail membership, status, and unrelated labels after Move', async
   await expect(design.getByTestId('label-chip')).toHaveCount(2)
   await expect(design.getByTestId('label-chip').filter({ hasText: 'projects' })).toBeVisible()
   await expect(design.getByTestId('label-chip').filter({ hasText: 'receipts' })).toBeVisible()
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 })
 
 test('moves through Spam, Trash, and Inbox with one Gmail label delta per move', async ({ page }) => {
@@ -110,7 +110,7 @@ test('moves through Spam, Trash, and Inbox with one Gmail label delta per move',
   await openMove(page)
   await page.getByTestId('move-spam').click()
   await expect(roadmap).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
   await goTo(page, 'p')
   await expect(page.getByTestId('view-title')).toHaveText('Spam')
@@ -133,7 +133,7 @@ test('moves through Spam, Trash, and Inbox with one Gmail label delta per move',
 
   await goTo(page, 'i')
   await expect(roadmap).toBeVisible()
-  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('3 letters waiting')
 
   await page.keyboard.press('z')
   await expect(roadmap).toHaveCount(0)
@@ -161,7 +161,7 @@ test('uses the same exclusive Spam and Trash transitions for direct shortcuts', 
   await page.getByTestId('thread-list').focus()
   await page.keyboard.press('#')
   await expect(roadmap).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('3 letters waiting')
 
   await page.keyboard.press('z')
   await expect(roadmap).toHaveCount(0)

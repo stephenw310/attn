@@ -53,7 +53,7 @@ export function PickerDialog({
         role="dialog"
         aria-label={ariaLabel}
         aria-modal="true"
-        className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden border border-edge bg-raised shadow-dialog"
         onKeyDownCapture={(event) => {
           if (event.key !== 'Escape') return
           event.preventDefault()
@@ -84,7 +84,7 @@ export function PickerDialog({
               }
             }}
             placeholder={searchPlaceholder}
-            className="w-full rounded-lg border border-edge bg-ground px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+            className="w-full border border-edge bg-ground px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
           />
         </div>
         <div data-testid={optionsTestId} className="max-h-[320px] overflow-y-auto p-1.5">

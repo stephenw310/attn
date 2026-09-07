@@ -67,7 +67,20 @@ Initial sync fetches recent Inbox bodies. Older bodies and attachment bytes down
 
 ### D6. Layout and themes
 
-The default visual direction uses graphite backgrounds, an amber accent, and the `attn:` wordmark. Built-in themes share semantic color tokens.
+The visual direction is ink on vellum. The light palette is warm paper; the dark palette is indigo-black
+stock. Rubric red carries marginalia — section headings, date groups, key hints, the unread mark, the view
+title's initial — and indigo carries secondary marks such as label names and draft or follow-up notes.
+Built-in themes share semantic color tokens.
+
+Type has three roles. Alegreya Sans sets the rows, where the eye does its work. Grenze sets the view titles.
+Grenze Gotisch sets the wordmark and the title initial. Counts use old-style figures; section headings, date
+groups and label names use small capitals rather than uppercased text. Corners are square throughout.
+
+A seeded canvas paints the sheet behind the window: fibre, flecks, mottling, and the darker band the sidebar
+is written on, torn down its right edge. The same hand draws the rules under date groups and above the
+footer, the torn strip of wash marking the row the keyboard is on, and the wax seal beside the wordmark. All
+of it is decorative and generated from fixed seeds, so it never moves between renders and never carries
+information a reader needs.
 
 A 216-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader.
 
@@ -158,7 +171,7 @@ old bodies or attachments. The durable listing count remains cursor bookkeeping 
 progress; page-level `resultSizeEstimate` is not a mailbox total and must never be used as the denominator.
 Contact statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
-never contribute to contacts. While the pass runs, sync status reads **Live · indexing older mail** with
+never contribute to contacts. While the pass runs, sync status reads **Scribes copying the archive** with
 progress and quota-wait detail. Importing a user's saved Google Contacts through the People API remains a
 separate opt-in product decision because it adds OAuth scope and consent requirements; autocomplete must not
 imply that the mail-derived index contains an address book the user has never emailed.
@@ -186,8 +199,8 @@ A capped sweep is usable but not complete. Keep `capped:lifetime[:page-token]` a
 durable so a raised limit resumes without duplicate counting. Show capped coverage separately from
 ongoing indexing and from an exhausted `done` cursor, with Gmail search available for older mail.
 
-After interactive readiness, the footer reports **Live · indexing older mail** rather than a blocking
-“Syncing” state. The lifetime line reads **X of Y threads indexed · time remaining**, where X is the account's
+After interactive readiness, the footer reports **Scribes copying the archive** rather than a blocking
+unpacking state. The lifetime line reads **X of Y threads copied, time remaining**, where X is the account's
 unique local thread count and Y is the current profile thread total. The ETA estimates time to the local
 sweep limit or the account total, whichever is smaller; disabling the limit uses the account total. No ETA
 is shown once that target is reached or when the account total is unknown. The footer also exposes an
@@ -203,7 +216,7 @@ their unread counts; the top bar has no unread-progress meter.
 
 Conflict rule: server state wins, except locally-pending actions replay on top of it.
 
-**Sync visibility:** local-first hides the network, so the app must say what the network is doing. The footer carries a persistent sync status — **Live**, **Checking**, **Syncing** (with backfill stage progress), **Offline**, or **Error** — distinguishing "network down, local mail fully usable" from "sync is failing". The error state opens details with **Retry now** and **Copy details** actions (both also registered commands); offline failures retry automatically when connectivity returns. The top bar shows "N pending" whenever local actions await server replay.
+**Sync visibility:** local-first hides the network, so the app must say what the network is doing. The footer carries a persistent sync status in the app's own voice — **All letters received** (idle), **Courier at the gate** (checking), **Courier unpacking …** (with backfill stage progress), **Scribes copying the archive** (lifetime indexing, **Scribes resting** while it waits to retry), **No road out** (offline), or **Courier turned back** (error) — distinguishing "network down, local mail fully usable" from "sync is failing". The `data-status` attribute keeps the plain state names: `live`, `checking`, `syncing`, `indexing`, `offline`, `error`. The error state opens details with **Retry now** and **Copy details** actions (both also registered commands); offline failures retry automatically when connectivity returns. That voice covers what the app reports about itself. Mailboxes, settings, splits, commands and every other control keep their product names. The top bar shows "N letters waiting" whenever local actions await server replay.
 
 **Acceptance criteria**
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.
@@ -212,7 +225,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 - Historical-limit changes survive restart, preserve cached mail and unrelated sync cursors, and apply
   only to the selected account. Raising a cap restores attachment flags for newly indexed older mail;
   an unchanged or lower reached cap performs no additional lifetime Gmail requests.
-- Losing the network mid-session flips the status to Offline while reads and triage keep working; restoring it returns to Live and drains the queue with no user action.
+- Losing the network mid-session flips the status to **No road out** while reads and triage keep working; restoring it returns to **All letters received** and drains the queue with no user action.
 
 ### F3 — Inbox list & conversation view
 
@@ -231,7 +244,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 - In the list, `J`/`K` and unmodified `ArrowUp`/`ArrowDown` move the selection.
 - `Enter` or clicking a row opens the **full-window conversation** at a responsive readable measure (576–896px), positioned at its newest message or restored thread-bound draft. Its header contains a visible Back/List control, subject, quiet queue position ("4 of 12"), and `Esc` hint. The newest message is expanded; older messages start as one-line summaries and their bodies (including HTML frames) are not mounted until expanded. Clicking an expanded message's header collapses it into that same summary row; clicking the summary reopens it.
 - While reading, `J`/`K` opens the next/previous conversation at its newest message or restored draft; at the first conversation, `K` returns to the full-width list instead of remaining in the reader. The adjacent conversations are fetched into the local renderer cache beforehand so this usually has no loading state. Unmodified `ArrowUp`/`ArrowDown`, `Space`/`Shift+Space`, and `PageUp`/`PageDown` scroll the current conversation, while `Shift+ArrowUp`/`Shift+ArrowDown` extend the selection exactly as `Shift+J`/`Shift+K` do — the arrow aliases behave the same in the list and the reader. Modifier+key chords retain their platform/browser meaning. Keyboard handling continues after clicking recipient, attachment, or trim controls and while focus is inside an HTML-mail frame; `Enter` on a focused mail link retains its native link action. Unless a transient overlay consumes it first, `Esc` or Back/List returns to the full-width list from every Tab stop—including focused buttons and mail links—with selection and scroll intact.
-- **Message display:** each message card shows the sender, with the active account rendered consistently as `Me` before and after send confirmation, plus a recipient summary ("to me, Priya · cc Daniel") that expands on click to the full From/To/Cc/Bcc/Reply-To set with the full date, the body, and attachment chips (filename + size — click downloads to the OS Downloads folder and reveals the file). The actual outgoing `From` header uses the primary Gmail send-as display name so recipients see the configured identity. Bare HTTP(S) and `www.` URLs in plain text or unlinked HTML text render as external links. Quoted trails and signatures auto-collapse behind a plain-text `...` control rendered inline at the trim boundary; the control stays in place while expanding/collapsing and a second click collapses again. `Tab` always retains native focus navigation across the product. For collapsed HTML mail, the `...` control precedes links inside the mail frame in keyboard order; reaching it reveals the hidden trail without changing the reading viewport dimensions, and the next Tab continues into the mail links. Revealing a long trail makes the existing reading surface scroll instead of growing the window. Text-like HTML and fallback text use Attn's padded native reading surface. Typography, media, tables, dimensions, alignment, and layout-only CSS remain native because they do not require a white document. Meaningful inline text colors remain distinct on the native dark surface, with low-contrast hues brightened and ordinary dark foregrounds normalized to the native text color. Uncolored quoted text is dimmed so preserved answer colors remain easy to distinguish. HTML whose rendered meaning depends on the winning non-neutral background or background image keeps a light document canvas shared by its body, trim control, and attachments. Attn does not add padding inside light documents; sender-authored body padding still takes precedence. Light HTML body containers use the message card's 10px corner radius. Decorative markup confined to a signature does not promote the message. A real authored canvas inside a quoted trail is content and retains the light treatment, while ordinary quoted formatting does not turn every later reply white. Wide mail gets an in-frame horizontal scrollbar, and the conversation reserves its vertical scrollbar gutter so expanding content does not shift the reader. Bcc appears only on the user's own sent copies — Gmail never exposes other senders' Bcc.
+- **Message display:** each message card shows the sender, with the active account rendered consistently as `Me` before and after send confirmation, plus a recipient summary ("to me, Priya · cc Daniel") that expands on click to the full From/To/Cc/Bcc/Reply-To set with the full date, the body, and attachment chips (filename + size — click downloads to the OS Downloads folder and reveals the file). The actual outgoing `From` header uses the primary Gmail send-as display name so recipients see the configured identity. Bare HTTP(S) and `www.` URLs in plain text or unlinked HTML text render as external links. Quoted trails and signatures auto-collapse behind a plain-text `...` control rendered inline at the trim boundary; the control stays in place while expanding/collapsing and a second click collapses again. `Tab` always retains native focus navigation across the product. For collapsed HTML mail, the `...` control precedes links inside the mail frame in keyboard order; reaching it reveals the hidden trail without changing the reading viewport dimensions, and the next Tab continues into the mail links. Revealing a long trail makes the existing reading surface scroll instead of growing the window. Text-like HTML and fallback text use Attn's padded native reading surface. Typography, media, tables, dimensions, alignment, and layout-only CSS remain native because they do not require a white document. Meaningful inline text colors remain distinct on the native dark surface, with low-contrast hues brightened and ordinary dark foregrounds normalized to the native text color. Uncolored quoted text is dimmed so preserved answer colors remain easy to distinguish. HTML whose rendered meaning depends on the winning non-neutral background or background image keeps a light document canvas shared by its body, trim control, and attachments. Attn does not add padding inside light documents; sender-authored body padding still takes precedence. Light HTML body containers share the message card's square corners. Decorative markup confined to a signature does not promote the message. A real authored canvas inside a quoted trail is content and retains the light treatment, while ordinary quoted formatting does not turn every later reply white. Wide mail gets an in-frame horizontal scrollbar, and the conversation reserves its vertical scrollbar gutter so expanding content does not shift the reader. Bcc appears only on the user's own sent copies — Gmail never exposes other senders' Bcc.
 - Bodies for the selected and adjacent conversations are preloaded so opening never shows a spinner.
 - **Auto-advance:** after done/snooze/trash, selection (and the open reader) moves to the next conversation automatically (setting: next / previous / back to list).
 

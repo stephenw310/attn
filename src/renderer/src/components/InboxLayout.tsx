@@ -3,17 +3,19 @@ import type { InboxController } from '../hooks/useInboxController'
 import { type MailView, userLabelId } from '../list/mailDisplay'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
+import { PaperSheet } from './Hand'
 import { InboxOverlays } from './InboxOverlays'
 import { InboxZero } from './InboxZero'
 import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
-import { MailSidebar } from './MailSidebar'
+import { MailSidebar, SIDEBAR_WIDTH } from './MailSidebar'
 import { OutboxList } from './OutboxList'
 import { SearchHeader, searchCoverageText } from './SearchHeader'
 import { ServerSearchRow } from './ServerSearchRow'
 import { SettingsView } from './SettingsView'
 import { SplitStrip } from './SplitStrip'
 import { ThreadList } from './ThreadList'
+import { ViewTitle } from './ViewTitle'
 
 function threadListKind(view: MailView): ThreadListView | 'label' {
   if (userLabelId(view)) return 'label'
@@ -24,6 +26,7 @@ function threadListKind(view: MailView): ThreadListView | 'label' {
 export function InboxLayout({ controller: c }: { controller: InboxController }): React.JSX.Element {
   return (
     <div className="flex h-full flex-col">
+      <PaperSheet bandWidth={c.sidebarCollapsed ? 0 : SIDEBAR_WIDTH} />
       <MailHeader
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
@@ -127,12 +130,11 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
           onSubmit={c.search.submit}
         />
       ) : (
-        <div
-          data-testid="mail-view-header"
-          className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
-        >
-          <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
-            <span data-testid="view-title">{c.activeViewTitle}</span>
+        <div data-testid="mail-view-header" className="flex h-[44px] flex-none items-center pr-7 pl-[60px]">
+          <h1 data-testid="mailbox-title" className="font-serif text-[27px] leading-none text-ink">
+            <span data-testid="view-title">
+              <ViewTitle title={c.activeViewTitle} />
+            </span>
           </h1>
           <button
             type="button"
@@ -140,7 +142,7 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
             aria-label="Search mail"
             title="Search mail (/)"
             onClick={c.openSearch}
-            className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+            className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 px-2 py-1 text-[13px] text-ink-faint hover:text-ink"
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
               <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />

@@ -1,12 +1,12 @@
 /* Shared by app chrome and the scriptless mail-frame document. */
 :root {
-  --attn-scrollbar-thumb: #b8b2a7;
-  --attn-scrollbar-thumb-hover: #8e887d;
+  --attn-scrollbar-thumb: #bdae8e;
+  --attn-scrollbar-thumb-hover: #9c8b68;
 }
 
 :root[data-theme-appearance="dark"] {
-  --attn-scrollbar-thumb: #41444d;
-  --attn-scrollbar-thumb-hover: #666b77;
+  --attn-scrollbar-thumb: #3b414f;
+  --attn-scrollbar-thumb-hover: #59606f;
 }
 
 ::-webkit-scrollbar {

@@ -41,7 +41,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
         aria-labelledby="snooze-title"
         data-testid="snooze-picker"
         tabIndex={-1}
-        className="fixed top-1/2 left-1/2 z-[60] w-[min(430px,90vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-edge bg-raised p-3 shadow-dialog focus:outline-none"
+        className="fixed top-1/2 left-1/2 z-[60] w-[min(430px,90vw)] -translate-x-1/2 -translate-y-1/2 border border-edge bg-raised p-3 shadow-dialog focus:outline-none"
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             event.preventDefault()
@@ -79,7 +79,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
               data-testid={`snooze-preset-${preset.id}`}
               data-active={activeIndex === index || undefined}
               tabIndex={-1}
-              className={`flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
+              className={`flex cursor-pointer items-center justify-between px-2.5 py-2 text-left text-sm ${
                 activeIndex === index ? 'bg-active text-ink' : ''
               }`}
               onClick={() => onConfirm(preset.dueAt)}
@@ -97,7 +97,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
               data-testid="snooze-unsnooze"
               data-active={activeIndex === presets.length || undefined}
               tabIndex={-1}
-              className={`flex w-full cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm ${
+              className={`flex w-full cursor-pointer items-center justify-between px-2.5 py-2 text-left text-sm ${
                 activeIndex === presets.length ? 'bg-active text-ink' : ''
               }`}
               onClick={onUnsnooze}
@@ -118,7 +118,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
               data-testid="snooze-input"
               value={custom}
               placeholder="thu 2pm or in 3 days"
-              className="min-w-0 flex-1 rounded-lg border border-edge bg-ground px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+              className="min-w-0 flex-1 border border-edge bg-ground px-3 py-2 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
               onChange={(event) => setCustom(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
@@ -137,7 +137,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
               type="button"
               data-testid="snooze-custom-confirm"
               disabled={customDueAt === null}
-              className="cursor-pointer rounded-lg bg-accent px-3 text-sm font-semibold text-ground disabled:cursor-default disabled:opacity-35"
+              className="cursor-pointer bg-accent px-3 text-sm font-semibold text-ground disabled:cursor-default disabled:opacity-35"
               onClick={() => customDueAt !== null && onConfirm(customDueAt)}
             >
               Snooze
