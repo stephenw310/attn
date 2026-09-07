@@ -159,8 +159,9 @@
     background: var(--color-ground);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    /* Alegreya Sans runs a smaller x-height than Inter at the same size. */
-    font-size: 15px;
+    /* Alegreya Sans runs a smaller x-height than Inter at the same size, and
+       the design is drawn at 16px. */
+    font-size: 16px;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -343,10 +344,6 @@
 
 /* Row flags key off data attributes so keyboard feedback can land in the same
    event turn, before the local SQLite round-trip confirms the React state. */
-.app-thread-unread-dot {
-  background: transparent;
-}
-
 .app-thread-sender {
   color: var(--color-ink-faint);
 }
@@ -363,12 +360,8 @@
   display: none;
 }
 
-/* An unread row is marked the way a reader marks one: a square of red in the
-   margin, and weight in the line itself. */
-[data-unread="true"] .app-thread-unread-dot {
-  background: var(--color-accent);
-}
-
+/* An unread row is marked the way a scribe marks one: weight and ink in the
+   line itself, with nothing in the margin. */
 [data-unread="true"] .app-thread-sender {
   color: var(--color-ink-dim);
   font-weight: 700;

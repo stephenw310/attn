@@ -129,7 +129,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('queue-readout')).toHaveCount(0)
     await expect(page.getByTestId('pending-count')).toHaveCount(0)
     await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knavigate')
-    await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
+    await expect(page.getByTestId('footer-shortcut-open')).toContainText('↵open')
     for (const [id, text] of [
       ['done', 'Edone'],
       ['compose', 'Ccompose'],

@@ -19,7 +19,7 @@ export function ViewTitle({ title }: { title: string }): React.JSX.Element {
   const initial = firstGrapheme(title)
   return (
     <>
-      <span className="font-gotisch text-[30px] text-accent">{initial}</span>
+      <span className="font-gotisch text-[50px] text-accent">{initial}</span>
       {title.slice(initial.length)}
     </>
   )

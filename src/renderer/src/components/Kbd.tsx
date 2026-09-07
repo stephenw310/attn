@@ -11,7 +11,11 @@ export function Kbd({
   compact?: boolean
 }): React.JSX.Element {
   return (
-    <kbd className={`app-small-caps font-semibold text-accent ${compact ? 'text-[11px]' : 'text-[11.5px]'}`}>
+    <kbd
+      // The key takes the size of the line it sits in, as a lettered key does;
+      // small capitals already set it a little below the surrounding text.
+      className={`app-small-caps font-semibold text-accent ${compact ? 'text-[0.86em]' : ''}`}
+    >
       {children}
     </kbd>
   )

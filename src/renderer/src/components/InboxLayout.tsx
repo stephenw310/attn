@@ -31,9 +31,10 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
         outboxCount={c.realOutbox.length}
-        selectionCount={c.searchOpen || (c.view !== 'drafts' && c.view !== 'outbox') ? c.selectedIds.size : 0}
+        selectionCount={selectedForCount(c)}
         composerOpen={c.fullWindowComposerDraft !== null}
         sidebarCollapsed={c.sidebarCollapsed}
+        accountInHeader={c.sidebarCollapsed || c.fullWindowComposerDraft !== null}
         status={c.status}
         accountStatuses={c.accounts.accountStatuses}
         onReconnectActions={c.accounts.reconnectActions}
@@ -53,7 +54,9 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         className={`min-h-0 flex-1 ${c.fullWindowComposerDraft ? 'hidden' : 'flex'}`}
         aria-hidden={!!c.fullWindowComposerDraft}
       >
-        {!c.sidebarCollapsed && (
+        {/* A full-window composer hides this column. Unmount the sidebar with
+            it so the account line it carries is not left in the page twice. */}
+        {!c.sidebarCollapsed && !c.fullWindowComposerDraft && (
           <MailSidebar
             view={c.view}
             labels={c.labels}
@@ -62,6 +65,14 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             outboxCount={c.realOutbox.length}
             onSwitchView={c.switchView}
             onOpenOutbox={c.openOutbox}
+            status={c.status}
+            accountStatuses={c.accounts.accountStatuses}
+            onSwitchAccount={c.accounts.switchAccount}
+            onAddAccount={c.accounts.addAccount}
+            onRemoveAccount={c.accounts.requestRemoveAccount}
+            onOpenSettings={() => c.openSettings(null)}
+            onOpenCheatSheet={c.openCheatSheet}
+            accountActionsBlocked={c.accountActionsBlocked}
           />
         )}
         {c.settingsOpen && c.activeAccount && (
@@ -115,6 +126,12 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
   )
 }
 
+/** Rows the keyboard has checked, only in the views that can check them. */
+function selectedForCount(c: InboxController): number {
+  if (c.fullWindowComposerDraft) return 0
+  return c.searchOpen || (c.view !== 'drafts' && c.view !== 'outbox') ? c.selectedIds.size : 0
+}
+
 function MailboxTop({ controller: c }: { controller: InboxController }): React.JSX.Element | null {
   if (c.readerOpen || c.fullWindowComposerDraft) return null
   return (
@@ -130,34 +147,29 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
           onSubmit={c.search.submit}
         />
       ) : (
-        <div data-testid="mail-view-header" className="flex h-[44px] flex-none items-center pr-7 pl-[60px]">
-          <h1 data-testid="mailbox-title" className="font-serif text-[27px] leading-none text-ink">
+        <div
+          data-testid="mail-view-header"
+          className="app-drag flex h-[68px] flex-none items-baseline gap-5 pt-4 pr-7 pl-[60px]"
+        >
+          <h1 data-testid="mailbox-title" className="font-serif text-[44px] leading-none text-ink">
             <span data-testid="view-title">
               <ViewTitle title={c.activeViewTitle} />
             </span>
           </h1>
-          <button
-            type="button"
-            data-testid="search-open"
-            aria-label="Search mail"
-            title="Search mail (/)"
-            onClick={c.openSearch}
-            className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 px-2 py-1 text-[13px] text-ink-faint hover:text-ink"
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
-              <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
-              <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-            <span>/</span>
-          </button>
+          <span data-testid="view-count" className="app-figures flex-none text-[16px] text-ink-faint">
+            {`${c.conversationThreadCount.toLocaleString()}${c.conversationThreadCountExact ? '' : '+'} ${
+              c.conversationThreadCount === 1 ? 'conversation' : 'conversations'
+            }`}
+          </span>
         </div>
       )}
-      {!c.searchOpen && c.view === 'inbox' && c.splits.state && (
+      {!c.searchOpen && (
         <SplitStrip
-          splits={c.splits.state.splits}
+          splits={c.view === 'inbox' ? (c.splits.state?.splits ?? []) : []}
           activeSplitId={c.splits.activeSplitId}
           onSelect={c.switchSplit}
           onManage={() => c.setSplitRulesOpen(true)}
+          onOpenSearch={c.openSearch}
         />
       )}
     </>

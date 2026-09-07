@@ -29,7 +29,7 @@ function ThreadLabels({
           key={label.id}
           data-testid="label-chip"
           title={label.name}
-          className="app-small-caps app-no-drag max-w-20 shrink cursor-pointer truncate text-[12.5px] text-indigo"
+          className="app-small-caps app-no-drag max-w-24 shrink cursor-pointer truncate text-indigo"
           onClick={(event) => {
             event.stopPropagation()
             onOpenLabel(label.id)
@@ -60,17 +60,21 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
   return (
     <>
       {thread.returned && (
-        <span data-testid="chip-returned" className="flex-none text-indigo italic">
+        <span data-testid="chip-returned" className="app-small-caps flex-none text-accent">
           Returned
         </span>
       )}
       {thread.followUpReturned && (
-        <span data-testid="chip-follow-up" className="flex-none text-indigo italic">
+        <span data-testid="chip-follow-up" className="app-small-caps flex-none text-accent">
           Follow up
         </span>
       )}
       {thread.dueAt !== undefined && (
-        <span data-testid="chip-snooze-due" title={thread.dueLabel} className="flex-none text-indigo italic">
+        <span
+          data-testid="chip-snooze-due"
+          title={thread.dueLabel}
+          className="app-small-caps flex-none text-accent"
+        >
           {thread.dueLabel}
         </span>
       )}
@@ -79,7 +83,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           data-testid="chip-follow-up-due"
           data-follow-up-awaiting={thread.followUpAwaiting ?? undefined}
           title={`Follow up if no reply — ${thread.followUpDueLabel}`}
-          className="flex-none text-indigo italic"
+          className="app-small-caps flex-none text-accent"
         >
           {`Follow up ${thread.followUpDueLabel}`}
           {thread.followUpAwaiting === 'origin'
@@ -393,31 +397,35 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
             <span className="flex size-4 items-center justify-center bg-accent text-[11px] font-bold text-on-accent">
               ✓
             </span>
-          ) : (
-            <span className="app-thread-unread-dot size-[6px]" />
-          )}
+          ) : null}
         </span>
         <span
           data-testid="thread-sender"
-          className="app-thread-sender w-44 flex-none overflow-hidden text-ellipsis whitespace-nowrap"
+          className="app-thread-sender w-48 flex-none overflow-hidden text-ellipsis whitespace-nowrap text-[15px]"
         >
           {thread.from}
         </span>
-        <span className="flex min-w-0 flex-1 items-baseline gap-2.5 text-[13.5px] text-ink-faint">
+        <span className="flex min-w-0 flex-1 items-baseline gap-3 text-[14.5px] text-ink-faint">
           {thread.hasDraft && (
-            <span data-testid="chip-draft" className="flex-none text-indigo italic">
+            <span data-testid="chip-draft" className="app-small-caps flex-none text-accent">
               Draft
             </span>
           )}
           <ThreadStatusChips thread={thread} />
-          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-            <span data-testid="thread-subject" className="app-thread-subject text-[14.5px]">
-              {thread.subject}
-            </span>
-            <span data-testid="thread-snippet"> — {thread.snippet}</span>
+          {/* Subject and snippet are two columns with a gap between them, not one
+              run of text joined by a dash: a long subject squeezes the snippet
+              rather than pushing it off the row. */}
+          <span
+            data-testid="thread-subject"
+            className="app-thread-subject max-w-[52%] flex-none truncate text-[16px]"
+          >
+            {thread.subject}
+          </span>
+          <span data-testid="thread-snippet" className="min-w-0 flex-1 truncate">
+            {thread.snippet}
           </span>
         </span>
-        <span className="flex min-w-0 shrink-[3] items-baseline gap-2.5 overflow-hidden text-[12.5px] text-ink-faint">
+        <span className="flex min-w-0 shrink-[3] items-baseline gap-3 overflow-hidden text-[13.5px] text-ink-faint">
           <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} onOpenLabel={onOpenLabel} />
         </span>
         <span className="flex flex-none items-center gap-2.5">
@@ -450,7 +458,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           )}
           <span
             data-testid="thread-time"
-            className="app-thread-time app-figures min-w-[62px] text-right text-[13px]"
+            className="app-thread-time app-figures min-w-[66px] text-right text-[14px]"
           >
             {thread.at}
           </span>
@@ -485,7 +493,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           } ${groupRemoved ? 'app-thread-exit' : ''}`}
           style={{ top: projectedGroupTop ?? entry.top + entry.dividerHeight }}
         >
-          <span className="app-small-caps flex-none text-[12.5px] text-accent">{group}</span>
+          <span className="app-small-caps flex-none text-[14px] text-accent">{group}</span>
           <TornRule className="mb-1.5 flex-1" />
         </div>
       )
@@ -555,7 +563,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           <div
             data-testid="thread-section-divider"
             data-section="gmail"
-            className={`app-small-caps absolute right-0 left-0 flex h-[34px] items-center gap-3 pr-7 pl-[30px] text-[12px] text-ink-faint ${
+            className={`app-small-caps absolute right-0 left-0 flex h-[34px] items-center gap-3 pr-7 pl-[30px] text-[13px] text-ink-faint ${
               projected?.dividerBeforeIndex !== undefined ? 'app-thread-position-shift' : ''
             }`}
             style={{

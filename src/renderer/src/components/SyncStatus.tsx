@@ -198,7 +198,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
     <>
       <span className="app-status-dot row-start-1 size-[7px] rounded-full" aria-hidden />
       <span
-        className={`row-start-1 whitespace-nowrap text-[13px] font-semibold ${
+        className={`row-start-1 whitespace-nowrap text-[14px] font-semibold ${
           displayState === 'error' ? 'text-danger' : 'text-ink-dim'
         }`}
       >
@@ -219,12 +219,12 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
                 'aria-valuemax': lifetimeTotal,
                 'aria-valuenow': sync.threadsDone
               })}
-          className="col-start-2 row-start-2 whitespace-nowrap text-[10.5px] leading-[11px] text-ink-faint"
+          className="col-start-2 row-start-2 whitespace-nowrap text-[11.5px] leading-[13px] text-ink-faint"
         >
           {detail}
         </span>
       ) : (
-        <span className="col-start-2 row-start-2 text-[10.5px] leading-[11px] text-ink-faint">{detail}</span>
+        <span className="col-start-2 row-start-2 text-[11.5px] leading-[13px] text-ink-faint">{detail}</span>
       )}
     </>
   )
@@ -234,7 +234,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       ref={wrapRef}
       data-testid="status-note"
       data-status={displayState}
-      className="relative ml-auto flex min-w-[196px] flex-none justify-end"
+      className="relative ml-auto flex min-w-[210px] flex-none justify-end"
       title={title}
     >
       <span className="sr-only" aria-live="polite">
@@ -244,7 +244,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
         <button
           type="button"
           data-testid="status-error-button"
-          className="grid w-fit cursor-pointer grid-cols-[7px_auto] grid-rows-[18px_11px] items-center gap-x-2 text-left"
+          className="grid w-fit cursor-pointer grid-cols-[7px_auto] grid-rows-[20px_13px] items-center gap-x-2 text-left"
           aria-expanded={detailsOpen}
           aria-controls="sync-error-details"
           onClick={() => setDetailsOpen((open) => !open)}
@@ -254,7 +254,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       ) : (
         <div
           data-testid="status-content"
-          className="grid w-fit grid-cols-[7px_auto] grid-rows-[18px_11px] items-center gap-x-2"
+          className="grid w-fit grid-cols-[7px_auto] grid-rows-[20px_13px] items-center gap-x-2"
         >
           {body}
         </div>

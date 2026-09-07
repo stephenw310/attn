@@ -183,7 +183,10 @@ test('classifies once, navigates locally, and restores each split selection', as
   await allMail.focus()
   await expect(allMail).toBeFocused()
   await expect(page.getByTestId('view-title')).toHaveText('All Mail')
-  await expect(strip).toHaveCount(0)
+  // The strip row keeps its place for the search affordance; only the split
+  // tabs and their manager belong to the Inbox.
+  await expect(tabs).toHaveCount(0)
+  await expect(page.getByTestId('split-rules-settings')).toHaveCount(0)
   await page.keyboard.press('Tab')
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')
   await expect(strip).toBeVisible()

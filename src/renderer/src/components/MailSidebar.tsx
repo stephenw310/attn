@@ -1,3 +1,4 @@
+import type { AccountSyncStatus, AuthStatus } from '../../../shared/auth'
 import type { MailboxView, MailLabel, SystemMailboxCounts } from '../../../shared/mail'
 import { COMMAND_SPECS } from '../commands'
 import {
@@ -8,8 +9,8 @@ import {
   VIEW_TITLES
 } from '../list/mailDisplay'
 import { formatShortcut } from '../platform'
+import { AccountMenu } from './AccountMenu'
 import { Seal, TornRule } from './Hand'
-import { Kbd } from './Kbd'
 
 /** The width of the darker stock the sidebar is written on. `PaperSheet` tears
     the sheet at this offset, so the two have to agree. */
@@ -54,29 +55,24 @@ function NavButton({
       data-testid={testId}
       data-active={active || undefined}
       aria-current={active ? 'page' : undefined}
+      title={shortcut ? `${title} (${formatShortcut(shortcut)})` : title}
       onClick={onClick}
-      className={`group relative flex min-h-8 w-full cursor-pointer items-baseline gap-2 pr-1 pl-3.5 text-left text-[15px] ${
+      className={`group relative flex min-h-[30px] w-full cursor-pointer items-baseline gap-2 pr-1 pl-3.5 text-left text-[16px] ${
         active ? 'font-bold text-ink' : 'text-ink-dim hover:text-ink'
       }`}
     >
       {/* The mark a reader leaves in the margin against the line they are on. */}
       {active && <span aria-hidden className="absolute top-[7px] left-0 h-4 w-[3px] bg-accent" />}
       <span className="min-w-0 flex-1 truncate">{title}</span>
-      {(shortcut || count != null) && (
-        <span className="app-figures w-10 flex-none text-right text-[13px]">
-          {count !== undefined && count !== null && (
-            <span
-              data-testid="sidebar-count"
-              data-count={count}
-              title={count.toLocaleString()}
-              className={count > 0 ? 'text-ink-dim' : 'text-ink-faint'}
-            >
-              {compactCount(count)}
-            </span>
-          )}
+      {count !== undefined && count !== null && (
+        <span
+          data-testid="sidebar-count"
+          data-count={count}
+          className={`app-figures flex-none text-[14px] ${count > 0 ? 'text-ink-dim' : 'text-ink-faint'}`}
+        >
+          {compactCount(count)}
         </span>
       )}
-      {shortcut && <Kbd>{formatShortcut(shortcut)}</Kbd>}
     </button>
   )
 }
@@ -89,10 +85,34 @@ interface MailSidebarProps {
   outboxCount: number
   onSwitchView: (view: NavigableMailView) => void
   onOpenOutbox: () => void
+  status: AuthStatus
+  accountStatuses: readonly AccountSyncStatus[] | null
+  onSwitchAccount: (accountId: string) => void
+  onAddAccount: () => void
+  onRemoveAccount: () => void
+  onOpenSettings: () => void
+  onOpenCheatSheet: () => void
+  accountActionsBlocked: boolean
 }
 
 export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
-  const { view, labels, mailboxCounts, draftCount, outboxCount, onSwitchView, onOpenOutbox } = props
+  const {
+    view,
+    labels,
+    mailboxCounts,
+    draftCount,
+    outboxCount,
+    onSwitchView,
+    onOpenOutbox,
+    status,
+    accountStatuses,
+    onSwitchAccount,
+    onAddAccount,
+    onRemoveAccount,
+    onOpenSettings,
+    onOpenCheatSheet,
+    accountActionsBlocked
+  } = props
   const activeLabelId = userLabelId(view)
 
   return (
@@ -104,7 +124,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
       aria-label="Mail navigation"
     >
       <div data-testid="sidebar-brand" className="flex-none px-1">
-        <div className="font-gotisch flex items-center gap-2.5 text-[34px] leading-none text-ink">
+        <div className="font-gotisch flex items-center gap-2.5 text-[40px] leading-none text-ink">
           attn
           <Seal letter="a" />
         </div>
@@ -112,7 +132,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
       </div>
       <nav className="mt-5 flex flex-none flex-col gap-0.5" aria-label="Mailboxes">
         <div className="flex min-h-7 items-center px-1">
-          <h2 className="app-small-caps text-[13px] text-accent">Mailboxes</h2>
+          <h2 className="app-small-caps text-[14px] text-accent">Mailboxes</h2>
         </div>
         {MAILBOX_ITEMS.map((item) => (
           <NavButton
@@ -136,10 +156,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
       </nav>
 
       <div className="mt-6 flex min-h-0 flex-1 flex-col">
-        <h2 className="app-small-caps flex items-center justify-between px-1 pb-1.5 text-[13px] text-accent">
-          <span>Labels</span>
-          <span className="app-figures text-ink-faint">{labels.length}</span>
-        </h2>
+        <h2 className="app-small-caps px-1 pb-1.5 text-[14px] text-accent">Labels</h2>
         <nav data-testid="sidebar-labels" className="min-h-0 overflow-y-auto" aria-label="Labels">
           {labels.length === 0 ? (
             <p className="px-1 py-2 text-[13px] text-ink-faint">No labels</p>
@@ -157,6 +174,20 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
             </div>
           )}
         </nav>
+      </div>
+
+      <div className="mt-4 flex-none pt-3">
+        <AccountMenu
+          placement="sidebar"
+          status={status}
+          accountStatuses={accountStatuses}
+          onSwitchAccount={onSwitchAccount}
+          onAddAccount={onAddAccount}
+          onRemoveAccount={onRemoveAccount}
+          onOpenSettings={onOpenSettings}
+          onOpenCheatSheet={onOpenCheatSheet}
+          accountActionsBlocked={accountActionsBlocked}
+        />
       </div>
     </aside>
   )

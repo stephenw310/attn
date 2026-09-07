@@ -1,20 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SplitSummary } from '../../../shared/splits'
 import { TornRule } from './Hand'
+import { Kbd } from './Kbd'
 
 interface SplitStripProps {
   splits: readonly SplitSummary[]
   activeSplitId: string | null
   onSelect: (id: string) => void
   onManage: () => void
+  onOpenSearch: () => void
 }
 
+/**
+ * The strip under the view title. Inbox splits sit at its left when the
+ * account has any; the way into search always sits at its right, so it keeps
+ * one place on the page whatever mailbox is open.
+ */
 export function SplitStrip({
   splits,
   activeSplitId,
   onSelect,
-  onManage
-}: SplitStripProps): React.JSX.Element | null {
+  onManage,
+  onOpenSearch
+}: SplitStripProps): React.JSX.Element {
   const [overflowOpen, setOverflowOpen] = useState(false)
   const overflowRef = useRef<HTMLDivElement>(null)
   const { visibleSplits, overflowSplits } = useMemo(() => {
@@ -46,10 +54,14 @@ export function SplitStrip({
     }
   }, [overflowOpen])
 
-  if (splits.length <= 1) return null
+  const tabbed = splits.length > 1
   return (
-    <div data-testid="split-strip" className="flex h-10 flex-none items-stretch pl-[60px]">
-      <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 overflow-x-auto">
+    <div data-testid="split-strip" className="flex h-11 flex-none items-stretch pr-7 pl-[60px]">
+      <div
+        role="tablist"
+        aria-label="Inbox splits"
+        className={`flex min-w-0 overflow-x-auto ${tabbed ? '' : 'hidden'}`}
+      >
         {visibleSplits.map((split) => {
           const active = split.id === activeSplitId
           return (
@@ -62,9 +74,7 @@ export function SplitStrip({
               data-active={active || undefined}
               aria-selected={active}
               title={`${split.total.toLocaleString()} conversations`}
-              // Every tab keeps one weight: the rule and the ink mark the
-              // active split, and a weight change would move the tabs beside it.
-              className={`app-no-drag relative flex flex-none cursor-pointer items-baseline gap-2 px-3 pt-2 pb-2.5 text-[15px] font-medium ${
+              className={`app-no-drag relative flex flex-none cursor-pointer items-baseline gap-2 px-3 pt-2 pb-2.5 text-[16px] ${
                 active ? 'text-ink' : 'text-ink-dim hover:text-ink'
               }`}
               onClick={(event) => {
@@ -72,8 +82,15 @@ export function SplitStrip({
                 event.currentTarget.blur()
               }}
             >
-              <span>{split.name}</span>
-              <span className="app-figures w-8 flex-none text-left text-[13px] text-ink-faint">
+              {/* A bold copy underneath reserves the active width, so switching
+                  splits cannot move the tabs beside it. */}
+              <span className="grid">
+                <span aria-hidden className="invisible col-start-1 row-start-1 font-bold">
+                  {split.name}
+                </span>
+                <span className={`col-start-1 row-start-1 ${active ? 'font-bold' : ''}`}>{split.name}</span>
+              </span>
+              <span className="app-figures w-8 flex-none text-left text-[14px] text-ink-faint">
                 {split.unread > 0 && (
                   <span data-testid="split-unread-count" data-count={split.unread}>
                     {split.unread > 999 ? '999+' : split.unread}
@@ -89,27 +106,29 @@ export function SplitStrip({
           )
         })}
       </div>
-      <button
-        type="button"
-        data-testid="split-rules-settings"
-        aria-label="Manage Inbox splits"
-        title="Manage Inbox splits"
-        onClick={onManage}
-        className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center text-ink-faint hover:text-ink"
-      >
-        <svg
-          aria-hidden
-          viewBox="0 0 24 24"
-          className="size-4 fill-none stroke-current"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+      {tabbed && (
+        <button
+          type="button"
+          data-testid="split-rules-settings"
+          aria-label="Manage Inbox splits"
+          title="Manage Inbox splits"
+          onClick={onManage}
+          className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center text-ink-faint hover:text-ink"
         >
-          <title>Manage Inbox splits</title>
-          <rect x="3" y="4" width="18" height="16" rx="2" />
-          <path d="M9 4v16M15 4v16" />
-        </svg>
-      </button>
+          <svg
+            aria-hidden
+            viewBox="0 0 24 24"
+            className="size-4 fill-none stroke-current"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <title>Manage Inbox splits</title>
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M9 4v16M15 4v16" />
+          </svg>
+        </button>
+      )}
       {overflowSplits.length > 0 && (
         <div ref={overflowRef} className="relative flex-none">
           <button
@@ -140,16 +159,30 @@ export function SplitStrip({
                     setOverflowOpen(false)
                     onSelect(split.id)
                   }}
-                  className="flex w-full cursor-pointer items-center justify-between gap-4 px-2.5 py-1.5 text-left text-xs text-ink-dim hover:bg-active hover:text-ink"
+                  className="flex w-full cursor-pointer items-center justify-between gap-4 px-2.5 py-1.5 text-left text-[15px] text-ink-dim hover:text-ink"
                 >
                   <span>{split.name}</span>
-                  {split.unread > 0 && <span className="tabular-nums text-accent">{split.unread}</span>}
+                  {split.unread > 0 && <span className="app-figures text-accent">{split.unread}</span>}
                 </button>
               ))}
             </div>
           )}
         </div>
       )}
+      <button
+        type="button"
+        data-testid="search-open"
+        aria-label="Search mail"
+        title="Search mail (/)"
+        onClick={onOpenSearch}
+        className="app-no-drag relative ml-auto flex flex-none cursor-pointer items-baseline gap-4 self-center pb-2 text-[15px] text-ink-faint hover:text-ink"
+      >
+        <span>Search the archive</span>
+        <Kbd>/</Kbd>
+        <span className="absolute right-0 bottom-0 left-0 block">
+          <TornRule />
+        </span>
+      </button>
     </div>
   )
 }
