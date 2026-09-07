@@ -125,12 +125,12 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
   return (
     <>
       <div
-        className="flex min-h-10 shrink-0 items-center border-b border-edge px-4"
+        className="flex min-h-11 shrink-0 items-baseline gap-4 border-b border-edge px-6 pt-2 pb-1.5"
         data-testid="composer-from"
         data-email={draft.accountId}
       >
-        <span className="w-10 shrink-0 text-sm font-medium text-ink-faint">From</span>
-        <span className="min-w-0 truncate text-sm text-ink">{draft.accountId}</span>
+        <span className="app-small-caps w-14 shrink-0 text-[13.5px] text-accent">From</span>
+        <span className="min-w-0 truncate text-[16px] text-ink">{draft.accountId}</span>
       </div>
       <div className="relative">
         <RecipientField
@@ -148,7 +148,7 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
         {!props.showCopies && (
           <button
             type="button"
-            className="absolute right-3 top-1.5 inline-flex h-7 items-center gap-1 border border-transparent px-2 text-xs text-ink-faint hover:border-edge hover:bg-active hover:text-ink"
+            className="app-small-caps absolute top-2 right-5 inline-flex h-7 items-center gap-1 px-1 text-[13px] text-ink-faint hover:text-ink"
             data-testid="composer-show-copies"
             aria-label="Show Cc and Bcc fields"
             aria-expanded="false"
@@ -197,7 +197,7 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
       )}
       {mode === 'full' && (
         <input
-          className="h-12 shrink-0 border-b border-edge bg-transparent px-4 text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
+          className="font-serif h-14 shrink-0 border-b border-edge bg-transparent px-6 text-[26px] text-ink outline-none placeholder:text-ink-faint"
           data-testid="composer-subject"
           aria-label="Subject"
           placeholder="Subject"

@@ -150,3 +150,30 @@ export function sealPath(seed = 0x5ea1): string {
   sealCache.set(seed, path)
   return path
 }
+
+/**
+ * The outline of a scrap of paper torn on all four edges. Unlike the rules and
+ * the strip, this one is generated at its true pixel size rather than stretched
+ * from a nominal box: a scrap is squarish, so scaling one axis would leave the
+ * tear coarse along one edge and fine along the other.
+ */
+export function tornScrapPath(width: number, height: number, seed = 0x5c1a9): string {
+  if (width <= 0 || height <= 0) return ''
+  const random = seededRandom(seed)
+  const step = 4
+  const amplitude = 2.6
+  const top = tornEdgeAt(random, wobbler(random, amplitude), 3.2, width, step)
+  const bottom = tornEdgeAt(random, wobbler(random, amplitude), 3.2, width, step)
+  const left = tornEdgeAt(random, wobbler(random, amplitude), 3.2, height, step)
+  const right = tornEdgeAt(random, wobbler(random, amplitude), 3.2, height, step)
+  const parts: string[] = []
+  const at = (x: number, y: number): void => {
+    parts.push(`${parts.length === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`)
+  }
+  for (let x = 0; x <= width; x += step) at(x, 4 + top(x))
+  for (let y = 0; y <= height; y += step) at(width - 4 + right(y), y)
+  for (let x = width; x >= 0; x -= step) at(x, height - 4 + bottom(x))
+  for (let y = height; y >= 0; y -= step) at(4 + left(y), y)
+  parts.push('Z')
+  return parts.join(' ')
+}

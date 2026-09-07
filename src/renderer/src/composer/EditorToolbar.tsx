@@ -107,12 +107,12 @@ export function EditorToolbar(): React.JSX.Element {
     [editor, format, openLink, patchStyle]
   )
 
-  const button = 'cursor-pointer px-2 py-1 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink'
+  const button = 'cursor-pointer px-1.5 py-1 text-[16px] text-accent hover:text-ink'
   const menuButton = `${button} text-left`
 
   return (
     <div
-      className="flex min-w-0 flex-1 flex-nowrap items-center gap-0.5"
+      className="flex min-w-0 flex-1 flex-nowrap items-center gap-2.5"
       role="toolbar"
       aria-label="Formatting toolbar"
     >
@@ -123,25 +123,25 @@ export function EditorToolbar(): React.JSX.Element {
         title={`Bold (${modKeyLabel()}B)`}
         onClick={() => format('bold')}
       >
-        B
+        <span className="font-bold">B</span>
       </button>
       <button
         type="button"
-        className={`${button} italic`}
+        className={button}
         aria-label="Italic"
         title={`Italic (${modKeyLabel()}I)`}
         onClick={() => format('italic')}
       >
-        I
+        <span className="italic">I</span>
       </button>
       <button
         type="button"
-        className={`${button} underline`}
+        className={button}
         aria-label="Underline"
         title={`Underline (${modKeyLabel()}U)`}
         onClick={() => format('underline')}
       >
-        U
+        <span className="underline underline-offset-[3px]">U</span>
       </button>
       <div className="relative">
         <button

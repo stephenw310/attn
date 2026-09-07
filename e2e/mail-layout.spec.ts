@@ -10,8 +10,8 @@ test('separates native, centered, and full-bleed sender canvases', async ({ page
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
-  await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '20px')
-  await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '20px')
+  await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '4px')
+  await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '4px')
   await expect
     .poll(() =>
       page.getByTestId('conversation-content').evaluate((content) => {

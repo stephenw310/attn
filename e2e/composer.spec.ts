@@ -237,11 +237,13 @@ test('inserts the saved Gmail signature collapsed and reveals it for editing', a
   await page.screenshot({ path })
   await testInfo.attach('composer-signature-collapsed', { path, contentType: 'image/png' })
 
+  // A letter is written as prose, so the body is set in the text serif at
+  // reading size rather than in the chrome's sans.
   await expect
     .poll(() => composer.editor.evaluate((element) => getComputedStyle(element).fontFamily))
-    .toContain('Inter Variable')
-  await expect(composer.editor).toHaveCSS('font-size', '13px')
-  await expect(composer.editor).toHaveCSS('line-height', '20px')
+    .toContain('Alegreya')
+  await expect(composer.editor).toHaveCSS('font-size', '17px')
+  await expect(composer.editor).toHaveCSS('line-height', '28px')
   await composer.revealSignature()
   await expect(signature).toHaveCSS('margin-top', '20px')
   await expect(signature.locator('p').first()).toHaveCSS('margin-bottom', '0px')

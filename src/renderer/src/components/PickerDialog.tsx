@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { HighlightedOption } from '../hooks/useHighlightedOption'
+import { ScrapEdge } from './Hand'
 
 interface PickerDialogProps {
   testId: string
@@ -53,7 +54,7 @@ export function PickerDialog({
         role="dialog"
         aria-label={ariaLabel}
         aria-modal="true"
-        className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden border border-edge bg-raised shadow-dialog"
+        className="fixed top-[18vh] left-1/2 isolate z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col"
         onKeyDownCapture={(event) => {
           if (event.key !== 'Escape') return
           event.preventDefault()
@@ -61,6 +62,7 @@ export function PickerDialog({
           onClose()
         }}
       >
+        <ScrapEdge />
         <div className="border-b border-edge p-3">
           <input
             ref={inputRef}

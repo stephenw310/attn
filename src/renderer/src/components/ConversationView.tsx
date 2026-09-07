@@ -288,7 +288,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           message={message}
           account={account}
           active={activeMessageId === message.id}
-          hasInlineComposer={Boolean(inlineComposer && inlineComposerSourceMessageId === message.id)}
           bodyHydrationMessage={bodyHydrationStatusMessage(
             message.bodyState,
             online,
@@ -446,23 +445,23 @@ export const ConversationView = memo(function ConversationView(
   }, [pendingFocusMessageId, scrollRef])
 
   return (
-    <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
-      <div className="flex items-center gap-4 border-b border-edge px-6 pt-3 pb-3">
+    <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col">
+      <div className="flex items-baseline gap-4 px-6 pt-4 pb-3">
         <button
           type="button"
           data-testid="conversation-back"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+          className="app-no-drag flex cursor-pointer items-baseline gap-1.5 px-1 text-[15px] text-ink-dim hover:text-ink"
           onClick={onClose}
         >
           <span aria-hidden>←</span> {mailboxTitle}
         </button>
         <h1
           data-testid="conversation-subject"
-          className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-lg font-bold tracking-tight"
+          className="font-serif min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[30px] leading-none text-ink"
         >
           {conversation?.subject ?? selected.subject}
         </h1>
-        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
+        <span className="flex flex-none items-baseline gap-2 text-[14px] text-ink-faint">
           <span data-testid="conversation-position" className="tabular-nums">
             {selectedIndex + 1} of {threadCount}
             {threadCountExact ? '' : '+'}
@@ -479,7 +478,7 @@ export const ConversationView = memo(function ConversationView(
         {conversation || inlineComposer ? (
           <div
             data-testid="conversation-content"
-            className="mx-auto flex w-full flex-col gap-3.5"
+            className="mx-auto flex w-full flex-col"
             style={{ maxWidth: 'clamp(576px, 57.6vw, 896px)' }}
           >
             <ConversationMessages

@@ -81,10 +81,10 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
 
   return (
     <div
-      className="relative flex min-h-10 items-start border-b border-edge px-4"
+      className="relative flex min-h-11 items-start gap-4 border-b border-edge px-6"
       data-testid={`composer-${field}`}
     >
-      <span className="w-10 shrink-0 pt-2.5 text-sm font-medium text-ink-faint">{label}</span>
+      <span className="app-small-caps w-14 shrink-0 pt-2.5 text-[13.5px] text-accent">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-1.5">
         {recipients.map((recipient) => (
           <span

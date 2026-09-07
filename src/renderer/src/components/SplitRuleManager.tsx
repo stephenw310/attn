@@ -12,6 +12,7 @@ import {
   type SplitState,
   type SplitSummary
 } from '../../../shared/splits'
+import { ScrapEdge } from './Hand'
 
 interface SplitRuleManagerProps {
   state: SplitState
@@ -360,8 +361,9 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
         aria-modal="true"
         aria-labelledby="split-rules-title"
         data-testid="split-rules"
-        className="relative flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col overflow-hidden border border-edge bg-raised shadow-dialog"
+        className="relative isolate flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col"
       >
+        <ScrapEdge />
         <header className="flex h-14 flex-none items-center border-b border-edge px-5">
           <div>
             <h2 id="split-rules-title" className="text-sm font-semibold text-ink">

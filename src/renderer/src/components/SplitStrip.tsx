@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SplitSummary } from '../../../shared/splits'
-import { TornRule } from './Hand'
+import { ScrapEdge, TornRule } from './Hand'
 import { Kbd } from './Kbd'
 
 interface SplitStripProps {
@@ -145,8 +145,9 @@ export function SplitStrip({
           {overflowOpen && (
             <div
               data-testid="split-overflow-menu"
-              className="absolute top-full right-1 z-50 mt-1 min-w-48 border border-edge bg-raised p-1.5 shadow-menu"
+              className="absolute top-full right-1 isolate z-50 mt-1 min-w-48 p-2.5"
             >
+              <ScrapEdge />
               {overflowSplits.map((split) => (
                 <button
                   key={split.id}

@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SplitSummary } from '../../../shared/splits'
-import alpineDawn from '../assets/inbox-zero/alpine-dawn.jpg'
-import coastalDusk from '../assets/inbox-zero/coastal-dusk.jpg'
-import forestMorning from '../assets/inbox-zero/forest-morning.jpg'
 import { INBOX_ZERO_CLOCK_INTERVAL_MS } from '../tuning'
+import { Seal } from './Hand'
 
-const BACKGROUNDS = [alpineDawn, coastalDusk, forestMorning] as const
 const AFFIRMATIONS = ['All clear.', 'You are caught up.', 'Done for now.'] as const
 
 export function inboxZeroRotation(date: Date): number {
   const day = Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000)
-  return day % BACKGROUNDS.length
+  return day % AFFIRMATIONS.length
 }
 
 function currentTime(date: Date): string {
@@ -51,30 +48,24 @@ export function InboxZero({
       className="relative min-h-0 flex-1 overflow-hidden outline-none"
       aria-label="Inbox zero"
     >
-      <img
-        src={BACKGROUNDS[rotation]}
-        alt=""
-        aria-hidden="true"
-        className="absolute inset-0 size-full object-cover"
-      />
-      <div className="app-inbox-zero-scrim absolute inset-0" aria-hidden="true" />
-      <div className="app-inbox-zero-copy relative flex h-full items-center justify-center p-8 text-center">
-        <section data-testid="inbox-zero-message" className="app-inbox-zero-card w-full max-w-xl px-8 py-9">
-          <p className="app-small-caps text-sm font-semibold">Inbox zero</p>
+      <div className="relative flex h-full items-center justify-center p-8 text-center">
+        <section data-testid="inbox-zero-message" className="w-full max-w-lg">
+          <p className="app-small-caps text-[15px] tracking-[0.09em] text-accent">Inbox zero</p>
           <time
-            className="mt-2 block text-5xl font-semibold tracking-tight tabular-nums"
+            className="font-serif app-figures mt-1 block text-[74px] leading-[82px] text-ink"
             dateTime={now.toISOString()}
           >
             {currentTime(now)}
           </time>
-          <p className="app-inbox-zero-muted mt-3 text-base">{AFFIRMATIONS[rotation]}</p>
+          <p className="font-letter mt-1 text-[20px] text-ink-dim italic">{AFFIRMATIONS[rotation]}</p>
+          <div className="mt-7 flex justify-center">
+            <Seal letter="a" />
+          </div>
 
           {remaining.length > 0 ? (
-            <div className="mt-8 border-t border-current/20 pt-5">
-              <p className="app-inbox-zero-muted app-small-caps text-[13px] font-semibold">
-                Conversations elsewhere
-              </p>
-              <div data-testid="inbox-zero-remaining" className="mt-3 flex flex-wrap justify-center gap-2">
+            <div className="mt-9">
+              <p className="app-small-caps text-[14px] text-accent">Letters elsewhere</p>
+              <div data-testid="inbox-zero-remaining" className="mx-auto mt-4 flex max-w-sm flex-col">
                 {remaining.map((split) => (
                   <button
                     key={split.id}
@@ -82,15 +73,21 @@ export function InboxZero({
                     data-testid="inbox-zero-split"
                     data-split-id={split.id}
                     onClick={() => onSelectSplit(split.id)}
-                    className="app-inbox-zero-chip cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium tabular-nums"
+                    className="flex cursor-pointer items-baseline justify-between gap-4 border-t border-edge py-2 text-[16px] text-ink-dim first:border-t-0 hover:text-ink"
                   >
-                    {split.name}: {split.total.toLocaleString()} total
+                    <span>{split.name}</span>
+                    <span className="app-figures text-[14.5px] text-ink-faint">
+                      {`${split.total.toLocaleString()} waiting`}
+                    </span>
                   </button>
                 ))}
               </div>
             </div>
           ) : (
-            <p data-testid="inbox-zero-all-clear" className="app-inbox-zero-muted mt-8 text-xs">
+            <p
+              data-testid="inbox-zero-all-clear"
+              className="font-letter mt-8 text-[15px] text-ink-faint italic"
+            >
               Every split is clear.
             </p>
           )}

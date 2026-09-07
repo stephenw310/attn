@@ -1,4 +1,7 @@
 @import "@fontsource-variable/inter";
+@import "@fontsource/alegreya/400.css";
+@import "@fontsource/alegreya/400-italic.css";
+@import "@fontsource/alegreya/700.css";
 @import "@fontsource/alegreya-sans/400.css";
 @import "@fontsource/alegreya-sans/400-italic.css";
 @import "@fontsource/alegreya-sans/500.css";
@@ -28,6 +31,7 @@
   --color-status-live: var(--attn-status-live);
   --color-status-offline: var(--attn-status-offline);
   --color-indigo: var(--attn-indigo);
+  --color-leaf: var(--attn-leaf);
   --color-overlay: var(--attn-overlay);
   --color-mail-link: var(--attn-mail-link);
   --color-mail-light-link: #1a73e8;
@@ -50,6 +54,9 @@
     "Alegreya Sans", "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
   --font-serif: Grenze, "Iowan Old Style", Georgia, serif;
+  /* A letter is read as prose, so it is set in the text serif Alegreya Sans was
+     drawn to pair with. The list is scanned as a table and stays in the sans. */
+  --font-letter: Alegreya, "Iowan Old Style", Georgia, serif;
   --font-gotisch: "Grenze Gotisch", Grenze, Georgia, serif;
 }
 
@@ -58,6 +65,9 @@
     --attn-ground: #15171e;
     --attn-raised: #101218;
     --attn-band: #101218;
+    --attn-leaf: #1e222c;
+    --attn-scrap-shadow: rgb(0 0 0 / 55%);
+    --attn-enclosure-shadow: rgb(0 0 0 / 46%);
     --attn-active: #22252e;
     --attn-edge: #2c303b;
     --attn-ink: #e9e4d8;
@@ -107,6 +117,9 @@
     --attn-ground: #e9dec6;
     --attn-raised: #ddceac;
     --attn-band: #ddceac;
+    --attn-leaf: #f2ead7;
+    --attn-scrap-shadow: rgb(70 52 28 / 34%);
+    --attn-enclosure-shadow: rgb(70 52 28 / 30%);
     --attn-active: #ded0b0;
     --attn-edge: #c9b791;
     --attn-ink: #2a2015;
@@ -221,6 +234,33 @@
 
 .app-seal {
   color: var(--color-accent);
+}
+
+/* The message the keyboard is on is marked in the margin, the way a reader
+   marks a page, rather than by tinting the letter itself. */
+.app-message-active::before {
+  position: absolute;
+  top: 22px;
+  left: -14px;
+  width: 3px;
+  height: 18px;
+  background: var(--color-accent);
+  content: "";
+}
+
+/* The sender's own page arrives as a printed enclosure: guillotined edges and
+   a hard shadow, so it reads as something that came in the post rather than as
+   part of the letter around it. Ours is torn; theirs is cut. */
+.app-enclosure {
+  box-shadow:
+    0 14px 30px var(--attn-enclosure-shadow),
+    0 0 0 1px rgb(0 0 0 / 14%);
+}
+
+/* A scrap of paper: its own stock, and the shadow of a leaf laid on the desk. */
+.app-scrap {
+  fill: var(--color-leaf);
+  filter: drop-shadow(0 14px 26px var(--attn-scrap-shadow));
 }
 
 /* Fixed photo-overlay colors keep contrast stable across both app themes. */

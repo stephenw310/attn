@@ -84,7 +84,6 @@ interface MessageCardProps {
   account: string | null
   collapsed?: boolean
   active?: boolean
-  hasInlineComposer?: boolean
   onToggleCollapsed?: () => void
   trimExpanded?: boolean
   onToggleTrim: () => void
@@ -98,7 +97,6 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     account,
     collapsed = false,
     active = false,
-    hasInlineComposer = false,
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
@@ -146,7 +144,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className={`border border-edge ${hasInlineComposer ? 'border-b-0 bg-raised' : active ? 'bg-active' : 'bg-ground'}`}
+        className="border-t border-edge"
       >
         <button
           type="button"
@@ -157,13 +155,13 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             onToggleCollapsed?.()
             event.currentTarget.blur()
           }}
-          className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-5 py-3 text-left hover:bg-active/50"
+          className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 px-1 py-2.5 text-left text-ink-faint hover:text-ink-dim"
         >
-          <span className="min-w-0 font-semibold">{message.fromName}</span>
-          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+          <span className="min-w-0 font-bold text-ink-dim">{message.fromName}</span>
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] text-ink-faint">
             {message.text || 'HTML message'}
           </span>
-          <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
+          <span className="app-figures flex items-baseline gap-2 text-[14px] text-ink-faint">
             {visibleAttachments.length > 0 && <span title="Has attachment">📎</span>}
             {message.at}
             <span aria-hidden>▾</span>
@@ -178,7 +176,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`border border-edge px-5 py-4 ${hasInlineComposer ? 'border-b-0 bg-raised' : active ? 'bg-active/50' : 'bg-ground'}`}
+      className={`relative border-t border-edge px-1 pt-5 pb-4 ${active ? 'app-message-active' : ''}`}
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
@@ -193,13 +191,13 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2.5">
-            <span className="font-semibold">{message.fromName}</span>
+            <span className="text-[17px] font-bold text-ink">{message.fromName}</span>
             <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
               &lt;{message.fromEmail}&gt;
             </span>
           </div>
         </div>
-        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint tabular-nums">
+        <span className="app-figures flex flex-none items-center gap-2 text-[14px] text-ink-faint">
           {message.at}
           {onToggleCollapsed && (
             <button
@@ -211,7 +209,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                 onToggleCollapsed()
                 event.currentTarget.blur()
               }}
-              className="cursor-pointer px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
+              className="cursor-pointer px-1 text-ink-faint hover:text-ink-dim"
             >
               <span aria-hidden>▴</span>
             </button>
@@ -228,7 +226,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
               setViewOriginal((current) => !current)
               event.currentTarget.blur()
             }}
-            className="col-span-2 mt-1 w-fit cursor-pointer text-[11px] text-ink-faint hover:text-ink-dim hover:underline"
+            className="app-small-caps col-span-2 mt-1 w-fit cursor-pointer text-[13px] text-accent hover:underline"
           >
             {viewOriginal ? 'Use dark view' : 'View original'}
           </button>
@@ -236,7 +234,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       </div>
       <div
         data-testid="message-content"
-        className={`min-w-0 ${htmlSurface ? 'overflow-hidden bg-mail-light-ground' : ''}`}
+        className={`min-w-0 ${htmlSurface ? 'app-enclosure overflow-hidden bg-mail-light-ground' : ''}`}
       >
         <MessageBody
           bodyText={message.text}

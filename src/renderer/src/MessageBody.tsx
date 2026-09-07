@@ -301,7 +301,7 @@ function SingleMessageBody({
       return (
         <div
           data-testid="plain-text-body"
-          className={`whitespace-pre-wrap leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
+          className={`font-letter text-[17px] whitespace-pre-wrap leading-[1.62] [overflow-wrap:break-word] ${surfaceClass}`}
         >
           <LinkedMailText text={bodyText} lightSurface={lightSurface} />
         </div>
@@ -312,7 +312,7 @@ function SingleMessageBody({
     return (
       <div
         data-testid="plain-text-body"
-        className={`leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
+        className={`font-letter text-[17px] leading-[1.62] [overflow-wrap:break-word] ${surfaceClass}`}
       >
         <div data-testid="plain-text-visible" className="whitespace-pre-wrap">
           <LinkedMailText text={visibleText} lightSurface={lightSurface} />

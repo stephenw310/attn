@@ -7,6 +7,7 @@ import {
 } from '../../../shared/auth'
 import { clearAccountView } from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
+import { ScrapEdge } from '../components/Hand'
 import type { ShowToast } from './useToast'
 
 interface Options {
@@ -253,9 +254,10 @@ export function useAccountSession(options: Options): AccountSession {
           role="dialog"
           aria-modal="true"
           aria-label={`Sign out of ${activeAccount}?`}
-          className="w-[460px] border border-edge bg-raised p-5 shadow-menu"
+          className="relative isolate w-[460px] p-6"
           onClick={(event) => event.stopPropagation()}
         >
+          <ScrapEdge />
           <h2 className="text-sm font-semibold text-ink">Sign out of {activeAccount}?</h2>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
             This signs the account out and stops its sync. Choose what happens to its mail cached on this

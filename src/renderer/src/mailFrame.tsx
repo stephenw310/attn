@@ -80,7 +80,11 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
   html { overflow-x: auto; overflow-y: ${scrollable ? 'auto' : 'hidden'}; }
   body { overflow: visible; }
   body {
-    font: ${light ? '14px/1.6 Arial, Helvetica, sans-serif' : '15px/1.7 Arial, Helvetica, sans-serif'};
+    font: ${
+      light
+        ? '14px/1.6 Arial, Helvetica, sans-serif'
+        : '17px/1.62 Alegreya, "Iowan Old Style", Georgia, serif'
+    };
     overflow-wrap: break-word;
     box-sizing: border-box;
     padding: 0;

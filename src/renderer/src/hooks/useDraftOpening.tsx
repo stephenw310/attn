@@ -564,8 +564,6 @@ export function useDraftOpening(options: Options): DraftOpening {
         : null,
     [aiDraftRequest, claimAiDraftRequest, getAiThreadContext, inlineComposerDraft]
   )
-  const inlineComposerAttached =
-    conversation?.messages.some((message) => message.id === inlineComposerDraft?.sourceMessageId) ?? false
   // ThreadList and ConversationView are memoized, so every prop they take has
   // to keep its identity across renders they do not care about — a sync push
   // must not re-render a mounted Lexical tree (P3).
@@ -577,7 +575,6 @@ export function useDraftOpening(options: Options): DraftOpening {
           ref={latest.current.inlineComposerRef}
           draft={inlineComposerDraft}
           mode="inline"
-          attachedToMessage={inlineComposerAttached}
           initialError={composerError}
           onClose={closeComposer}
           onExit={closeComposerAndReader}
@@ -591,7 +588,6 @@ export function useDraftOpening(options: Options): DraftOpening {
       closeComposerAndReader,
       composerError,
       inlineComposerAiDraft,
-      inlineComposerAttached,
       inlineComposerDraft,
       showToast
     ]

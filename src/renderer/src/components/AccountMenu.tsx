@@ -6,6 +6,7 @@ import { modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { AccountHealthLine } from './AccountHealthLine'
 import { blurActive } from './blurActive'
+import { ScrapEdge } from './Hand'
 import { Kbd } from './Kbd'
 
 export function AccountMenu({
@@ -88,10 +89,11 @@ export function AccountMenu({
       {open && (
         <div
           role="menu"
-          className={`absolute z-50 w-[280px] border border-edge bg-raised p-1.5 shadow-menu ${
+          className={`absolute isolate z-50 w-[280px] p-2.5 ${
             placement === 'sidebar' ? 'bottom-full left-0 mb-2' : 'top-full right-0 mt-2'
           }`}
         >
+          <ScrapEdge />
           {status.accounts.map((account, index) => {
             const active = account.id === status.activeAccountId
             const health = healthFor(account.id)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncStage, SyncState } from '../../../shared/mail'
 import { blurActive } from './blurActive'
+import { ScrapEdge } from './Hand'
 
 const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'drafts', 'all-mail', 'spam', 'trash', 'reconcile']
 
@@ -266,8 +267,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           data-testid="status-error-details"
           role="dialog"
           aria-label="Sync error details"
-          className="absolute right-0 bottom-full z-50 mb-2 w-[330px] border border-edge bg-raised p-3.5 text-left shadow-menu"
+          className="absolute right-0 bottom-full isolate z-50 mb-2 w-[330px] p-4 text-left"
         >
+          <ScrapEdge />
           <div className="flex items-center gap-2 text-xs font-bold text-ink">
             <span className="text-danger" aria-hidden>
               ●

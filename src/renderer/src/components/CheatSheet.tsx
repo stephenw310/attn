@@ -7,6 +7,7 @@ import {
   subscribeCommandRegistry
 } from '../commands'
 import { formatShortcut } from '../platform'
+import { ScrapEdge } from './Hand'
 import { Kbd } from './Kbd'
 
 interface CheatSheetProps {
@@ -124,9 +125,10 @@ export function CheatSheet({
         aria-modal="true"
         aria-label="Keyboard shortcuts"
         data-testid="cheat-sheet"
-        className="fixed top-1/2 left-1/2 z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden border border-edge bg-raised shadow-dialog"
+        className="fixed top-1/2 left-1/2 isolate z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col"
       >
-        <div className="flex flex-none items-center gap-3 border-b border-edge px-5 py-3">
+        <ScrapEdge />
+        <div className="flex flex-none items-center gap-3 px-6 pt-5 pb-2">
           <h2 className="text-sm font-semibold text-ink">Keyboard shortcuts</h2>
           <span className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-faint">
             <Kbd>Esc</Kbd> closes

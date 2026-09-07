@@ -70,11 +70,9 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
               />
             </svg>
           </div>
-          <p className="app-small-caps mb-3 text-[13px] font-semibold text-accent">Your inbox, in focus</p>
-          <h1 className="text-[32px] font-semibold tracking-[-0.035em] text-ink">
-            Make space for what matters.
-          </h1>
-          <p className="mx-auto mt-4 max-w-[390px] text-sm leading-6 text-ink-dim">
+          <p className="app-small-caps mb-3 text-[14px] text-accent">Your inbox, in focus</p>
+          <h1 className="font-serif text-[38px] leading-[46px] text-ink">Make space for what matters.</h1>
+          <p className="font-letter mx-auto mt-3 max-w-[44ch] text-[17.5px] leading-[28px] text-ink-dim">
             Sign in with Google to bring your Gmail into a fast, keyboard-first inbox that keeps its local
             copy on this device.
           </p>
