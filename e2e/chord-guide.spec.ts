@@ -186,13 +186,12 @@ test('cancels pending chords before overlays stop keyboard propagation', async (
 })
 
 test('keeps the footer height fixed when reader shortcuts overflow', async ({ app, page }) => {
-  // The window cannot go below its 900px minimum, and the hint row fits there.
-  // Zooming shrinks the CSS viewport instead, which is also how a real user
-  // reaches this state.
+  // The footer belongs to the mailbox column, so the hint row's width follows
+  // the window minus the sidebar. At this size the list and reader hints
+  // overflow it and the shorter chord guide does not, which is what the rest
+  // of this test measures.
   await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0]
-    window?.setContentSize(900, 420)
-    window?.webContents.setZoomFactor(1.15)
+    BrowserWindow.getAllWindows()[0]?.setContentSize(1060, 420)
   })
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
   const footer = page.getByTestId('mail-footer')
@@ -249,7 +248,4 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('conversation-view')).toHaveCount(0)
   await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1)
-  })
 })

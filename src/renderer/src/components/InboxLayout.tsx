@@ -75,51 +75,59 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             accountActionsBlocked={c.accountActionsBlocked}
           />
         )}
-        {c.settingsOpen && c.activeAccount && (
-          <SettingsView
-            status={c.status}
-            accountStatuses={c.accounts.accountStatuses}
-            settings={c.appSettings}
-            accountSettings={c.accountSettings}
-            onUpdateSetting={c.updateAppSetting}
-            onUpdateAccountSetting={c.updateAccountSetting}
-            onReorderAccounts={c.onReorderAccounts}
-            onAddAccount={c.accounts.addAccount}
-            onReconnect={c.accounts.reconnectActions}
-            onSignOut={c.accounts.requestRemoveAccount}
-            onClose={c.closeSettings}
-            focusControl={c.settingsFocus}
-          />
-        )}
-        <div
-          className={`min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
-          aria-hidden={c.settingsOpen || undefined}
-        >
-          <MailboxTop controller={c} />
-          <MailboxBody controller={c} />
+        {/* The footer belongs to this column, not to the window: the sidebar
+            runs the full height of the page beside it, as the sheet does. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+            {c.settingsOpen && c.activeAccount && (
+              <SettingsView
+                status={c.status}
+                accountStatuses={c.accounts.accountStatuses}
+                settings={c.appSettings}
+                accountSettings={c.accountSettings}
+                onUpdateSetting={c.updateAppSetting}
+                onUpdateAccountSetting={c.updateAccountSetting}
+                onReorderAccounts={c.onReorderAccounts}
+                onAddAccount={c.accounts.addAccount}
+                onReconnect={c.accounts.reconnectActions}
+                onSignOut={c.accounts.requestRemoveAccount}
+                onClose={c.closeSettings}
+                focusControl={c.settingsFocus}
+              />
+            )}
+            <div
+              className={`min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
+              aria-hidden={c.settingsOpen || undefined}
+            >
+              <MailboxTop controller={c} />
+              <MailboxBody controller={c} />
+            </div>
+          </div>
+
+          {/* A full-window composer replaces the footer with its own, so this
+              one leaves the page rather than lingering hidden behind it. */}
+          {!c.fullWindowComposerDraft && (
+            <MailFooter
+              context={
+                c.inlineComposerDraft
+                  ? 'composer'
+                  : c.searchOpen && c.search.keyboardTarget === 'query' && !c.readerOpen
+                    ? 'search'
+                    : c.readerOpen
+                      ? 'reader'
+                      : !c.searchOpen && c.view === 'outbox'
+                        ? 'outbox'
+                        : 'list'
+              }
+              pendingChord={c.pendingChord}
+              sync={c.sync}
+              networkOnline={c.networkOnline}
+              onRetry={c.retrySync}
+              onCopyError={c.copySyncError}
+            />
+          )}
         </div>
       </div>
-
-      {!c.fullWindowComposerDraft && (
-        <MailFooter
-          context={
-            c.inlineComposerDraft
-              ? 'composer'
-              : c.searchOpen && c.search.keyboardTarget === 'query' && !c.readerOpen
-                ? 'search'
-                : c.readerOpen
-                  ? 'reader'
-                  : !c.searchOpen && c.view === 'outbox'
-                    ? 'outbox'
-                    : 'list'
-          }
-          pendingChord={c.pendingChord}
-          sync={c.sync}
-          networkOnline={c.networkOnline}
-          onRetry={c.retrySync}
-          onCopyError={c.copySyncError}
-        />
-      )}
 
       <InboxOverlays controller={c} />
     </div>

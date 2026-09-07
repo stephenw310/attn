@@ -71,7 +71,7 @@ export function AccountMenu({
       <button
         type="button"
         data-attention={chipAttention ? 'true' : undefined}
-        className="app-no-drag flex w-full cursor-pointer items-center gap-2 px-1 py-1 text-left text-[14px] text-ink-faint hover:text-ink"
+        className="app-no-drag group flex w-full cursor-pointer items-center gap-2 px-1 py-1 text-left text-[14px] text-ink-faint decoration-dotted underline-offset-4 hover:text-ink"
         onClick={() => (open ? closeMenu() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -79,7 +79,11 @@ export function AccountMenu({
         {chipAttention && (
           <span aria-hidden title="An account needs attention" className="size-[7px] flex-none bg-accent" />
         )}
-        <span className="min-w-0 truncate">{status.email ?? 'signed in'}</span>
+        <span className="min-w-0 truncate group-hover:underline">{status.email ?? 'signed in'}</span>
+        {/* Without a mark the line reads as a caption rather than a control. */}
+        <span aria-hidden className="flex-none text-[9px] text-accent">
+          ▾
+        </span>
       </button>
       {open && (
         <div

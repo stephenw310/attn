@@ -176,7 +176,9 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
         </nav>
       </div>
 
-      <div className="mt-4 flex-none pt-3">
+      {/* The colophon: who signed this page, set off from the labels above it. */}
+      <div className="mt-4 flex-none">
+        <TornRule className="mb-3 w-full" />
         <AccountMenu
           placement="sidebar"
           status={status}
