@@ -183,10 +183,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <div
         className={
           mode === 'inline'
-            ? 'flex w-full flex-col bg-raised'
-            : 'mx-auto flex min-h-0 w-full max-w-[900px] flex-1 flex-col border-x border-edge bg-raised'
+            ? 'flex w-full flex-col'
+            : 'relative isolate mx-auto my-6 flex min-h-0 w-full max-w-[820px] flex-1 flex-col px-9 pt-5'
         }
       >
+        {mode === 'full' && <ScrapEdge />}
         <ComposerEnvelope
           draft={draft}
           mode={mode}

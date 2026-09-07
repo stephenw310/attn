@@ -100,7 +100,7 @@ A 216-pixel sidebar contains mailboxes and user labels. A persistent control and
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
-The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. Inbox splits appear above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette.
+The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. Inbox splits appear above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette. It opens as a page written on the sheet, with a contents column down its left that scrolls to a heading and follows the reader; its sections are small-capital headings that each open a torn rule, and its values sit on ruled lines rather than in boxes.
 
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
 

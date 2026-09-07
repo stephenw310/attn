@@ -45,12 +45,15 @@ test.describe('settings surface', () => {
     await expect(settings.getByTestId('settings-account-row')).toContainText('seed@attn.test')
     const accountScope = settings.getByTestId('settings-account-scope')
     const allAccountsScope = settings.getByTestId('settings-all-accounts-scope')
-    await expect(accountScope).toContainText('This account')
+    // The scope headings moved into the contents column; each section still
+    // says in its own words whose settings it holds.
+    await expect(settings.getByTestId('settings-contents')).toContainText('This account')
+    await expect(settings.getByTestId('settings-contents')).toContainText('All accounts')
+    await expect(accountScope).toContainText('These settings apply only to')
     await expect(accountScope).toContainText('seed@attn.test')
     await expect(accountScope.getByTestId('settings-sync')).toBeVisible()
     await expect(accountScope.getByTestId('settings-compose')).toBeVisible()
     await expect(accountScope.getByTestId('settings-split-rules')).toHaveCount(0)
-    await expect(allAccountsScope).toContainText('All accounts')
     await expect(allAccountsScope).toContainText('every signed-in account and mailbox')
     await expect(allAccountsScope.getByTestId('settings-triage')).toBeVisible()
     await expect(allAccountsScope.getByTestId('settings-security')).toBeVisible()

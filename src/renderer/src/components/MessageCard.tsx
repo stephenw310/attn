@@ -7,6 +7,7 @@ import { MessageBody } from '../MessageBody'
 import { mailReadingForHtml } from '../mailReading'
 import { useTheme } from '../theme'
 import { useShowToast } from '../toastContext'
+import { TornRule } from './Hand'
 
 function firstName(address: MailAddress, account: string | null): string {
   if (account && normalizeEmailKey(address.email) === normalizeEmailKey(account)) return 'me'
@@ -144,8 +145,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className="border-t border-edge"
       >
+        <TornRule className="w-full" />
         <button
           type="button"
           data-testid="older-message-toggle"
@@ -176,8 +177,9 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`relative border-t border-edge px-1 pt-5 pb-4 ${active ? 'app-message-active' : ''}`}
+      className={`relative px-1 pt-5 pb-4 ${active ? 'app-message-active' : ''}`}
     >
+      <TornRule className="mb-4 w-full" />
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
       <div
