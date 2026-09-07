@@ -236,25 +236,12 @@
   color: var(--color-accent);
 }
 
-/* The message the keyboard is on is marked in the margin, the way a reader
-   marks a page, rather than by tinting the letter itself. */
-.app-message-active::before {
-  position: absolute;
-  top: 22px;
-  left: -14px;
-  width: 3px;
-  height: 18px;
-  background: var(--color-accent);
-  content: "";
-}
-
 /* The sender's own page arrives as a printed enclosure: guillotined edges and
    a hard shadow, so it reads as something that came in the post rather than as
    part of the letter around it. Ours is torn; theirs is cut. */
 .app-enclosure {
-  box-shadow:
-    0 14px 30px var(--attn-enclosure-shadow),
-    0 0 0 1px rgb(0 0 0 / 14%);
+  margin-block: 6px;
+  box-shadow: 0 10px 26px var(--attn-enclosure-shadow);
 }
 
 /* A scrap of paper: its own stock, and the shadow of a leaf laid on the desk. */

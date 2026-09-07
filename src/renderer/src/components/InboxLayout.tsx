@@ -26,7 +26,7 @@ function threadListKind(view: MailView): ThreadListView | 'label' {
 export function InboxLayout({ controller: c }: { controller: InboxController }): React.JSX.Element {
   return (
     <div className="flex h-full flex-col">
-      <PaperSheet bandWidth={c.sidebarCollapsed ? 0 : SIDEBAR_WIDTH} />
+      <PaperSheet bandWidth={c.sidebarCollapsed || c.fullWindowComposerDraft ? 0 : SIDEBAR_WIDTH} />
       <MailHeader
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
@@ -34,7 +34,6 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         selectionCount={selectedForCount(c)}
         composerOpen={c.fullWindowComposerDraft !== null}
         sidebarCollapsed={c.sidebarCollapsed}
-        accountInHeader={c.sidebarCollapsed || c.fullWindowComposerDraft !== null}
         status={c.status}
         accountStatuses={c.accounts.accountStatuses}
         onReconnectActions={c.accounts.reconnectActions}
@@ -65,14 +64,6 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             outboxCount={c.realOutbox.length}
             onSwitchView={c.switchView}
             onOpenOutbox={c.openOutbox}
-            status={c.status}
-            accountStatuses={c.accounts.accountStatuses}
-            onSwitchAccount={c.accounts.switchAccount}
-            onAddAccount={c.accounts.addAccount}
-            onRemoveAccount={c.accounts.requestRemoveAccount}
-            onOpenSettings={() => c.openSettings(null)}
-            onOpenCheatSheet={c.openCheatSheet}
-            accountActionsBlocked={c.accountActionsBlocked}
           />
         )}
         {/* The footer belongs to this column, not to the window: the sidebar

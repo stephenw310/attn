@@ -361,7 +361,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
         aria-modal="true"
         aria-labelledby="split-rules-title"
         data-testid="split-rules"
-        className="relative isolate flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col"
+        className="relative isolate flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col px-7 py-6"
       >
         <ScrapEdge />
         <header className="flex h-14 flex-none items-center border-b border-edge px-5">

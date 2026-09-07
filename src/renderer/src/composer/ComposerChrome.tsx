@@ -55,18 +55,7 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
       }`}
       data-testid={mode === 'inline' ? 'composer-inline-header' : undefined}
     >
-      {mode === 'full' ? (
-        <button
-          type="button"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
-          data-testid="composer-close"
-          aria-label="Save draft and go back"
-          disabled={props.attaching || props.closing}
-          onClick={props.closeAndSave}
-        >
-          <span aria-hidden>←</span> Back
-        </button>
-      ) : (
+      {mode === 'inline' && (
         <span className="flex size-7 flex-none items-center justify-center rounded-full bg-accent/10 text-sm text-accent">
           {draft.kind === 'forward' ? '↪' : '↩'}
         </span>
@@ -93,28 +82,26 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
         </span>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        {mode === 'full' ? (
-          <span className="flex items-center gap-2 text-[11px] text-ink-faint">
+        {mode === 'full' && (
+          <span className="flex items-center gap-4 text-[13px] text-ink-faint">
             <span className="flex items-center gap-1.5" data-testid="composer-undo-hint">
               undo <Kbd>{modKeyLabel()}Z</Kbd>
             </span>
-            <span aria-hidden>·</span>
             <span className="flex items-center gap-1.5">
               save &amp; close <Kbd>Esc</Kbd>
             </span>
           </span>
-        ) : (
-          <button
-            type="button"
-            className="flex size-7 items-center justify-center text-lg text-ink-faint hover:bg-active hover:text-ink"
-            data-testid="composer-close"
-            aria-label="Save and close draft"
-            title="Save and close draft (Esc)"
-            onClick={props.closeAndSave}
-          >
-            ×
-          </button>
         )}
+        <button
+          type="button"
+          className="flex size-7 items-center justify-center text-lg text-ink-faint hover:bg-active hover:text-ink"
+          data-testid="composer-close"
+          aria-label="Save and close draft"
+          title="Save and close draft (Esc)"
+          onClick={props.closeAndSave}
+        >
+          ×
+        </button>
       </div>
     </header>
   )

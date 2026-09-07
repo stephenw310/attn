@@ -54,7 +54,7 @@ export function PickerDialog({
         role="dialog"
         aria-label={ariaLabel}
         aria-modal="true"
-        className="fixed top-[18vh] left-1/2 isolate z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col"
+        className="fixed top-[18vh] left-1/2 isolate z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col px-4 py-4"
         onKeyDownCapture={(event) => {
           if (event.key !== 'Escape') return
           event.preventDefault()

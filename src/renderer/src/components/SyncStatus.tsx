@@ -267,7 +267,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           data-testid="status-error-details"
           role="dialog"
           aria-label="Sync error details"
-          className="absolute right-0 bottom-full isolate z-50 mb-2 w-[330px] p-4 text-left"
+          className="absolute right-0 bottom-full isolate z-50 mb-2 w-[330px] p-5 text-left"
         >
           <ScrapEdge />
           <div className="flex items-center gap-2 text-xs font-bold text-ink">

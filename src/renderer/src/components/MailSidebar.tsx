@@ -1,4 +1,3 @@
-import type { AccountSyncStatus, AuthStatus } from '../../../shared/auth'
 import type { MailboxView, MailLabel, SystemMailboxCounts } from '../../../shared/mail'
 import { COMMAND_SPECS } from '../commands'
 import {
@@ -9,7 +8,6 @@ import {
   VIEW_TITLES
 } from '../list/mailDisplay'
 import { formatShortcut } from '../platform'
-import { AccountMenu } from './AccountMenu'
 import { Seal, TornRule } from './Hand'
 
 /** The width of the darker stock the sidebar is written on. `PaperSheet` tears
@@ -85,34 +83,10 @@ interface MailSidebarProps {
   outboxCount: number
   onSwitchView: (view: NavigableMailView) => void
   onOpenOutbox: () => void
-  status: AuthStatus
-  accountStatuses: readonly AccountSyncStatus[] | null
-  onSwitchAccount: (accountId: string) => void
-  onAddAccount: () => void
-  onRemoveAccount: () => void
-  onOpenSettings: () => void
-  onOpenCheatSheet: () => void
-  accountActionsBlocked: boolean
 }
 
 export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
-  const {
-    view,
-    labels,
-    mailboxCounts,
-    draftCount,
-    outboxCount,
-    onSwitchView,
-    onOpenOutbox,
-    status,
-    accountStatuses,
-    onSwitchAccount,
-    onAddAccount,
-    onRemoveAccount,
-    onOpenSettings,
-    onOpenCheatSheet,
-    accountActionsBlocked
-  } = props
+  const { view, labels, mailboxCounts, draftCount, outboxCount, onSwitchView, onOpenOutbox } = props
   const activeLabelId = userLabelId(view)
 
   return (
@@ -174,22 +148,6 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
             </div>
           )}
         </nav>
-      </div>
-
-      {/* The colophon: who signed this page, set off from the labels above it. */}
-      <div className="mt-4 flex-none">
-        <TornRule className="mb-3 w-full" />
-        <AccountMenu
-          placement="sidebar"
-          status={status}
-          accountStatuses={accountStatuses}
-          onSwitchAccount={onSwitchAccount}
-          onAddAccount={onAddAccount}
-          onRemoveAccount={onRemoveAccount}
-          onOpenSettings={onOpenSettings}
-          onOpenCheatSheet={onOpenCheatSheet}
-          accountActionsBlocked={accountActionsBlocked}
-        />
       </div>
     </aside>
   )

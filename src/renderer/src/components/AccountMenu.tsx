@@ -89,7 +89,7 @@ export function AccountMenu({
       {open && (
         <div
           role="menu"
-          className={`absolute isolate z-50 w-[280px] p-2.5 ${
+          className={`absolute isolate z-50 w-[280px] p-4 ${
             placement === 'sidebar' ? 'bottom-full left-0 mb-2' : 'top-full right-0 mt-2'
           }`}
         >

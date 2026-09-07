@@ -145,7 +145,7 @@ export function SplitStrip({
           {overflowOpen && (
             <div
               data-testid="split-overflow-menu"
-              className="absolute top-full right-1 isolate z-50 mt-1 min-w-48 p-2.5"
+              className="absolute top-full right-1 isolate z-50 mt-1 min-w-48 p-4"
             >
               <ScrapEdge />
               {overflowSplits.map((split) => (

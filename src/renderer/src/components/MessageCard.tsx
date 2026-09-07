@@ -84,7 +84,6 @@ interface MessageCardProps {
   message: DisplayMessage
   account: string | null
   collapsed?: boolean
-  active?: boolean
   onToggleCollapsed?: () => void
   trimExpanded?: boolean
   onToggleTrim: () => void
@@ -97,7 +96,6 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     message,
     account,
     collapsed = false,
-    active = false,
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
@@ -177,7 +175,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`relative px-1 pt-5 pb-4 ${active ? 'app-message-active' : ''}`}
+      className="relative px-1 pt-5 pb-4"
     >
       <TornRule className="mb-4 w-full" />
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}

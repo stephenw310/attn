@@ -125,7 +125,7 @@ export function CheatSheet({
         aria-modal="true"
         aria-label="Keyboard shortcuts"
         data-testid="cheat-sheet"
-        className="fixed top-1/2 left-1/2 isolate z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col"
+        className="fixed top-1/2 left-1/2 isolate z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col px-5 py-5"
       >
         <ScrapEdge />
         <div className="flex flex-none items-center gap-3 px-6 pt-5 pb-2">

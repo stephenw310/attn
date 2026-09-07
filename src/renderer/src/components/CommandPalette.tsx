@@ -216,7 +216,7 @@ export function CommandPalette({
         aria-label="Command palette"
         data-testid="command-palette"
         data-usage-loaded={usageLoaded ? 'true' : 'false'}
-        className="fixed top-[15vh] left-1/2 isolate z-[90] flex max-h-[70vh] w-[min(640px,92vw)] -translate-x-1/2 flex-col"
+        className="fixed top-[15vh] left-1/2 isolate z-[90] flex max-h-[70vh] w-[min(640px,92vw)] -translate-x-1/2 flex-col px-4 py-4"
         onKeyDown={(event) => event.stopPropagation()}
       >
         <ScrapEdge />

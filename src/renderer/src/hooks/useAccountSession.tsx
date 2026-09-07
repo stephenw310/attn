@@ -254,7 +254,7 @@ export function useAccountSession(options: Options): AccountSession {
           role="dialog"
           aria-modal="true"
           aria-label={`Sign out of ${activeAccount}?`}
-          className="relative isolate w-[460px] p-6"
+          className="relative isolate w-[460px] p-8"
           onClick={(event) => event.stopPropagation()}
         >
           <ScrapEdge />

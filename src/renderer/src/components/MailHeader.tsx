@@ -10,9 +10,6 @@ interface MailHeaderProps {
   selectionCount: number
   composerOpen: boolean
   sidebarCollapsed: boolean
-  /** True whenever the sidebar is off screen — collapsed, or hidden behind a
-      full-window composer — and the account line has nowhere else to sit. */
-  accountInHeader: boolean
   status: AuthStatus
   accountStatuses: readonly AccountSyncStatus[] | null
   onReconnectActions: () => void
@@ -34,7 +31,6 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     selectionCount,
     composerOpen,
     sidebarCollapsed,
-    accountInHeader,
     status,
     accountStatuses,
     onReconnectActions,
@@ -74,9 +70,19 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           <path d="M8.5 4v16" strokeWidth="1.75" />
         </svg>
       </button>
-      {/* The queue readouts stay on this bar rather than beside the view title:
-          they have to stay in sight while the reader is open, and the title
-          row belongs to the list. */}
+      {/* The account has one home, beside the sidebar control, so it never
+          moves when the sidebar opens or closes. */}
+      <AccountMenu
+        placement="header"
+        status={status}
+        accountStatuses={accountStatuses}
+        onSwitchAccount={onSwitchAccount}
+        onAddAccount={onAddAccount}
+        onRemoveAccount={onRemoveAccount}
+        onOpenSettings={onOpenSettings}
+        onOpenCheatSheet={onOpenCheatSheet}
+        accountActionsBlocked={accountActionsBlocked}
+      />
       <div className="app-no-drag ml-auto flex items-center gap-5">
         {!composerOpen && selectionCount > 0 && (
           <span data-testid="selection-count" className="app-figures text-[15px] font-semibold text-accent">
@@ -90,21 +96,6 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           onReconnect={onReconnectActions}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />
-        {/* The account line lives at the foot of the sidebar; it comes back up
-            here whenever the sidebar is off screen. */}
-        {accountInHeader && (
-          <AccountMenu
-            placement="header"
-            status={status}
-            accountStatuses={accountStatuses}
-            onSwitchAccount={onSwitchAccount}
-            onAddAccount={onAddAccount}
-            onRemoveAccount={onRemoveAccount}
-            onOpenSettings={onOpenSettings}
-            onOpenCheatSheet={onOpenCheatSheet}
-            accountActionsBlocked={accountActionsBlocked}
-          />
-        )}
       </div>
     </header>
   )
