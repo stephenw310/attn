@@ -50,26 +50,31 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
       data-testid="mail-header"
       className="app-drag app-titlebar-safe-area flex h-11 flex-none items-center gap-6"
     >
-      <button
-        type="button"
-        data-testid="sidebar-toggle"
-        data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
-        aria-label={sidebarAction}
-        aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
-        aria-controls="mail-sidebar"
-        aria-expanded={!sidebarCollapsed}
-        title={`${sidebarAction} (${sidebarShortcut})`}
-        onClick={(event) => {
-          onToggleSidebar()
-          event.currentTarget.blur()
-        }}
-        className="app-no-drag flex size-7 cursor-pointer items-center justify-center text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-      >
-        <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
-          <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
-          <path d="M8.5 4v16" strokeWidth="1.75" />
-        </svg>
-      </button>
+      {/* A full-window composer takes the whole page, sidebar included. The
+          toggle would then say it collapses something that is not there, and
+          pressing it would move a preference with nothing to show for it. */}
+      {!composerOpen && (
+        <button
+          type="button"
+          data-testid="sidebar-toggle"
+          data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
+          aria-label={sidebarAction}
+          aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
+          aria-controls="mail-sidebar"
+          aria-expanded={!sidebarCollapsed}
+          title={`${sidebarAction} (${sidebarShortcut})`}
+          onClick={(event) => {
+            onToggleSidebar()
+            event.currentTarget.blur()
+          }}
+          className="app-no-drag flex size-7 cursor-pointer items-center justify-center text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
+            <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
+            <path d="M8.5 4v16" strokeWidth="1.75" />
+          </svg>
+        </button>
+      )}
       <div className="app-no-drag ml-auto flex items-center gap-5">
         {!composerOpen && selectionCount > 0 && (
           <span data-testid="selection-count" className="app-figures text-[15px] font-semibold text-accent">
@@ -86,7 +91,6 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         {/* The account keeps one home, at the top right, clear of the torn edge
             the sidebar's band leaves down the left. */}
         <AccountMenu
-          placement="header"
           status={status}
           accountStatuses={accountStatuses}
           onSwitchAccount={onSwitchAccount}

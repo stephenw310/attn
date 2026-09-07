@@ -88,12 +88,15 @@ function sectionAnchor(id: string): string {
 
 function SectionTitle({ id, children }: { id: string; children: React.ReactNode }): React.JSX.Element {
   return (
-    <h3 id={sectionAnchor(id)} className="mt-7 mb-1 flex items-baseline gap-3 scroll-mt-6">
+    <h2 id={sectionAnchor(id)} className="mt-7 mb-1 flex items-baseline gap-3 scroll-mt-6">
       <span className={SECTION_TITLE}>{children}</span>
       <TornRule className="flex-1" />
-    </h3>
+    </h2>
   )
 }
+
+/** How long a clicked heading keeps the mark while the page scrolls to it. */
+const PIN_MS = 700
 
 /**
  * The contents down the left of the desk. It scrolls the page to a heading and
@@ -105,21 +108,39 @@ function SettingsContents({
   scrollRef: React.RefObject<HTMLElement | null>
 }): React.JSX.Element {
   const [active, setActive] = useState(SETTINGS_SECTIONS[0].id)
+  // Clicking a heading answers the question the scroll position cannot: the
+  // last four sections all share the final screenful, so geometry alone would
+  // mark whichever sits last no matter which one the reader asked for. Hold
+  // their answer until the smooth scroll has settled.
+  const pinnedUntil = useRef(0)
   useEffect(() => {
     const scroller = scrollRef.current
     if (!scroller) return
     const follow = (): void => {
-      const top = scroller.getBoundingClientRect().top + 24
+      // The tail sections are shorter than the viewport, so scrolling to the
+      // bottom can never bring their headings past the mark line. At the end
+      // of the page the last heading that is on screen at all is the one the
+      // reader is looking at.
+      const box = scroller.getBoundingClientRect()
+      const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
+      const line = atEnd ? box.bottom : box.top + 24
       let nearest = SETTINGS_SECTIONS[0].id
       for (const section of SETTINGS_SECTIONS) {
         const heading = document.getElementById(sectionAnchor(section.id))
-        if (heading && heading.getBoundingClientRect().top <= top) nearest = section.id
+        if (heading && heading.getBoundingClientRect().top <= line) nearest = section.id
       }
-      setActive(nearest)
+      if (performance.now() >= pinnedUntil.current) setActive(nearest)
     }
     follow()
     scroller.addEventListener('scroll', follow, { passive: true })
-    return () => scroller.removeEventListener('scroll', follow)
+    // A width change reflows the page under a still scroll position, which
+    // leaves the mark on a section the reader has already passed.
+    const resize = new ResizeObserver(follow)
+    resize.observe(scroller)
+    return () => {
+      scroller.removeEventListener('scroll', follow)
+      resize.disconnect()
+    }
   }, [scrollRef])
 
   let lastGroup = ''
@@ -139,7 +160,10 @@ function SettingsContents({
               type="button"
               data-testid="settings-contents-link"
               data-active={active === section.id || undefined}
+              aria-current={active === section.id ? 'true' : undefined}
               onClick={() => {
+                setActive(section.id)
+                pinnedUntil.current = performance.now() + PIN_MS
                 document
                   .getElementById(sectionAnchor(section.id))
                   ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -282,10 +306,10 @@ export function SettingsView({
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex w-full max-w-[840px] flex-col px-7 pt-2 pb-10">
             <section data-testid="settings-accounts" aria-label="Accounts">
-              <h3 id={sectionAnchor('accounts')} className="mt-2 mb-1 flex items-baseline gap-3 scroll-mt-6">
+              <h2 id={sectionAnchor('accounts')} className="mt-2 mb-1 flex items-baseline gap-3 scroll-mt-6">
                 <span className={SECTION_TITLE}>Accounts</span>
                 <TornRule className="flex-1" />
-              </h3>
+              </h2>
               <p className={`mt-1.5 ${NOTE}`}>
                 The order below is the switcher order — {modKeyLabel()}1…9 follow it, and so does the account
                 menu.

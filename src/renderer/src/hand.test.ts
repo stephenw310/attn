@@ -18,6 +18,21 @@ describe('seededRandom', () => {
     for (const value of first) expect(value).toBeGreaterThanOrEqual(0)
     for (const value of first) expect(value).toBeLessThan(1)
   })
+
+  it('keeps drawing new values for as long as the paper asks for them', () => {
+    // A float64 multiply loses the low bits of this generator's product, which
+    // cycled after about 11,000 draws. One sheet of paper asks for more than
+    // that, so the fibres landed twice on the same coordinates at double the
+    // intended alpha. Eight draws cannot see it; 40,000 can.
+    const random = seededRandom(0x5eed17)
+    const drawn = Array.from({ length: 40_000 }, random)
+    expect(new Set(drawn).size).toBeGreaterThan(39_000)
+
+    // The same rounding also drove three quarters of the outputs to a zero low
+    // byte. Spread across the 256 buckets says the low bits still carry noise.
+    const buckets = new Set(drawn.map((value) => Math.round(value * 0x7fffffff) % 256))
+    expect(buckets.size).toBeGreaterThan(200)
+  })
 })
 
 describe('hand-drawn paths', () => {

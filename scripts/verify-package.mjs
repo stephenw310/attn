@@ -23,6 +23,13 @@ const requiredEntries = [
   '/resources/menuBarTemplate.png',
   '/resources/tray.png'
 ]
+// Scopes the renderer bundles for itself. Anything under one of these inside
+// app.asar came from runtime `dependencies` and is dead weight.
+const RENDERER_ONLY_PREFIXES = [
+  '/node_modules/@dnd-kit/',
+  '/node_modules/@fontsource/',
+  '/node_modules/@fontsource-variable/'
+]
 
 async function findAppArchives(directory) {
   const archives = []
@@ -81,11 +88,16 @@ async function verifyArchive(archive) {
   }
 
   // Renderer-only packages are bundled into out/renderer, so shipping their
-  // sources means they drifted back into runtime `dependencies`.
-  const rendererOnly = entries.filter((entry) => entry.startsWith('/node_modules/@dnd-kit/'))
+  // sources means they drifted back into runtime `dependencies`. Fonts are the
+  // costly case: four @fontsource families are ~9 MB of sources beside the
+  // subset Vite already emitted.
+  const rendererOnly = entries.filter((entry) =>
+    RENDERER_ONLY_PREFIXES.some((prefix) => entry.startsWith(prefix))
+  )
   if (rendererOnly.length > 0) {
+    const scopes = [...new Set(rendererOnly.map((entry) => entry.split('/').slice(2, 4).join('/')))]
     throw new Error(
-      `${relative(projectDir, archive)} ships bundled-only @dnd-kit sources; keep them in devDependencies`
+      `${relative(projectDir, archive)} ships bundled-only sources for ${scopes.join(', ')}; keep them in devDependencies`
     )
   }
 

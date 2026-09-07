@@ -54,7 +54,9 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         aria-hidden={!!c.fullWindowComposerDraft}
       >
         {/* A full-window composer hides this column. Unmount the sidebar with
-            it so the account line it carries is not left in the page twice. */}
+            it rather than leaving it in the page behind `hidden`: a hidden copy
+            still answers Playwright's strict-mode selectors and still holds
+            focusable rows. */}
         {!c.sidebarCollapsed && !c.fullWindowComposerDraft && (
           <MailSidebar
             view={c.view}

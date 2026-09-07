@@ -45,7 +45,17 @@ export function PaperSheet({ bandWidth }: { bandWidth: number }): React.JSX.Elem
     }
   }, [bandWidth])
 
-  return <canvas ref={canvasRef} data-testid="paper-sheet" className="app-paper" />
+  // The sheet is texture. Chromium exposes a bare canvas as an unlabelled
+  // image, so without this every screen opens with one for a reader to trip on.
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden="true"
+      tabIndex={-1}
+      data-testid="paper-sheet"
+      className="app-paper"
+    />
+  )
 }
 
 /**

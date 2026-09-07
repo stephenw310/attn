@@ -73,7 +73,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
         <span
           data-testid="chip-snooze-due"
           title={thread.dueLabel}
-          className="app-small-caps flex-none text-accent"
+          className="app-small-caps min-w-0 shrink-[3] truncate text-accent"
         >
           {thread.dueLabel}
         </span>
@@ -83,7 +83,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           data-testid="chip-follow-up-due"
           data-follow-up-awaiting={thread.followUpAwaiting ?? undefined}
           title={`Follow up if no reply — ${thread.followUpDueLabel}`}
-          className="app-small-caps flex-none text-accent"
+          className="app-small-caps min-w-0 shrink-[3] truncate text-accent"
         >
           {`Follow up ${thread.followUpDueLabel}`}
           {thread.followUpAwaiting === 'origin'
@@ -405,7 +405,10 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         >
           {thread.from}
         </span>
-        <span className="flex min-w-0 flex-1 items-baseline gap-3 text-[14.5px] text-ink-faint">
+        {/* `overflow-hidden` is load-bearing: the subject and the chips are
+            `flex-none`, so without it a long follow-up chip on a narrow window
+            paints across the labels and the timestamp instead of ellipsizing. */}
+        <span className="flex min-w-0 flex-1 items-baseline gap-3 overflow-hidden text-[14.5px] text-ink-faint">
           {thread.hasDraft && (
             <span data-testid="chip-draft" className="app-small-caps flex-none text-accent">
               Draft
@@ -415,9 +418,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           {/* Subject and snippet are two columns with a gap between them, not one
               run of text joined by a dash: a long subject squeezes the snippet
               rather than pushing it off the row. */}
+          {/* The subject yields only after the snippet has given up all its
+              space: the snippet grows from a zero basis, so it goes first, and
+              `shrink` here is what stops two chips plus a subject overflowing
+              the column on a narrow window. */}
           <span
             data-testid="thread-subject"
-            className="app-thread-subject max-w-[52%] flex-none truncate text-[16px]"
+            className="app-thread-subject min-w-0 max-w-[52%] shrink truncate text-[16px]"
           >
             {thread.subject}
           </span>

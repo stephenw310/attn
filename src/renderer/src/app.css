@@ -157,7 +157,9 @@
     --attn-hand-ink: 42 32 21;
     --attn-hand-rule-alpha: 0.34;
     --attn-hand-wash: 150 108 44;
-    --attn-hand-wash-alpha: 0.18;
+    /* 0.18 dropped rubric text on a marked row to 4.48:1, just under the
+       threshold; the tear still reads clearly at this strength. */
+    --attn-hand-wash-alpha: 0.15;
     color-scheme: light;
   }
 

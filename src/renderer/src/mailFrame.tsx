@@ -1,3 +1,8 @@
+import alegreyaItalic from '@fontsource/alegreya/files/alegreya-latin-400-italic.woff2?inline'
+import alegreyaRegular from '@fontsource/alegreya/files/alegreya-latin-400-normal.woff2?inline'
+import alegreyaBold from '@fontsource/alegreya/files/alegreya-latin-700-normal.woff2?inline'
+import alegreyaSansRegular from '@fontsource/alegreya-sans/files/alegreya-sans-latin-400-normal.woff2?inline'
+import alegreyaSansBold from '@fontsource/alegreya-sans/files/alegreya-sans-latin-700-normal.woff2?inline'
 import DOMPurify from 'dompurify'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { safeUrl } from '../../shared/html'
@@ -44,6 +49,30 @@ const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
  * frame's registration, remains the authority on whether any of them may go
  * out at all.
  */
+/**
+ * The frame's own faces.
+ *
+ * `@font-face` belongs to the document that declares it, and the frame is a
+ * separate `about:srcdoc` document, so the app's own faces do not reach it:
+ * without this a text-structured letter fell back to the system serif beside
+ * a plain-text one set in Alegreya. The frame's CSP allows `data:` and the
+ * app is loaded from `file:` in a packaged build, so the bytes have to travel
+ * in the stylesheet rather than behind a URL. Built once; only the native
+ * surface pays for it, and a sender's own page keeps Arial and pays nothing.
+ */
+const MAIL_FRAME_FACES = [
+  ['Alegreya', 400, 'normal', alegreyaRegular],
+  ['Alegreya', 400, 'italic', alegreyaItalic],
+  ['Alegreya', 700, 'normal', alegreyaBold],
+  ['Alegreya Sans', 400, 'normal', alegreyaSansRegular],
+  ['Alegreya Sans', 700, 'normal', alegreyaSansBold]
+]
+  .map(
+    ([family, weight, style, source]) =>
+      `@font-face{font-family:"${family}";font-style:${style};font-weight:${weight};font-display:block;src:url(${source}) format("woff2")}`
+  )
+  .join('')
+
 const MAIL_FRAME_CSP = [
   "default-src 'none'",
   'img-src data: http: https:',
@@ -79,6 +108,7 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
   const indigo = appearance === 'light' ? '#3f4f7c' : '#93a8db'
   const rule = appearance === 'light' ? '#c9b791' : '#2c303b'
   return `
+  ${senderCanvas ? '' : MAIL_FRAME_FACES}
   :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
     margin: 0;

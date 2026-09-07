@@ -1534,6 +1534,10 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('composer')).toHaveCount(0)
   await expect(page.getByTestId('draft-list')).toBeVisible()
+  // The reader is closed here, so the page heading is back and can be checked
+  // exactly; the two assertions above this one run with the reader open, where
+  // the header is unmounted and the sidebar highlight is the only witness.
+  await expect(page.getByTestId('view-title')).toHaveText('Drafts')
   await expect(page.locator('[data-testid="sidebar-mailbox"][data-active="true"]')).toContainText('Drafts')
   await page.keyboard.press('g')
   await page.keyboard.press('i')

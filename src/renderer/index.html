@@ -3,9 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <title>Attn</title>
+    <!--
+      `font-src` covers the mail frame too: an about:srcdoc document inherits
+      this policy and intersects its own with it, so the frame's `font-src`
+      alone never applied. `data:` is what lets the frame carry the app's own
+      faces, since @font-face is scoped to the document that declares it and a
+      packaged build is served from file:. Remote fonts stay blocked in mail:
+      the intersection with this policy drops the frame's http:/https:.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; frame-src 'self' about:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: http:; frame-src 'self' about:"
     />
   </head>
   <body>

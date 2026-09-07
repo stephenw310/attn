@@ -12,11 +12,19 @@
 /** The nominal width every horizontal ornament is generated at. */
 export const HAND_WIDTH = 600
 
-/** Deterministic noise. The same seed always draws the same line. */
+/**
+ * Deterministic noise. The same seed always draws the same line.
+ *
+ * `Math.imul` rather than `*`: the multiplier needs 30 bits and the state 31,
+ * so a float64 product loses its low bits to rounding. That version cycled
+ * after about 11,000 draws and left three quarters of the outputs with a zero
+ * low byte, which showed up as paper fibres painted twice over each other at
+ * double the alpha the stylesheet asks for.
+ */
 export function seededRandom(seed: number): () => number {
   let state = seed >>> 0
   return () => {
-    state = (state * 1103515245 + 12345) & 0x7fffffff
+    state = (Math.imul(state, 1103515245) + 12345) & 0x7fffffff
     return state / 0x7fffffff
   }
 }

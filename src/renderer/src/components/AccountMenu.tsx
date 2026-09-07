@@ -17,8 +17,7 @@ export function AccountMenu({
   onRemoveAccount,
   onOpenSettings,
   onOpenCheatSheet,
-  accountActionsBlocked,
-  placement
+  accountActionsBlocked
 }: {
   status: AuthStatus
   /** Live per-account health, pushed by the utility (F18). */
@@ -31,9 +30,6 @@ export function AccountMenu({
   onOpenCheatSheet: () => void
   /** True while a composer is open: switching would drop unsaved keystrokes. */
   accountActionsBlocked: boolean
-  /** The sidebar writes the account at the foot of the page and opens the menu
-      upward; the header carries it only while the sidebar is collapsed. */
-  placement: 'sidebar' | 'header'
 }): React.JSX.Element {
   const blockedTitle = accountActionsBlocked ? 'Save and close the draft first (Esc)' : undefined
   const [open, setOpen] = useState(false)
@@ -87,12 +83,7 @@ export function AccountMenu({
         </span>
       </button>
       {open && (
-        <div
-          role="menu"
-          className={`absolute isolate z-50 w-[280px] p-4 ${
-            placement === 'sidebar' ? 'bottom-full left-0 mb-2' : 'top-full right-0 mt-2'
-          }`}
-        >
+        <div role="menu" className="absolute top-full right-0 isolate z-50 mt-2 w-[280px] p-4">
           <ScrapEdge />
           {status.accounts.map((account, index) => {
             const active = account.id === status.activeAccountId

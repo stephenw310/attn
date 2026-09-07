@@ -237,69 +237,80 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     ])
   }, [activeMessageId, conversation.messages, onReply, replyToMessage, revealedTrashedIds])
 
-  const items = conversation.messages.map((message) => (
-    <div
-      key={`message:${message.id}`}
-      ref={(element) => {
-        if (element) messageElementsRef.current.set(message.id, element)
-        else messageElementsRef.current.delete(message.id)
-      }}
-      data-testid="conversation-message"
-      data-message-id={message.id}
-      data-active-message={activeMessageId === message.id ? 'true' : undefined}
-      aria-current={activeMessageId === message.id ? 'true' : undefined}
-      data-latest-conversation-item={!inlineComposer && activeMessageId === message.id ? '' : undefined}
-      className="relative"
-      onPointerDownCapture={() => {
-        if (!inlineComposer) setActiveMessageId(message.id)
-      }}
-      onFocusCapture={() => {
-        if (!inlineComposer) setActiveMessageId(message.id)
-      }}
-    >
-      {activeMessageId === message.id && (
-        <span
-          data-testid="message-cursor"
-          aria-hidden
-          className="pointer-events-none absolute top-[42px] left-0 z-10 h-[19px] w-[3px] bg-accent"
-        />
-      )}
-      {message.trashed && !revealedTrashedIds.has(message.id) ? (
-        <div
-          data-testid="trashed-message-marker"
-          className="flex items-center gap-3 border border-edge border-dashed px-4 py-3 text-[14.5px] text-ink-faint"
-        >
-          This message was moved to Trash.
-          <button
-            type="button"
-            data-testid="trashed-message-reveal"
-            onClick={(event) => {
-              revealTrashed(message.id)
-              event.currentTarget.blur()
-            }}
-            className="cursor-pointer font-medium text-accent hover:underline"
+  const items = conversation.messages.map((message) => {
+    const hidden = message.trashed && !revealedTrashedIds.has(message.id)
+    const shut = !expandedMessageIds.has(message.id)
+    // The bar marks the sender line, and that line starts at a different
+    // height in each of the three shapes a message takes: an open card pads
+    // itself and draws a rule first, a shut one only draws the rule, and a
+    // trashed marker has a border and its own padding. One fixed offset put
+    // the bar on the seam under a shut row and hanging into the next.
+    const cursor = hidden ? { top: 15, height: 18 } : shut ? { top: 15, height: 20 } : { top: 42, height: 19 }
+    return (
+      <div
+        key={`message:${message.id}`}
+        ref={(element) => {
+          if (element) messageElementsRef.current.set(message.id, element)
+          else messageElementsRef.current.delete(message.id)
+        }}
+        data-testid="conversation-message"
+        data-message-id={message.id}
+        data-active-message={activeMessageId === message.id ? 'true' : undefined}
+        aria-current={activeMessageId === message.id ? 'true' : undefined}
+        data-latest-conversation-item={!inlineComposer && activeMessageId === message.id ? '' : undefined}
+        className="relative"
+        onPointerDownCapture={() => {
+          if (!inlineComposer) setActiveMessageId(message.id)
+        }}
+        onFocusCapture={() => {
+          if (!inlineComposer) setActiveMessageId(message.id)
+        }}
+      >
+        {activeMessageId === message.id && (
+          <span
+            data-testid="message-cursor"
+            aria-hidden
+            style={cursor}
+            className="pointer-events-none absolute left-0 z-10 w-[3px] bg-accent"
+          />
+        )}
+        {hidden ? (
+          <div
+            data-testid="trashed-message-marker"
+            className="flex items-center gap-3 border border-edge border-dashed px-4 py-3 text-[14.5px] text-ink-faint"
           >
-            Show message
-          </button>
-        </div>
-      ) : (
-        <MessageCard
-          threadId={conversation.threadId}
-          message={message}
-          account={account}
-          bodyHydrationMessage={bodyHydrationStatusMessage(
-            message.bodyState,
-            online,
-            conversation.bodyHydrationFailed
-          )}
-          collapsed={!expandedMessageIds.has(message.id)}
-          onToggleCollapsed={() => toggleMessage(message.id)}
-          trimExpanded={expandedTrimIds.has(message.id)}
-          onToggleTrim={() => toggleTrim(message.id)}
-        />
-      )}
-    </div>
-  ))
+            This message was moved to Trash.
+            <button
+              type="button"
+              data-testid="trashed-message-reveal"
+              onClick={(event) => {
+                revealTrashed(message.id)
+                event.currentTarget.blur()
+              }}
+              className="cursor-pointer font-medium text-accent hover:underline"
+            >
+              Show message
+            </button>
+          </div>
+        ) : (
+          <MessageCard
+            threadId={conversation.threadId}
+            message={message}
+            account={account}
+            bodyHydrationMessage={bodyHydrationStatusMessage(
+              message.bodyState,
+              online,
+              conversation.bodyHydrationFailed
+            )}
+            collapsed={shut}
+            onToggleCollapsed={() => toggleMessage(message.id)}
+            trimExpanded={expandedTrimIds.has(message.id)}
+            onToggleTrim={() => toggleTrim(message.id)}
+          />
+        )}
+      </div>
+    )
+  })
   if (inlineComposer) {
     const sourceIndex = conversation.messages.findIndex(
       (message) => message.id === inlineComposerSourceMessageId

@@ -229,11 +229,35 @@ test('coexisting snooze and follow-up produce one stable return across relaunch'
   // keeping the snooze ahead of the follow-up, and waits for the send to have
   // written its reminder — two pending rows — before it does.
   await expect.poll(() => expireReminders(app, 2)).toBe(2)
-  const { page: relaunched } = await boot.relaunch()
+  const { app: relaunchedApp, page: relaunched } = await boot.relaunch()
   const returned = relaunched.getByTestId('thread-row').filter({ hasText: 'Design notes' })
   await expect(returned.getByTestId('chip-follow-up')).toBeVisible({ timeout: 10_000 })
   await expect(returned.getByTestId('chip-returned')).toBeVisible()
   await expect(relaunched.getByTestId('thread-date-group').first()).toHaveText('Follow up')
+
+  // Two chips on one row is the crowded case, and the app's own minimum width
+  // is where it bites. The chips and the subject do not shrink, so without a
+  // clip on their column they painted across the labels and the timestamp
+  // rather than ellipsizing inside it.
+  await relaunchedApp.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setContentSize(900, 600)
+  )
+  const crowded = await returned.evaluate((row) => {
+    const subject = row.querySelector('[data-testid="thread-subject"]')
+    const middle = subject?.parentElement
+    const time = row.lastElementChild
+    if (!subject || !middle || !time) return null
+    return {
+      height: row.getBoundingClientRect().height,
+      middleRight: middle.getBoundingClientRect().right,
+      contentRight: Math.max(...[...middle.children].map((child) => child.getBoundingClientRect().right)),
+      timeLeft: time.getBoundingClientRect().left
+    }
+  })
+  expect(crowded).not.toBeNull()
+  expect(crowded?.height).toBe(46)
+  expect(crowded?.contentRight ?? 0).toBeLessThanOrEqual((crowded?.middleRight ?? 0) + 1)
+  expect(crowded?.middleRight ?? 0).toBeLessThanOrEqual((crowded?.timeLeft ?? 0) + 1)
 
   // A view round trip re-reads from SQLite: the return remains visible.
   await relaunched.keyboard.press('g')

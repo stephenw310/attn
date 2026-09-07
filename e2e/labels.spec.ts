@@ -204,15 +204,26 @@ test('keeps the subject readable beside labels at the narrowest window', async (
   // so it must still fit inside the span that clips the line.
   const line = await first.evaluate((row) => {
     const subject = row.querySelector('[data-testid="thread-subject"]')
-    const clip = subject?.parentElement
-    if (!subject || !clip) return null
+    const labels = row.querySelector('[data-testid="label-chip"]')?.parentElement
+    const time = row.lastElementChild
+    if (!subject || !labels || !time) return null
     return {
+      rowHeight: row.getBoundingClientRect().height,
       subjectRight: subject.getBoundingClientRect().right,
-      clipRight: clip.getBoundingClientRect().right,
-      clipWidth: clip.getBoundingClientRect().width
+      subjectShown: (subject as HTMLElement).clientWidth,
+      labelsLeft: labels.getBoundingClientRect().left,
+      labelsRight: labels.getBoundingClientRect().right,
+      timeLeft: time.getBoundingClientRect().left
     }
   })
   expect(line).not.toBeNull()
-  expect(line?.subjectRight ?? 0).toBeLessThanOrEqual((line?.clipRight ?? 0) + 1)
-  expect(line?.clipWidth ?? 0).toBeGreaterThan(160)
+  // One line, whatever the labels do.
+  expect(line?.rowHeight).toBe(46)
+  // Labels are a column of their own, set after the subject and before the
+  // timestamp; neither neighbour is allowed to reach into them.
+  expect(line?.subjectRight ?? 0).toBeLessThanOrEqual((line?.labelsLeft ?? 0) + 1)
+  expect(line?.labelsRight ?? 0).toBeLessThanOrEqual((line?.timeLeft ?? 0) + 1)
+  // And the subject still shows enough of itself to be worth scanning. At this
+  // window it is truncated; the failure this guards is truncation to nothing.
+  expect(line?.subjectShown ?? 0).toBeGreaterThan(60)
 })
