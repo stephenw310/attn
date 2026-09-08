@@ -140,7 +140,7 @@ describe('$autocompleteExcerpt', () => {
 
   it('truncates away from the caret: prefix tail, suffix head', () => {
     const editor = editorWith(() => {
-      const body = paragraph('a'.repeat(3_000) + 'CARET' + 'b'.repeat(1_000))
+      const body = paragraph(`${'a'.repeat(3_000)}CARET${'b'.repeat(1_000)}`)
       $getRoot().append(body)
       const text = body.getFirstChild()
       if ($isTextNode(text)) text.select(3_005, 3_005)
