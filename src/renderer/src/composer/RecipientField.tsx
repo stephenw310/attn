@@ -106,7 +106,6 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
         ))}
         <input
           ref={inputRef}
-          placeholder={recipients.length === 0 ? 'Name or email' : undefined}
           className="min-w-28 flex-1 bg-transparent py-1 text-sm text-ink outline-none placeholder:text-ink-faint"
           aria-invalid={invalid ? 'true' : undefined}
           aria-label={`${label} recipients`}

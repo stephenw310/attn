@@ -199,7 +199,6 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
             className="min-w-0 flex-1 bg-transparent text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
             data-testid="composer-subject"
             aria-label="Subject"
-            placeholder="Add a subject"
             value={props.subject}
             onChange={(event) => {
               props.setSubject(event.target.value)
