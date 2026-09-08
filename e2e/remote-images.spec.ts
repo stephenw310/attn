@@ -219,6 +219,30 @@ test('blocking cancels every request type; overrides, live policy changes, and r
   }
 })
 
+test('a sender stylesheet cannot fetch another one', async ({ app, page }) => {
+  const probe = await startProbeServer()
+  try {
+    await expect(page.getByTestId('thread-row')).toHaveCount(8)
+    // `@import` is the one way a kept <style> can reach off the machine, and an
+    // imported sheet can carry `src: local(...)` faces that `font-src` never
+    // sees. The frame's `style-src` is intersected with the renderer's own, and
+    // neither admits a remote sheet.
+    await setMessageHtml(
+      app,
+      `<style>@import url("http://127.0.0.1:${probe.port}/imported.css");</style>` +
+        `<div style="background:#0aa3d2">Lunch plans</div>`
+    )
+    await openLunch(page)
+    await expect(page.getByTestId('html-body-frame')).toBeVisible()
+    await expectWireQuiet(probe, page, '/imported.css')
+    await closeReader(page)
+  } finally {
+    await new Promise<void>((resolve) => {
+      probe.server.close(() => resolve())
+    })
+  }
+})
+
 test('a sender cannot ship a typeface of its own', async ({ app, page }) => {
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   // A non-neutral canvas keeps the sender's <style> block, the one surface

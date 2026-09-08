@@ -179,7 +179,13 @@ function installDisplayLinkHook(purifier: DOMPurify): void {
     link.setAttribute('target', '_blank')
     link.setAttribute('rel', 'noopener noreferrer')
   })
-  purifier.addHook('afterSanitizeElements', (node) => {
+  // `uponSanitizeElement`, not `afterSanitizeElements`: DOMPurify's mXSS probe
+  // runs between them, and this hook rewrites text. Serializing the parsed sheet
+  // turns `\3c` back into a literal `<`, so a sender who wrote
+  // `content:"\3c/style>\3cstyle>@font-face{…}"` would have had a second
+  // stylesheet handed to the frame after the only thing that inspects for one
+  // had already passed. Rewriting before the probe puts the result back under it.
+  purifier.addHook('uponSanitizeElement', (node) => {
     // `localName`, not `nodeName`: a `<style>` inside inline SVG is in the SVG
     // namespace, where `nodeName` is lowercase — and it still styles the whole
     // document, `@font-face` included.

@@ -59,15 +59,47 @@ test('no sheet a sender writes can declare a face', async ({ app, page }) => {
   const source = `url(data:font/woff2;base64,${readFileSync(
     require.resolve('@fontsource/alegreya/files/alegreya-latin-400-normal.woff2')
   ).toString('base64')})`
-  const sheets = SHEETS.map(([, css]) => css.replace('SRC', source)).join('\n')
+  // One <style> per case: a face found in a sheet rewrites that sheet, so
+  // sharing one element would let a single catch mask the rest.
+  const sheets = SHEETS.map(([, css]) => `<style>${css.replace('SRC', source)}</style>`).join('')
   // A non-neutral canvas is the surface that keeps a sender's <style> at all.
-  await setBody(app, `<style>${sheets}</style><div style="background:#0aa3d2">Lunch plans</div>`)
+  await setBody(app, `${sheets}<div style="background:#0aa3d2">Lunch plans</div>`)
   await page.getByTestId('thread-row').filter({ hasText: 'Lunch next week' }).click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Lunch next week')
 
   const families = await framedFamilies(page)
   // Naming the survivors beats a bare count: a failure says which form got in.
   expect(families.filter((family) => FAMILIES.includes(family))).toEqual([])
+  await page.keyboard.press('Escape')
+})
+
+test('a sheet cannot smuggle a second one past the check for one', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  // Serializing a parsed sheet turns `\3c` back into a literal `<`. DOMPurify
+  // inspects text for that before the hook that rewrites it, so a rewrite made
+  // afterwards would hand the frame a second stylesheet nothing had looked at.
+  // There is no literal `<` in the input, which is what let it past the probe.
+  const source = `url(data:font/woff2;base64,${readFileSync(
+    require.resolve('@fontsource/alegreya/files/alegreya-latin-400-normal.woff2')
+  ).toString('base64')})`
+  await setBody(
+    app,
+    `<style>@font-face{font-family:Dropped;src:${source}}` +
+      `p{content:"\\3c/style>\\3cstyle>@font-face{font-family:Smuggled;src:${source}}\\3c/style>"}</style>` +
+      `<div style="background:#0aa3d2">Lunch plans</div>`
+  )
+  await page.getByTestId('thread-row').filter({ hasText: 'Lunch next week' }).click()
+  await expect(page.getByTestId('conversation-subject')).toHaveText('Lunch next week')
+
+  const families = await framedFamilies(page)
+  expect(families).not.toContain('Smuggled')
+  expect(families).not.toContain('Dropped')
+  const sheets = await page
+    .getByTestId('html-body-frame')
+    .contentFrame()
+    .locator('body')
+    .evaluate((body) => body.querySelectorAll('style').length)
+  expect(sheets).toBeLessThanOrEqual(1)
   await page.keyboard.press('Escape')
 })
 

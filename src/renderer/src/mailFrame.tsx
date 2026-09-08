@@ -85,10 +85,14 @@ const MAIL_FRAME_CSP = [
   // origin and base URL; the parent policy is intersected with this one, so
   // both have to name it. This is the backstop rather than the guard: under
   // file: `'self'` matches any file: URL, so what actually keeps a sender from
-  // shipping a typeface is `stripFontFaceRules`, which drops the rule before
-  // the frame ever sees it.
+  // shipping a typeface is `dropSenderFontFaces`, which parses each sheet with
+  // the engine's own parser and deletes the rule before the frame ever sees it.
   "font-src 'self'",
-  "style-src 'unsafe-inline' http: https:"
+  // No `http:`/`https:`: nothing legitimate needs them. DOMPurify admits no
+  // `<link>`, and an `@import` a sender writes in a `<style>` is refused by the
+  // parent policy this one is intersected with — which matters, because an
+  // imported sheet can carry `src: local(…)` faces that `font-src` never sees.
+  "style-src 'unsafe-inline'"
 ].join('; ')
 /** Schemes main will actually open; a display link outside them is dropped. */
 const DISPLAY_LINK_SCHEMES = ['https', 'http', 'mailto']
