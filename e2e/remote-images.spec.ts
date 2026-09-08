@@ -229,6 +229,7 @@ test('a sender stylesheet cannot fetch another one', async ({ app, page }) => {
     // neither admits a remote sheet.
     await setMessageHtml(
       app,
+      'm-lunch',
       `<style>@import url("http://127.0.0.1:${probe.port}/imported.css");</style>` +
         `<div style="background:#0aa3d2">Lunch plans</div>`
     )
