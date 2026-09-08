@@ -20,7 +20,7 @@ import { accountNeedsAttention, useAccountHealth } from '../hooks/useAccountHeal
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { useShowToast } from '../toastContext'
-import { SETTINGS_HEADING_PIN_MS } from '../tuning'
+import { SETTINGS_HEADING_OFFSET_PX, SETTINGS_HEADING_PIN_MS } from '../tuning'
 import { AboutSection } from './AboutSection'
 import { AccountHealthLine } from './AccountHealthLine'
 import { AiSettingsSection } from './AiSettingsSection'
@@ -89,7 +89,11 @@ function sectionAnchor(id: string): string {
 
 function SectionTitle({ id, children }: { id: string; children: React.ReactNode }): React.JSX.Element {
   return (
-    <h2 id={sectionAnchor(id)} className="mt-7 mb-1 flex items-baseline gap-3 scroll-mt-6">
+    <h2
+      id={sectionAnchor(id)}
+      style={{ scrollMarginTop: SETTINGS_HEADING_OFFSET_PX }}
+      className="mt-7 mb-1 flex items-baseline gap-3"
+    >
       <span className={SECTION_TITLE}>{children}</span>
       <TornRule className="flex-1" />
     </h2>
@@ -126,7 +130,12 @@ function SettingsContents({
       // reader is looking at.
       const box = scroller.getBoundingClientRect()
       const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
-      const line = atEnd ? box.bottom : box.top + 24
+      // A smooth scroll lands on a fractional offset at a fractional device
+      // scale, so a heading can settle a fraction of a pixel below its own
+      // `scroll-margin-top` and read as not yet reached. Harmless while the
+      // pin only ever stood still; now that it hands control back on a timer,
+      // the pass it hands to would mark the section above the one clicked.
+      const line = atEnd ? box.bottom : box.top + SETTINGS_HEADING_OFFSET_PX + 1
       let nearest = SETTINGS_SECTIONS[0].id
       for (const section of SETTINGS_SECTIONS) {
         const heading = document.getElementById(sectionAnchor(section.id))
@@ -320,7 +329,11 @@ export function SettingsView({
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex w-full max-w-[840px] flex-col px-7 pt-2 pb-10">
             <section data-testid="settings-accounts" aria-label="Accounts">
-              <h2 id={sectionAnchor('accounts')} className="mt-2 mb-1 flex items-baseline gap-3 scroll-mt-6">
+              <h2
+                id={sectionAnchor('accounts')}
+                style={{ scrollMarginTop: SETTINGS_HEADING_OFFSET_PX }}
+                className="mt-2 mb-1 flex items-baseline gap-3"
+              >
                 <span className={SECTION_TITLE}>Accounts</span>
                 <TornRule className="flex-1" />
               </h2>

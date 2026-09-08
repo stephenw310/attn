@@ -13,3 +13,10 @@ export const INBOX_ZERO_CLOCK_INTERVAL_MS = 30_000
  * would mark whichever sits last however the reader arrived.
  */
 export const SETTINGS_HEADING_PIN_MS = 700
+/**
+ * The gap a Settings heading keeps above the scroller when the contents column
+ * scrolls to it, and the line the same column measures against to decide which
+ * heading the reader is on. One number, so the two cannot drift: the heading takes it as an
+ * inline `scroll-margin-top` and the contents column reads the same constant.
+ */
+export const SETTINGS_HEADING_OFFSET_PX = 24

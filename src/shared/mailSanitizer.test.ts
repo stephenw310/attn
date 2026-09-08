@@ -146,6 +146,45 @@ describe('sender font faces', () => {
     expect(stripFontFaceRules('p{color:red}@font-face{src:url(x)')).toBe('p{color:red}')
   })
 
+  it('reads past a comment between the keyword and the block', () => {
+    // A tokenizer sees no comment at all: the at-keyword is `font-face` and the
+    // prelude is empty, which is a rule Chromium accepts.
+    expect(stripFontFaceRules('@font-face/**/{src:url(x)}p{color:red}')).toBe('p{color:red}')
+    // `@font/**/-face` really is a different at-rule, and stays.
+    expect(stripFontFaceRules('@font/**/-face{a:b}')).toBe('@font/**/-face{a:b}')
+  })
+
+  it('takes a form feed or a carriage return as the whitespace an escape swallows', () => {
+    expect(stripFontFaceRules('@\\66\font-face{src:url(x)}p{color:red}')).toBe('p{color:red}')
+    expect(stripFontFaceRules('@\\66\ront-face{src:url(x)}p{color:red}')).toBe('p{color:red}')
+    expect(stripFontFaceRules('@\\66\r\nont-face{src:url(x)}p{color:red}')).toBe('p{color:red}')
+  })
+
+  it('does not mistake a brace inside a string or a url for the end of the block', () => {
+    expect(stripFontFaceRules('@font-face{src:url("{")}p{color:red}q{color:blue}')).toBe(
+      'p{color:red}q{color:blue}'
+    )
+    expect(stripFontFaceRules('@font-face{font-family:"}";src:url(x)}p{color:red}')).toBe('p{color:red}')
+    expect(stripFontFaceRules('@font-face{src:url(a}b)}p{color:red}')).toBe('p{color:red}')
+  })
+
+  it('leaves an @ inside a string or a comment alone', () => {
+    expect(stripFontFaceRules('p{content:"@font-face{x}"}')).toBe('p{content:"@font-face{x}"}')
+    expect(stripFontFaceRules('/* @font-face{x} */p{color:red}')).toBe('/* @font-face{x} */p{color:red}')
+  })
+
+  it('drops the statement form without swallowing the next rule', () => {
+    expect(stripFontFaceRules('@font-face;p{color:red}')).toBe('p{color:red}')
+  })
+
+  it('strips the rule out of a style element inside inline SVG', () => {
+    // An SVG `<style>` is in the SVG namespace, where `nodeName` is lowercase,
+    // and it styles the whole document just the same.
+    const html = '<svg><style>@font-face{font-family:Sender;src:url(x)}</style></svg><p>hi</p>'
+    const sanitized = sanitizeMailHtml(createDOMPurify(window), html)
+    expect(sanitized).not.toContain('font-face')
+  })
+
   it('strips the rule out of a sanitized style element', () => {
     const html =
       '<style>@font-face{font-family:Sender;src:url(data:font/woff2;base64,AA)}p{color:red}</style><p>hi</p>'
