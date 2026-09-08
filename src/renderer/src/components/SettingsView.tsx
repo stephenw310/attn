@@ -20,6 +20,7 @@ import { accountNeedsAttention, useAccountHealth } from '../hooks/useAccountHeal
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { useShowToast } from '../toastContext'
+import { SETTINGS_HEADING_PIN_MS } from '../tuning'
 import { AboutSection } from './AboutSection'
 import { AccountHealthLine } from './AccountHealthLine'
 import { AiSettingsSection } from './AiSettingsSection'
@@ -95,9 +96,6 @@ function SectionTitle({ id, children }: { id: string; children: React.ReactNode 
   )
 }
 
-/** How long a clicked heading keeps the mark while the page scrolls to it. */
-const PIN_MS = 700
-
 /**
  * The contents down the left of the desk. It scrolls the page to a heading and
  * follows the heading the reader is nearest, so the mark tracks the scroll.
@@ -113,6 +111,11 @@ function SettingsContents({
   // mark whichever sits last no matter which one the reader asked for. Hold
   // their answer until the smooth scroll has settled.
   const pinnedUntil = useRef(0)
+  // The click handler needs the geometry pass the effect owns, so that the pin
+  // can hand control back when it expires rather than waiting for a scroll
+  // that may never come.
+  const followRef = useRef<() => void>(() => {})
+  const pinTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
     const scroller = scrollRef.current
     if (!scroller) return
@@ -131,15 +134,20 @@ function SettingsContents({
       }
       if (performance.now() >= pinnedUntil.current) setActive(nearest)
     }
+    followRef.current = follow
     follow()
     scroller.addEventListener('scroll', follow, { passive: true })
-    // A width change reflows the page under a still scroll position, which
-    // leaves the mark on a section the reader has already passed.
+    // A reflow under a still scroll position leaves the mark on a section the
+    // reader has already passed. Watch the content as well as the scroller: a
+    // section that grows — a new account row — moves every heading below it
+    // without changing the scroller's own box.
     const resize = new ResizeObserver(follow)
     resize.observe(scroller)
+    if (scroller.firstElementChild) resize.observe(scroller.firstElementChild)
     return () => {
       scroller.removeEventListener('scroll', follow)
       resize.disconnect()
+      window.clearTimeout(pinTimer.current)
     }
   }, [scrollRef])
 
@@ -163,7 +171,13 @@ function SettingsContents({
               aria-current={active === section.id ? 'true' : undefined}
               onClick={() => {
                 setActive(section.id)
-                pinnedUntil.current = performance.now() + PIN_MS
+                pinnedUntil.current = performance.now() + SETTINGS_HEADING_PIN_MS
+                // The reader may scroll away inside the pin. Their last scroll
+                // event would then be the one the pin swallowed, and without
+                // this the mark would sit on the clicked heading until they
+                // scrolled again.
+                window.clearTimeout(pinTimer.current)
+                pinTimer.current = window.setTimeout(() => followRef.current(), SETTINGS_HEADING_PIN_MS + 30)
                 document
                   .getElementById(sectionAnchor(section.id))
                   ?.scrollIntoView({ block: 'start', behavior: 'smooth' })

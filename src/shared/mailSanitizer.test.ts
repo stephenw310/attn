@@ -2,7 +2,12 @@
 
 import createDOMPurify from 'dompurify'
 import { describe, expect, it } from 'vitest'
-import { sanitizeMailHtml, sanitizeQuotedMailHtml, stripUnsafeQuoteCss } from './mailSanitizer'
+import {
+  sanitizeMailHtml,
+  sanitizeQuotedMailHtml,
+  stripFontFaceRules,
+  stripUnsafeQuoteCss
+} from './mailSanitizer'
 
 describe('stripUnsafeQuoteCss', () => {
   it('removes the properties that lift quoted content out of normal flow', () => {
@@ -111,5 +116,41 @@ describe('mail sanitizer policies', () => {
     )
 
     expect(clean).toBe('<div>Hi</div>')
+  })
+})
+
+describe('sender font faces', () => {
+  it('drops an @font-face and keeps the rest of the sheet', () => {
+    expect(
+      stripFontFaceRules(
+        'p{color:red}@font-face{font-family:X;src:url(data:font/woff2;base64,AA)}b{color:blue}'
+      )
+    ).toBe('p{color:red}b{color:blue}')
+  })
+
+  it('reads the at-rule name through CSS escapes', () => {
+    // `@\66 ont-face` is the same at-rule to a parser, so a plain string match
+    // would walk straight past it.
+    expect(stripFontFaceRules('@\\66 ont-face{src:url(x)}p{color:red}')).toBe('p{color:red}')
+    expect(stripFontFaceRules('@\\46\\4F\\4Et-face{src:url(x)}p{color:red}')).toBe('p{color:red}')
+  })
+
+  it('keeps at-rules a sender may legitimately use, including nested ones', () => {
+    expect(stripFontFaceRules('@media print{p{color:red}}')).toBe('@media print{p{color:red}}')
+    expect(stripFontFaceRules('@media print{@font-face{src:url(x)}p{color:red}}')).toBe(
+      '@media print{p{color:red}}'
+    )
+  })
+
+  it('drops an unterminated rule rather than leaving it open', () => {
+    expect(stripFontFaceRules('p{color:red}@font-face{src:url(x)')).toBe('p{color:red}')
+  })
+
+  it('strips the rule out of a sanitized style element', () => {
+    const html =
+      '<style>@font-face{font-family:Sender;src:url(data:font/woff2;base64,AA)}p{color:red}</style><p>hi</p>'
+    const sanitized = sanitizeMailHtml(createDOMPurify(window), html)
+    expect(sanitized).not.toContain('font-face')
+    expect(sanitized).toContain('color:red')
   })
 })

@@ -1,6 +1,7 @@
 import alegreyaItalic from '@fontsource/alegreya/files/alegreya-latin-400-italic.woff2?url'
 import alegreyaRegular from '@fontsource/alegreya/files/alegreya-latin-400-normal.woff2?url'
 import alegreyaBold from '@fontsource/alegreya/files/alegreya-latin-700-normal.woff2?url'
+import alegreyaSansItalic from '@fontsource/alegreya-sans/files/alegreya-sans-latin-400-italic.woff2?url'
 import alegreyaSansRegular from '@fontsource/alegreya-sans/files/alegreya-sans-latin-400-normal.woff2?url'
 import alegreyaSansBold from '@fontsource/alegreya-sans/files/alegreya-sans-latin-700-normal.woff2?url'
 import DOMPurify from 'dompurify'
@@ -66,6 +67,7 @@ const MAIL_FRAME_FACES = [
   ['Alegreya', 400, 'italic', alegreyaItalic],
   ['Alegreya', 700, 'normal', alegreyaBold],
   ['Alegreya Sans', 400, 'normal', alegreyaSansRegular],
+  ['Alegreya Sans', 400, 'italic', alegreyaSansItalic],
   ['Alegreya Sans', 700, 'normal', alegreyaSansBold]
 ]
   .map(
@@ -80,9 +82,11 @@ const MAIL_FRAME_CSP = [
   'media-src data: http: https:',
   // `'self'` and nothing else. The frame's faces are the app's own bundled
   // assets, which it reaches because a srcdoc document inherits the parent's
-  // origin and base URL; a sender's `@font-face`, whether it names a `data:`
-  // source or a remote one, loads nothing. The parent policy is intersected
-  // with this one, so both have to name it.
+  // origin and base URL; the parent policy is intersected with this one, so
+  // both have to name it. This is the backstop rather than the guard: under
+  // file: `'self'` matches any file: URL, so what actually keeps a sender from
+  // shipping a typeface is `stripFontFaceRules`, which drops the rule before
+  // the frame ever sees it.
   "font-src 'self'",
   "style-src 'unsafe-inline' http: https:"
 ].join('; ')

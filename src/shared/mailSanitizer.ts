@@ -81,6 +81,63 @@ export function stripUnsafeQuoteCss(style: string): string {
     .join('; ')
 }
 
+/**
+ * Drop every `@font-face` a sender wrote.
+ *
+ * The mail frame needs `font-src` open enough to load Attn's own faces, so the
+ * policy alone cannot tell our typeface from theirs. This is the half that can:
+ * the rule never reaches the frame, and the policy stays as the backstop. The
+ * name is read through CSS escapes, because `@\66 ont-face` is the same at-rule
+ * to a parser and a plain string match would walk past it.
+ */
+export function stripFontFaceRules(css: string): string {
+  let output = ''
+  let cursor = 0
+  while (cursor < css.length) {
+    const at = css.indexOf('@', cursor)
+    if (at === -1) return output + css.slice(cursor)
+    output += css.slice(cursor, at)
+    let scan = at + 1
+    let name = ''
+    while (scan < css.length && !/[\s{;]/.test(css[scan])) {
+      if (css[scan] !== '\\') {
+        name += css[scan]
+        scan += 1
+        continue
+      }
+      const escaped = /^\\([0-9a-fA-F]{1,6})[ \t\n]?/.exec(css.slice(scan))
+      if (escaped) {
+        name += String.fromCodePoint(Number.parseInt(escaped[1], 16))
+        scan += escaped[0].length
+        continue
+      }
+      name += css[scan + 1] ?? ''
+      scan += 2
+    }
+    if (name.toLowerCase() !== 'font-face') {
+      output += '@'
+      cursor = at + 1
+      continue
+    }
+    const open = css.indexOf('{', scan)
+    if (open === -1) return output
+    let depth = 0
+    let close = open
+    for (; close < css.length; close += 1) {
+      if (css[close] === '{') depth += 1
+      else if (css[close] === '}') {
+        depth -= 1
+        if (depth === 0) {
+          close += 1
+          break
+        }
+      }
+    }
+    cursor = close
+  }
+  return output
+}
+
 const quoteHooked = new WeakSet<DOMPurify>()
 let quoting = false
 
@@ -119,6 +176,13 @@ function installDisplayLinkHook(purifier: DOMPurify): void {
     if (typeof link.setAttribute !== 'function') return
     link.setAttribute('target', '_blank')
     link.setAttribute('rel', 'noopener noreferrer')
+  })
+  purifier.addHook('afterSanitizeElements', (node) => {
+    if (!displaying || node.nodeName !== 'STYLE') return
+    const style = node as Element
+    const css = style.textContent ?? ''
+    if (!css.includes('@')) return
+    style.textContent = stripFontFaceRules(css)
   })
 }
 
