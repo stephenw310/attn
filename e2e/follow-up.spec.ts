@@ -27,15 +27,13 @@ async function sendReplyWithFollowUp(page: Page, deadline: string): Promise<void
   await composer.openReply()
   const followUpTrigger = page.getByTestId('composer-follow-up')
   await expect(followUpTrigger).not.toContainText('⏰')
-  await expect
-    .poll(() => followUpTrigger.evaluate((button) => getComputedStyle(button).textDecorationLine))
-    .toContain('underline')
+  await expect(followUpTrigger).toHaveAttribute('aria-label', 'Remind me if no reply')
   await composer.typeBody('Circling back on this.')
   await page.getByTestId('composer-follow-up').click()
   await page.getByTestId('follow-up-custom-input').fill(deadline)
   await expect(page.getByTestId('follow-up-resolved')).not.toContainText('Pick a future time')
   await page.getByTestId('follow-up-custom-confirm').click()
-  await expect(followUpTrigger).toContainText('Follow up')
+  await expect(followUpTrigger).toHaveAttribute('data-follow-up-at', /\d+/)
   await composer.triggerSend()
   await expect(composer.root).toHaveCount(0)
   await page.keyboard.press('Escape')
@@ -161,7 +159,7 @@ test('the shortcut opens follow-up without overflowing the toolbar, and Escape r
 
   await page.getByTestId('follow-up-preset-3d').click()
   await expect(popover).toHaveCount(0)
-  await expect(page.getByTestId('composer-follow-up')).toContainText('Follow up')
+  await expect(page.getByTestId('composer-follow-up')).toHaveAttribute('data-follow-up-at', /\d+/)
   await expect
     .poll(() =>
       page.getByTestId('composer-footer').evaluate((footer) => footer.scrollWidth <= footer.clientWidth)

@@ -34,7 +34,6 @@ import { useComposerController } from './useComposerController'
 interface ComposerProps {
   draft: Draft
   mode?: 'full' | 'inline'
-  attachedToMessage?: boolean
   initialError?: string | null
   onClose: () => void
   onExit?: () => void
@@ -63,7 +62,7 @@ function validateComposerUrl(url: string): boolean {
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast, aiDraft },
+  { draft, mode = 'full', initialError = null, onClose, onExit, onToast, aiDraft },
   ref
 ): React.JSX.Element {
   const {
@@ -131,8 +130,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? `flex w-full flex-none flex-col overflow-hidden border border-edge bg-raised ${attachedToMessage ? 'rounded-b-[10px]' : 'rounded-xl shadow-composer'}`
-          : 'flex min-h-0 flex-1 flex-col bg-raised/35'
+          ? 'flex w-full flex-none flex-col rounded-[10px] border border-edge bg-raised'
+          : 'flex min-h-0 flex-1 flex-col bg-raised/35 px-6 pb-6'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}
       data-draft-kind={draft.kind}
@@ -182,8 +181,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <div
         className={
           mode === 'inline'
-            ? 'flex w-full flex-col bg-raised'
-            : 'mx-auto flex min-h-0 w-full max-w-[900px] flex-1 flex-col border-x border-edge bg-raised'
+            ? 'flex w-full flex-col rounded-b-[10px]'
+            : 'mx-auto mt-3 flex min-h-0 w-full max-w-[900px] flex-1 flex-col rounded-xl border border-edge bg-raised shadow-composer'
         }
       >
         <ComposerEnvelope

@@ -50,23 +50,12 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
   const { draft, mode } = props
   return (
     <header
-      className={`flex shrink-0 items-center border-b border-edge ${
+      className={`flex shrink-0 items-center ${
         mode === 'inline' ? 'min-h-12 gap-3 px-4 py-2' : 'min-h-13 gap-4 px-6 py-2.5'
       }`}
       data-testid={mode === 'inline' ? 'composer-inline-header' : undefined}
     >
-      {mode === 'full' ? (
-        <button
-          type="button"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
-          data-testid="composer-close"
-          aria-label="Save draft and go back"
-          disabled={props.attaching || props.closing}
-          onClick={props.closeAndSave}
-        >
-          <span aria-hidden>←</span> Back
-        </button>
-      ) : (
+      {mode === 'inline' && (
         <span className="flex size-7 flex-none items-center justify-center rounded-full bg-accent/10 text-sm text-accent">
           {draft.kind === 'forward' ? '↪' : '↩'}
         </span>
@@ -99,9 +88,17 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
               undo <Kbd>{modKeyLabel()}Z</Kbd>
             </span>
             <span aria-hidden>·</span>
-            <span className="flex items-center gap-1.5">
-              save &amp; close <Kbd>Esc</Kbd>
-            </span>
+            <button
+              type="button"
+              data-testid="composer-close"
+              aria-label="Save and close draft"
+              data-tooltip="Save and close draft (Esc)"
+              disabled={props.attaching || props.closing}
+              onClick={props.closeAndSave}
+              className="cursor-pointer rounded-md px-2 py-1 hover:bg-active hover:text-ink"
+            >
+              <Kbd>Esc</Kbd>
+            </button>
           </span>
         ) : (
           <button
@@ -109,7 +106,7 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
             className="flex size-7 items-center justify-center rounded-md text-lg text-ink-faint hover:bg-active hover:text-ink"
             data-testid="composer-close"
             aria-label="Save and close draft"
-            title="Save and close draft (Esc)"
+            data-tooltip="Save draft and close reply"
             onClick={props.closeAndSave}
           >
             ×
@@ -125,11 +122,11 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
   return (
     <>
       <div
-        className="flex min-h-10 shrink-0 items-center border-b border-edge px-4"
+        className="flex min-h-10 shrink-0 items-center px-4"
         data-testid="composer-from"
         data-email={draft.accountId}
       >
-        <span className="w-10 shrink-0 text-sm font-medium text-ink-faint">From</span>
+        <span className="w-14 shrink-0 text-sm font-medium text-ink-faint">From</span>
         <span className="min-w-0 truncate text-sm text-ink">{draft.accountId}</span>
       </div>
       <div className="relative">
@@ -196,17 +193,20 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
         </>
       )}
       {mode === 'full' && (
-        <input
-          className="h-12 shrink-0 border-b border-edge bg-transparent px-4 text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
-          data-testid="composer-subject"
-          aria-label="Subject"
-          placeholder="Subject"
-          value={props.subject}
-          onChange={(event) => {
-            props.setSubject(event.target.value)
-            props.updateFields({ subject: event.target.value })
-          }}
-        />
+        <label className="mx-4 flex h-12 shrink-0 items-center border-b border-edge focus-within:border-accent">
+          <span className="w-14 shrink-0 text-sm font-medium text-ink-faint">Subject</span>
+          <input
+            className="min-w-0 flex-1 bg-transparent text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
+            data-testid="composer-subject"
+            aria-label="Subject"
+            placeholder="Add a subject"
+            value={props.subject}
+            onChange={(event) => {
+              props.setSubject(event.target.value)
+              props.updateFields({ subject: event.target.value })
+            }}
+          />
+        </label>
       )}
       {props.sendError && (
         <div

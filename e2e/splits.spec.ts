@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { runPaletteCommand } from './nav'
 import { emitFocusThread } from './seams'
 
 test.use({ seed: 'fixtures/seed-splits.json' })
@@ -45,7 +46,10 @@ test('classifies once, navigates locally, and restores each split selection', as
   await expect(tabs).toHaveText([/Calendar1/, /GitHub1/, /Newsletters1/, /Important1/, /Other1/])
   // Rules have one visible home in the Inbox header. The ellipsis appears
   // only when there are genuinely hidden splits to navigate to.
-  await expect(page.getByTestId('split-rules-settings')).toHaveAttribute('title', 'Manage Inbox splits')
+  await expect(page.getByTestId('split-rules-settings')).toHaveAttribute(
+    'data-tooltip',
+    /Manage Inbox splits/
+  )
   await expect(page.getByTestId('split-strip-overflow')).toHaveCount(0)
 
   await expect(page.locator('[data-testid="split-tab"][data-split-id="base:important"]')).toHaveAttribute(
@@ -460,3 +464,28 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByTestId('split-rules')).toBeVisible()
   })
 }
+
+test('shares one header row and remembers the hidden status and hint bar', async ({ boot, page }) => {
+  const header = page.getByTestId('mail-view-header')
+  const strip = page.getByTestId('split-strip')
+  await expect(strip).toBeVisible()
+  const headerBox = await header.boundingBox()
+  const stripBox = await strip.boundingBox()
+  expect(stripBox?.y).toBe(headerBox?.y)
+  expect(stripBox?.height).toBeLessThanOrEqual(headerBox?.height ?? 0)
+  const before = await page.getByTestId('thread-list').boundingBox()
+  await page.getByTestId('footer-toggle').click()
+  await expect(page.getByTestId('mail-footer')).toHaveCount(0)
+  expect((await page.getByTestId('thread-list').boundingBox())?.height).toBeGreaterThan(before?.height ?? 0)
+  await page.getByTestId('thread-row').first().click()
+  await expect(page.getByTestId('mail-footer')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+  await page.screenshot({ path: join(__dirname, '.artifacts/header-footer-collapsed.png') })
+  const relaunched = await boot.relaunch()
+  await expect(relaunched.page.getByTestId('footer-toggle')).toHaveAttribute('aria-expanded', 'false')
+  await expect(relaunched.page.getByTestId('mail-footer')).toHaveCount(0)
+  await runPaletteCommand(relaunched.page, 'Show keyboard hints')
+  await expect(relaunched.page.getByTestId('mail-footer')).toBeVisible()
+  await expect(relaunched.page.getByTestId('footer-toggle')).toHaveAttribute('aria-expanded', 'true')
+})

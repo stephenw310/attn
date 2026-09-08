@@ -50,7 +50,7 @@ function MailActivity({
           type="button"
           data-testid="action-reconnect"
           onClick={onReconnect}
-          title="Google authorization expired; reconnect to retry paused changes"
+          data-tooltip="Google authorization expired; reconnect to retry paused changes"
           className="cursor-pointer font-medium text-accent hover:underline"
         >
           <span data-testid="paused-count">{pausedActions} paused</span> · Reconnect Google
@@ -127,7 +127,7 @@ function AccountMenu({
         {chipAttention && (
           <span
             aria-hidden
-            title="An account needs attention"
+            data-tooltip="An account needs attention"
             className="size-1.5 flex-none rounded-full bg-accent"
           />
         )}
@@ -150,7 +150,7 @@ function AccountMenu({
                 data-email={account.id}
                 data-active={active ? 'true' : 'false'}
                 disabled={accountActionsBlocked && !active}
-                title={active ? undefined : blockedTitle}
+                data-tooltip={active ? undefined : blockedTitle}
                 onClick={() => {
                   closeMenu()
                   if (!active) onSwitchAccount(account.id)
@@ -180,7 +180,7 @@ function AccountMenu({
             type="button"
             data-testid="account-add"
             disabled={accountActionsBlocked}
-            title={blockedTitle}
+            data-tooltip={blockedTitle}
             onClick={() => {
               closeMenu()
               onAddAccount()
@@ -214,7 +214,7 @@ function AccountMenu({
             // live, so opening it mid-draft lets keystrokes reach a surface
             // the user can no longer see (PR #101 review).
             disabled={accountActionsBlocked}
-            title={blockedTitle}
+            data-tooltip={blockedTitle}
             onClick={() => {
               closeMenu()
               onOpenSettings()
@@ -243,7 +243,7 @@ function AccountMenu({
               closeMenu()
               onRemoveAccount()
             }}
-            title={
+            data-tooltip={
               blockedTitle ??
               "Removes this account's sign-in and stops its sync; you choose what happens to its local mail"
             }
@@ -258,11 +258,14 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
+  syncStatus: React.ReactNode
   pendingActionCount: number
   pausedActionCount: number
   outboxCount: number
   selectionCount: number
   composerOpen: boolean
+  footerCollapsed: boolean
+  onToggleFooter: () => void
   sidebarCollapsed: boolean
   status: AuthStatus
   accountStatuses: readonly AccountSyncStatus[] | null
@@ -284,6 +287,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     outboxCount,
     selectionCount,
     composerOpen,
+    footerCollapsed,
+    onToggleFooter,
     sidebarCollapsed,
     status,
     accountStatuses,
@@ -304,26 +309,49 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
       data-testid="mail-header"
       className="app-drag app-titlebar-safe-area flex h-11 flex-none items-center gap-6 border-b border-edge"
     >
-      <button
-        type="button"
-        data-testid="sidebar-toggle"
-        data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
-        aria-label={sidebarAction}
-        aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
-        aria-controls="mail-sidebar"
-        aria-expanded={!sidebarCollapsed}
-        title={`${sidebarAction} (${sidebarShortcut})`}
-        onClick={(event) => {
-          onToggleSidebar()
-          event.currentTarget.blur()
-        }}
-        className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-      >
-        <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
-          <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
-          <path d="M8.5 4v16" strokeWidth="1.75" />
-        </svg>
-      </button>
+      {!composerOpen && (
+        <>
+          <button
+            type="button"
+            data-testid="sidebar-toggle"
+            data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
+            aria-label={sidebarAction}
+            aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
+            aria-controls="mail-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            data-tooltip={`${sidebarAction} (${sidebarShortcut})`}
+            onClick={(event) => {
+              onToggleSidebar()
+              event.currentTarget.blur()
+            }}
+            className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
+              <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
+              <path d="M8.5 4v16" strokeWidth="1.75" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            data-testid="footer-toggle"
+            aria-label={footerCollapsed ? 'Show keyboard hints' : 'Hide keyboard hints'}
+            data-tooltip={`${footerCollapsed ? 'Show keyboard hints' : 'Hide keyboard hints'} (${modKeyLabel()}⇧B)`}
+            aria-keyshortcuts={isMacPlatform() ? 'Meta+Shift+B' : 'Control+Shift+B'}
+            aria-expanded={!footerCollapsed}
+            aria-controls="mail-footer"
+            onClick={(event) => {
+              onToggleFooter()
+              event.currentTarget.blur()
+            }}
+            className="app-no-drag -ml-4 flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
+              <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
+              <path d="M3 15h18" strokeWidth="1.75" />
+            </svg>
+          </button>
+        </>
+      )}
       <div className="app-no-drag ml-auto flex items-center gap-4">
         {!composerOpen && selectionCount > 0 && (
           <span
@@ -340,6 +368,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           onReconnect={onReconnectActions}
           onOpenOutbox={composerOpen ? undefined : onOpenOutbox}
         />
+        {props.syncStatus}
         <AccountMenu
           status={status}
           accountStatuses={accountStatuses}

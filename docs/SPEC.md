@@ -73,7 +73,9 @@ A 216-pixel sidebar contains mailboxes and user labels. A persistent control and
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
-The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. Inbox splits appear above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette.
+The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title and Inbox splits share one header row above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
+Reader, Settings, and new-message headers use one clickable `Esc` close control without a separate Back button.
+Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
 
@@ -158,8 +160,8 @@ old bodies or attachments. The durable listing count remains cursor bookkeeping 
 progress; page-level `resultSizeEstimate` is not a mailbox total and must never be used as the denominator.
 Contact statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
-never contribute to contacts. While the pass runs, sync status reads **Live · indexing older mail** with
-progress and quota-wait detail. Importing a user's saved Google Contacts through the People API remains a
+never contribute to contacts. While the pass runs, sync status reads **Indexing**.
+Hover or click the status for progress and quota-wait details. Importing a user's saved Google Contacts through the People API remains a
 separate opt-in product decision because it adds OAuth scope and consent requirements; autocomplete must not
 imply that the mail-derived index contains an address book the user has never emailed.
 
@@ -186,11 +188,11 @@ A capped sweep is usable but not complete. Keep `capped:lifetime[:page-token]` a
 durable so a raised limit resumes without duplicate counting. Show capped coverage separately from
 ongoing indexing and from an exhausted `done` cursor, with Gmail search available for older mail.
 
-After interactive readiness, the footer reports **Live · indexing older mail** rather than a blocking
-“Syncing” state. The lifetime line reads **X of Y threads indexed · time remaining**, where X is the account's
+After interactive readiness, the top bar reports **Indexing** while mail remains usable.
+The status details show **X of Y threads indexed** and time remaining, where X is the account's
 unique local thread count and Y is the current profile thread total. The ETA estimates time to the local
 sweep limit or the account total, whichever is smaller; disabling the limit uses the account total. No ETA
-is shown once that target is reached or when the account total is unknown. The footer also exposes an
+is shown once that target is reached or when the account total is unknown. The status details also expose an
 explicit quota-wait state instead of appearing stuck during backoff. Split badges and OS badges retain
 their unread counts; the top bar has no unread-progress meter.
 
@@ -203,7 +205,7 @@ their unread counts; the top bar has no unread-progress meter.
 
 Conflict rule: server state wins, except locally-pending actions replay on top of it.
 
-**Sync visibility:** local-first hides the network, so the app must say what the network is doing. The footer carries a persistent sync status — **Live**, **Checking**, **Syncing** (with backfill stage progress), **Offline**, or **Error** — distinguishing "network down, local mail fully usable" from "sync is failing". The error state opens details with **Retry now** and **Copy details** actions (both also registered commands); offline failures retry automatically when connectivity returns. The top bar shows "N pending" whenever local actions await server replay.
+**Sync visibility:** The top bar shows a dot and one label: Live, Checking, Syncing, Indexing, Offline, or Error. Hover or click for progress details. Click Error to read the full message, retry, or copy details. Status remains visible when keyboard hints are hidden.
 
 **Acceptance criteria**
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.
@@ -229,7 +231,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 
 - The content-width list groups conversations under Today, Yesterday, Last 7 days, Earlier this month, then calendar-year headings so month/day timestamps on old mail stay unambiguous. It shows sender(s), subject, a 1–2 line snippet, timestamp, and chips (attachment, starred, snoozed-return, follow-up). Unread rows are visually distinct. Every mailbox and user-label view reads 100 rows initially, loads the next keyset page near the tail, and keeps fixed-height windowing with overscan over the accumulated rows. No list count is shown because a loaded-page count is not a mailbox total.
 - In the list, `J`/`K` and unmodified `ArrowUp`/`ArrowDown` move the selection.
-- `Enter` or clicking a row opens the **full-window conversation** at a responsive readable measure (576–896px), positioned at its newest message or restored thread-bound draft. Its header contains a visible Back/List control, subject, quiet queue position ("4 of 12"), and `Esc` hint. The newest message is expanded; older messages start as one-line summaries and their bodies (including HTML frames) are not mounted until expanded. Clicking an expanded message's header collapses it into that same summary row; clicking the summary reopens it.
+- `Enter` or clicking a row opens the **full-window conversation** at a responsive readable measure (576–896px), positioned at its newest message or restored thread-bound draft. Its header contains subject, quiet queue position ("4 of 12"), and a clickable `Esc` control that returns to the list. The newest message is expanded; older messages start as one-line summaries and their bodies (including HTML frames) are not mounted until expanded. Clicking an expanded message's header collapses it into that same summary row; clicking the summary reopens it.
 - While reading, `J`/`K` opens the next/previous conversation at its newest message or restored draft; at the first conversation, `K` returns to the full-width list instead of remaining in the reader. The adjacent conversations are fetched into the local renderer cache beforehand so this usually has no loading state. Unmodified `ArrowUp`/`ArrowDown`, `Space`/`Shift+Space`, and `PageUp`/`PageDown` scroll the current conversation, while `Shift+ArrowUp`/`Shift+ArrowDown` extend the selection exactly as `Shift+J`/`Shift+K` do — the arrow aliases behave the same in the list and the reader. Modifier+key chords retain their platform/browser meaning. Keyboard handling continues after clicking recipient, attachment, or trim controls and while focus is inside an HTML-mail frame; `Enter` on a focused mail link retains its native link action. Unless a transient overlay consumes it first, `Esc` or Back/List returns to the full-width list from every Tab stop—including focused buttons and mail links—with selection and scroll intact.
 - **Message display:** each message card shows the sender, with the active account rendered consistently as `Me` before and after send confirmation, plus a recipient summary ("to me, Priya · cc Daniel") that expands on click to the full From/To/Cc/Bcc/Reply-To set with the full date, the body, and attachment chips (filename + size — click downloads to the OS Downloads folder and reveals the file). The actual outgoing `From` header uses the primary Gmail send-as display name so recipients see the configured identity. Bare HTTP(S) and `www.` URLs in plain text or unlinked HTML text render as external links. Quoted trails and signatures auto-collapse behind a plain-text `...` control rendered inline at the trim boundary; the control stays in place while expanding/collapsing and a second click collapses again. `Tab` always retains native focus navigation across the product. For collapsed HTML mail, the `...` control precedes links inside the mail frame in keyboard order; reaching it reveals the hidden trail without changing the reading viewport dimensions, and the next Tab continues into the mail links. Revealing a long trail makes the existing reading surface scroll instead of growing the window. Text-like HTML and fallback text use Attn's padded native reading surface. Typography, media, tables, dimensions, alignment, and layout-only CSS remain native because they do not require a white document. Meaningful inline text colors remain distinct on the native dark surface, with low-contrast hues brightened and ordinary dark foregrounds normalized to the native text color. Uncolored quoted text is dimmed so preserved answer colors remain easy to distinguish. HTML whose rendered meaning depends on the winning non-neutral background or background image keeps a light document canvas shared by its body, trim control, and attachments. Attn does not add padding inside light documents; sender-authored body padding still takes precedence. Light HTML body containers use the message card's 10px corner radius. Decorative markup confined to a signature does not promote the message. A real authored canvas inside a quoted trail is content and retains the light treatment, while ordinary quoted formatting does not turn every later reply white. Wide mail gets an in-frame horizontal scrollbar, and the conversation reserves its vertical scrollbar gutter so expanding content does not shift the reader. Bcc appears only on the user's own sent copies — Gmail never exposes other senders' Bcc.
 - Bodies for the selected and adjacent conversations are preloaded so opening never shows a spinner.
@@ -243,7 +245,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 - Every message's full recipient set is inspectable in two interactions or fewer; attachments download to the OS Downloads folder and are revealed on completion.
 - Quote/signature collapsing never reduces an all-quote/all-signature message to a blank card, never hides content without a visible expander, and expanding/collapsing is instant (no network) without moving the control or remounting the HTML document.
 - Opening by keyboard or pointer transfers reading keys to the conversation. `J`/`K` changes conversation, reading keys scroll, inline controls and HTML-frame focus never strand the keyboard loop, and expanding long content does not horizontally shift the reading surface.
-- When the sidebar is expanded, every system mailbox and user label is visible. Collapsing it with the top-bar toggle or `Mod+B` removes the entire sidebar, preserves the active view, and survives relaunch. The title-only view header remains visible so the current mailbox or label is unambiguous. System mailboxes remain reachable by palette and keyboard while the sidebar is closed. Every user label opens from its row or a message-list chip. A cached switch renders in < 50ms, returning restores selection/scroll, and displayed rows match local membership without a network round trip.
+- When the sidebar is expanded, every system mailbox and user label is visible. Collapsing it with the top-bar toggle or `Mod+B` removes the entire sidebar, preserves the active view, and survives relaunch. The view header remains visible so the current mailbox or label is unambiguous. System mailboxes remain reachable by palette and keyboard while the sidebar is closed. Every user label opens from its row or a message-list chip. A cached switch renders in < 50ms, returning restores selection/scroll, and displayed rows match local membership without a network round trip.
 
 ### F4 — Triage actions & undo
 
@@ -333,7 +335,9 @@ The Done action confirmation says `Marked done`.
 - Ranking: exact prefix > fuzzy score, with recently/frequently used commands boosted.
 - **Engineering rule:** every user-facing feature must register a palette command. No feature ships reachable only by mouse.
 
-The shortcut footer is a context-aware guide. Its default state is a single,
+The shortcut footer is a context-aware guide. A persistent top-bar control, `Mod+Shift+B`, and the command palette show or hide
+the keyboard hints. The hint bar is visible by default. It sits below the right-hand content pane. The sidebar extends to the bottom of the window. Sync status stays visible beside the account menu when hints are hidden. The saved choice applies across mail views and survives
+relaunch. Its default state is a single,
 non-wrapping line of only the commands relevant to the active view. Footer hints are explicit command
 metadata, not automatic ranking. They favor frequent or view-defining actions, appear only while that
 command is registered, and group equivalent keys under one label. The main list orders `J/K` Navigate,
@@ -354,7 +358,7 @@ can pan the line horizontally without a native scrollbar changing the footer hei
 
 `C` opens new mail in a **full-window focused surface** with a centered 800–900px writing measure. The prior
 list or conversation remains mounted but hidden so its selection and scroll are restored exactly when `Esc`
-or the visible Back control saves and closes the draft. From a mail list, `R` or `F` opens the selected
+or the visible Esc control saves and closes the draft. From a mail list, `R` or `F` opens the selected
 conversation directly into its inline reply or forward composer. In the reader, `N`/`P` moves a visible
 message cursor without expanding the message, and `O` expands or collapses it. Clicking a message also
 selects it. `Enter` opens a selected collapsed message, like `O`; on an already expanded message it opens
@@ -376,8 +380,11 @@ Opening a conversation with an existing thread-bound draft reopens its newest dr
 selecting and expanding that message. If the source is no longer available, the draft appears at the end of
 the conversation. Loading or refreshing the conversation never remounts the composer or loses unsaved edits.
 New incoming messages do not move the message cursor away from what the user is reading.
+Inline drafts are separate rounded cards with a gap below their source message. The message cursor ends at the source card.
+New-message drafts have a rounded card with space above and below it. Recipient and Subject fields use inset bottom rules and persistent labels. From stays unruled. The action toolbar has no divider. Full-screen compose hides the sidebar and hint-bar toggles while keeping sync status visible.
+The reminder control uses a bell icon. Its popup renders above the composer without clipping.
 The inline
-composer's close button saves the draft and leaves the reader open; `Esc` or the conversation Back control
+composer's close button saves the draft and leaves the reader open; `Esc` or the reader close control
 saves it and returns directly to the originating list in one action. Thread-bound drafts opened from Drafts
 return to this same inline context whenever the parent conversation is locally available. While composing, the global mail shortcut
 footer is absent and the composer owns its action footer, so editing controls can never overlap global hints.
@@ -487,7 +494,7 @@ the reminder states affected by triage.
 - Result rows open straight into the conversation; `Esc` returns to the result list, then to the inbox.
 - Search is scoped to the active account — the local FTS query and the Enter-submitted Gmail query alike.
   Cross-account search is out of v1 (F18).
-- Local coverage follows the store: header fields match lifetime mail once the sweep completes; body terms and filenames match only hydrated mail, while `has:attachment` matches lifetime-wide once the ids-only attachment pass that follows the sweep has run under F2. Local results update as the user types. Enter submits the same query to Gmail (`q=`) once and moves focus to the results; a passive row reports remote progress and failures. Threads fetched from Gmail persist through the normal write path and stay cached. Gmail search is unavailable for Drafts and snooze queries because those are backed by Attn's local outbox and reminder state rather than Gmail search state.
+- Local coverage follows the store: header fields match lifetime mail once the sweep completes; body terms and filenames match only hydrated mail, while `has:attachment` matches lifetime-wide once the ids-only attachment pass that follows the sweep has run under F2. Local results update as the user types. Gmail search status and local coverage share one compact area directly below the search bar without separate divider rows. Enter submits the same query to Gmail (`q=`) once and moves focus to the results; a passive row reports remote progress and failures. Threads fetched from Gmail persist through the normal write path and stay cached. Gmail search is unavailable for Drafts and snooze queries because those are backed by Attn's local outbox and reminder state rather than Gmail search state.
 - At large scale, text search considers a bounded recent-match window before filters, and the footer
   identifies partial results. Explicit snooze queries keep older local matches because Gmail cannot
   search local reminder state. A historical sync cap is a separate coverage limit; changing it neither

@@ -9,10 +9,12 @@ import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
 import { MailSidebar } from './MailSidebar'
 import { OutboxList } from './OutboxList'
+import { QuickTooltip } from './QuickTooltip'
 import { SearchHeader, searchCoverageText } from './SearchHeader'
 import { ServerSearchRow } from './ServerSearchRow'
 import { SettingsView } from './SettingsView'
 import { SplitStrip } from './SplitStrip'
+import { SyncStatus } from './SyncStatus'
 import { ThreadList } from './ThreadList'
 
 function threadListKind(view: MailView): ThreadListView | 'label' {
@@ -31,6 +33,16 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         selectionCount={c.searchOpen || (c.view !== 'drafts' && c.view !== 'outbox') ? c.selectedIds.size : 0}
         composerOpen={c.fullWindowComposerDraft !== null}
         sidebarCollapsed={c.sidebarCollapsed}
+        footerCollapsed={c.footerCollapsed}
+        onToggleFooter={c.toggleFooter}
+        syncStatus={
+          <SyncStatus
+            sync={c.sync}
+            networkOnline={c.networkOnline}
+            onRetry={c.retrySync}
+            onCopyError={c.copySyncError}
+          />
+        }
         status={c.status}
         accountStatuses={c.accounts.accountStatuses}
         onReconnectActions={c.accounts.reconnectActions}
@@ -61,53 +73,52 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             onOpenOutbox={c.openOutbox}
           />
         )}
-        {c.settingsOpen && c.activeAccount && (
-          <SettingsView
-            status={c.status}
-            accountStatuses={c.accounts.accountStatuses}
-            settings={c.appSettings}
-            accountSettings={c.accountSettings}
-            onUpdateSetting={c.updateAppSetting}
-            onUpdateAccountSetting={c.updateAccountSetting}
-            onReorderAccounts={c.onReorderAccounts}
-            onAddAccount={c.accounts.addAccount}
-            onReconnect={c.accounts.reconnectActions}
-            onSignOut={c.accounts.requestRemoveAccount}
-            onClose={c.closeSettings}
-            focusControl={c.settingsFocus}
-          />
-        )}
-        <div
-          className={`min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
-          aria-hidden={c.settingsOpen || undefined}
-        >
-          <MailboxTop controller={c} />
-          <MailboxBody controller={c} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {c.settingsOpen && c.activeAccount && (
+            <SettingsView
+              status={c.status}
+              accountStatuses={c.accounts.accountStatuses}
+              settings={c.appSettings}
+              accountSettings={c.accountSettings}
+              onUpdateSetting={c.updateAppSetting}
+              onUpdateAccountSetting={c.updateAccountSetting}
+              onReorderAccounts={c.onReorderAccounts}
+              onAddAccount={c.accounts.addAccount}
+              onReconnect={c.accounts.reconnectActions}
+              onSignOut={c.accounts.requestRemoveAccount}
+              onClose={c.closeSettings}
+              focusControl={c.settingsFocus}
+            />
+          )}
+          <div
+            className={`min-h-0 min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
+            aria-hidden={c.settingsOpen || undefined}
+          >
+            <MailboxTop controller={c} />
+            <SearchStatus controller={c} />
+            <MailboxBody controller={c} />
+          </div>
+          {!c.fullWindowComposerDraft && !c.footerCollapsed && (
+            <MailFooter
+              context={
+                c.inlineComposerDraft
+                  ? 'composer'
+                  : c.searchOpen && c.search.keyboardTarget === 'query' && !c.readerOpen
+                    ? 'search'
+                    : c.readerOpen
+                      ? 'reader'
+                      : !c.searchOpen && c.view === 'outbox'
+                        ? 'outbox'
+                        : 'list'
+              }
+              pendingChord={c.pendingChord}
+            />
+          )}
         </div>
       </div>
 
-      {!c.fullWindowComposerDraft && (
-        <MailFooter
-          context={
-            c.inlineComposerDraft
-              ? 'composer'
-              : c.searchOpen && c.search.keyboardTarget === 'query' && !c.readerOpen
-                ? 'search'
-                : c.readerOpen
-                  ? 'reader'
-                  : !c.searchOpen && c.view === 'outbox'
-                    ? 'outbox'
-                    : 'list'
-          }
-          pendingChord={c.pendingChord}
-          sync={c.sync}
-          networkOnline={c.networkOnline}
-          onRetry={c.retrySync}
-          onCopyError={c.copySyncError}
-        />
-      )}
-
       <InboxOverlays controller={c} />
+      <QuickTooltip />
     </div>
   )
 }
@@ -131,14 +142,22 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
           data-testid="mail-view-header"
           className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
         >
-          <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
+          <h1 data-testid="mailbox-title" className="mr-5 flex-none text-base font-semibold text-ink">
             <span data-testid="view-title">{c.activeViewTitle}</span>
           </h1>
+          {c.view === 'inbox' && c.splits.state && (
+            <SplitStrip
+              splits={c.splits.state.splits}
+              activeSplitId={c.splits.activeSplitId}
+              onSelect={c.switchSplit}
+              onManage={() => c.setSplitRulesOpen(true)}
+            />
+          )}
           <button
             type="button"
             data-testid="search-open"
             aria-label="Search mail"
-            title="Search mail (/)"
+            data-tooltip="Search mail (/)"
             onClick={c.openSearch}
             className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
           >
@@ -149,14 +168,6 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
             <span>/</span>
           </button>
         </div>
-      )}
-      {!c.searchOpen && c.view === 'inbox' && c.splits.state && (
-        <SplitStrip
-          splits={c.splits.state.splits}
-          activeSplitId={c.splits.activeSplitId}
-          onSelect={c.switchSplit}
-          onManage={() => c.setSplitRulesOpen(true)}
-        />
       )}
     </>
   )
@@ -243,8 +254,6 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
         />
       )}
 
-      <SearchStatus controller={c} />
-
       {c.readerOpen && c.selected && (
         <ConversationView
           selected={c.selected}
@@ -271,7 +280,10 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
 function SearchStatus({ controller: c }: { controller: InboxController }): React.JSX.Element | null {
   if (!c.searchOpen || c.readerOpen || !c.searchQuery.trim()) return null
   return (
-    <>
+    <div
+      data-testid="search-status"
+      className="flex flex-none flex-wrap items-center justify-between gap-x-6 gap-y-1 px-7 py-2 text-ink-faint"
+    >
       {!c.searchDraftMode && !c.search.snoozeMode && (
         <ServerSearchRow
           phase={c.search.server.phase}
@@ -286,7 +298,7 @@ function SearchStatus({ controller: c }: { controller: InboxController }): React
         data-search-query={c.search.local.completedQuery ?? undefined}
         role={c.search.local.failed ? 'alert' : 'status'}
         data-partial={c.search.local.response?.partial || undefined}
-        className={`flex h-8 flex-none items-center border-t border-edge px-7 text-[11px] ${
+        className={`min-w-0 text-[11px] ${
           c.search.local.response?.partial ? 'text-accent' : 'text-ink-faint'
         }`}
       >
@@ -296,6 +308,6 @@ function SearchStatus({ controller: c }: { controller: InboxController }): React
             ? searchCoverageText(c.search.local.response.coverage, c.search.local.response.partial)
             : 'Searching cached mail…'}
       </div>
-    </>
+    </div>
   )
 }

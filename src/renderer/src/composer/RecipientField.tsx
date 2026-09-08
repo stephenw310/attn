@@ -81,10 +81,10 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
 
   return (
     <div
-      className="relative flex min-h-10 items-start border-b border-edge px-4"
+      className="relative flex min-h-11 items-start px-4 after:pointer-events-none after:absolute after:inset-x-4 after:bottom-0 after:border-b after:border-edge focus-within:after:border-accent"
       data-testid={`composer-${field}`}
     >
-      <span className="w-10 shrink-0 pt-2.5 text-sm font-medium text-ink-faint">{label}</span>
+      <span className="w-14 shrink-0 pt-2.5 text-sm font-medium text-ink-faint">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-1.5">
         {recipients.map((recipient) => (
           <span
@@ -106,6 +106,7 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
         ))}
         <input
           ref={inputRef}
+          placeholder={recipients.length === 0 ? 'Name or email' : undefined}
           className="min-w-28 flex-1 bg-transparent py-1 text-sm text-ink outline-none placeholder:text-ink-faint"
           aria-invalid={invalid ? 'true' : undefined}
           aria-label={`${label} recipients`}

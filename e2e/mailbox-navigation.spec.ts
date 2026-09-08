@@ -155,7 +155,7 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
     process.platform === 'darwin' ? 'Meta+B' : 'Control+B'
   )
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute(
-    'title',
+    'data-tooltip',
     `Collapse sidebar (${process.platform === 'darwin' ? '⌘' : 'Ctrl'}B)`
   )
 

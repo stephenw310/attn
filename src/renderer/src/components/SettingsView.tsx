@@ -177,20 +177,19 @@ export function SettingsView({
   }
 
   return (
-    <div ref={rootRef} data-testid="settings-view" className="flex min-w-0 flex-1 flex-col">
+    <div ref={rootRef} data-testid="settings-view" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex h-[44px] flex-none items-center gap-3 border-b border-edge pr-7 pl-[53px]">
+        <h1 className="text-base font-semibold text-ink">Settings</h1>
         <button
           type="button"
           data-testid="settings-back"
+          aria-label="Close settings"
+          data-tooltip="Close settings (Esc)"
           onClick={onClose}
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+          className="ml-auto cursor-pointer rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
         >
-          <span aria-hidden>←</span> Back
+          <Kbd>Esc</Kbd>
         </button>
-        <h1 className="text-base font-semibold text-ink">Settings</h1>
-        <span className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-faint">
-          <Kbd>Esc</Kbd> closes
-        </span>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">

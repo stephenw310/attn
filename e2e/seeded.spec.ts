@@ -112,58 +112,25 @@ test('shows phased sync progress and keeps error details behind an accessible co
   const status = page.getByTestId('status-note')
   await expect(status).toHaveAttribute('data-status', 'live')
 
+  const content = page.getByTestId('status-content')
+  await expect(content).toHaveText('Live')
   await setSyncState(app, { phase: 'syncing', stage: 'bodies', threadsDone: 428 })
-  await expect(status).toContainText('Syncing · Recent mail')
-  await expect(status).toHaveAttribute('data-status', 'syncing')
-  await expect(status).toHaveAttribute('title', 'Syncing · Recent mail — 428 processed')
-  const progress = page.getByTestId('sync-progress')
-  await expect(progress).toHaveAttribute('aria-valuenow', '2')
-  await expect(progress.locator('[data-phase-state]')).toHaveCount(7)
-  await expect(progress.locator('[data-phase-state]').nth(0)).toHaveAttribute('data-phase-state', 'complete')
-  await expect(progress.locator('[data-phase-state]').nth(1)).toHaveAttribute('data-phase-state', 'active')
-
-  await setSyncState(app, { phase: 'syncing', stage: 'drafts', threadsDone: 470 })
-  await expect(status).toContainText('Syncing · Drafts')
-  await expect(progress).toHaveAttribute('aria-valuenow', '3')
-
-  await setSyncState(app, { phase: 'syncing', stage: 'all-mail', threadsDone: 512 })
-  await expect(status).toContainText('Syncing · All mail')
-  await expect(progress).toHaveAttribute('aria-valuenow', '4')
-
-  await setSyncState(app, { phase: 'syncing', stage: 'spam', threadsDone: 530 })
-  await expect(status).toContainText('Syncing · Spam')
-  await expect(progress).toHaveAttribute('aria-valuenow', '5')
-
-  await setSyncState(app, { phase: 'syncing', stage: 'trash', threadsDone: 544 })
-  await expect(status).toContainText('Syncing · Trash')
-  await expect(progress).toHaveAttribute('aria-valuenow', '6')
-
+  await expect(content).toHaveText('Syncing')
+  await expect(content).toHaveAttribute('data-tooltip', 'Recent mail: 428 processed')
+  await expect(content).toHaveCSS('height', '28px')
   await setSyncState(app, {
     phase: 'indexing',
     stage: 'lifetime',
     threadsDone: 750,
-    threadsTotal: 2_000,
-    messagesTotal: 3_200,
-    etaMs: 12 * 60_000,
-    quotaWaitMs: 500,
+    threadsTotal: 2000,
     reason: 'running'
   })
-  await expect(status).toContainText('Live · indexing older mail')
-  await expect(status).toContainText('750 of 2,000 threads indexed · 12 min remaining')
-  await expect(status).toHaveAttribute('data-status', 'indexing')
-  const lifetimeProgress = page.getByTestId('lifetime-progress')
-  await expect(lifetimeProgress).toHaveAttribute('aria-valuenow', '750')
-  await expect(lifetimeProgress).toHaveAttribute('aria-valuemax', '2000')
-  // Text assertions still pass when CSS clips the ETA. Pin the rendered line too.
-  expect(await lifetimeProgress.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
-  await expect(status).toHaveAttribute(
-    'title',
-    'Live · indexing older mail — 750 of 2,000 threads indexed · 12 min remaining · 3,200 messages in account'
-  )
-
-  // Never present a stale or corrupt denominator as meaningful progress. Old
-  // builds could persist Gmail's page-level estimate and render nonsense such
-  // as "86,200 of 201" after a resumed sweep.
+  await expect(content).toHaveText('Indexing')
+  await expect(content).toHaveAttribute('data-tooltip', /750 of 2,000 threads indexed/)
+  await content.click()
+  await expect(page.getByRole('dialog', { name: 'Sync details', exact: true })).toContainText('750 of 2,000')
+  await page.keyboard.press('Escape')
+  // Keep denominator and retry evidence available in the compact status details.
   await setSyncState(app, {
     phase: 'indexing',
     stage: 'lifetime',
@@ -171,20 +138,21 @@ test('shows phased sync progress and keeps error details behind an accessible co
     threadsTotal: 201,
     reason: 'running'
   })
-  await expect(status).toContainText('86,200 threads indexed')
-  await expect(status).not.toContainText('of 201')
-  await expect(lifetimeProgress).not.toHaveAttribute('aria-valuemax')
-
+  await expect(content).toHaveAttribute('data-tooltip', /86,200 threads indexed/)
+  await expect(content).not.toHaveAttribute('data-tooltip', /of 201/)
   await setSyncState(app, {
     phase: 'indexing',
     stage: 'lifetime',
     threadsDone: 750,
     threadsTotal: 2_000,
+    etaMs: 12 * 60_000,
     reason: 'quota-wait',
     waitMs: 1_000
   })
-  await expect(status).toContainText('Quota pacing · 750 of 2,000 threads indexed')
-
+  await expect(content).toHaveAttribute(
+    'data-tooltip',
+    /Quota pacing · 750 of 2,000 threads indexed · 12 min remaining/
+  )
   await setSyncState(app, {
     phase: 'indexing',
     stage: 'lifetime',
@@ -193,33 +161,21 @@ test('shows phased sync progress and keeps error details behind an accessible co
     waitMs: 15_000,
     message: 'rate limited'
   })
-  await expect(status).toContainText('Indexing paused · retrying soon · 2,400 threads indexed')
-  await expect(lifetimeProgress).not.toHaveAttribute('aria-valuenow')
-  await expect(lifetimeProgress).not.toHaveAttribute('aria-valuemax')
-  await expect(lifetimeProgress).toHaveAttribute(
-    'aria-valuetext',
-    'Indexing paused · retrying soon · 2,400 threads indexed'
+  await expect(content).toHaveAttribute(
+    'data-tooltip',
+    /Indexing paused · retrying soon · 2,400 threads indexed/
   )
-
-  // An incremental poll is not a backfill phase: no stage label, no progress bar.
   await setSyncState(app, { phase: 'checking' })
-  await expect(status).toContainText('Checking mail')
-  await expect(status).toContainText('Looking for new mail')
-  await expect(status).toHaveAttribute('data-status', 'checking')
-  await expect(status).toHaveAttribute('title', 'Checking mail — Looking for new mail')
-  await expect(page.getByTestId('sync-progress')).toHaveCount(0)
-
+  await expect(content).toHaveText('Checking')
   await setSyncState(app, { phase: 'offline', message: 'fetch failed' })
-  await expect(status).toContainText('Offline')
-  await expect(status).toContainText('Local mail available')
-  await expect(status).toHaveAttribute('data-status', 'offline')
+  await expect(content).toHaveText('Offline')
 
   await page.evaluate(() => window.dispatchEvent(new Event('offline')))
   const message = `gmail history failed (403): ${'q'.repeat(300)}`
   await setSyncState(app, { phase: 'error', message })
   await expect(status).toContainText('Error')
   await expect(status).not.toContainText(message)
-  await expect(status).toHaveAttribute('title', message)
+  await expect(status).toHaveAttribute('data-tooltip', message)
 
   await page.getByTestId('status-error-button').click()
   const details = page.getByTestId('status-error-details')
