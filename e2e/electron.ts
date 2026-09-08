@@ -88,6 +88,13 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
         // feature enforcing the block, not the app misbehaving; every other
         // failed load still fails the test.
         if (msg.text().includes('ERR_BLOCKED_BY_CLIENT')) return
+        // A sender's `@font-face` refused by `font-src` logs a CSP violation
+        // from inside the mail frame. Same category as the line above: the
+        // policy doing its job, not the app misbehaving. Attn's own faces load
+        // from `'self'`, so this only ever fires for a typeface a sender tried
+        // to ship. Every other CSP violation still fails the test.
+        if (msg.text().includes('Content Security Policy directive') && msg.text().includes('font-src'))
+          return
         rendererErrors.push(msg.text())
       })
       page.on('pageerror', (err) => rendererErrors.push(String(err)))

@@ -1,8 +1,8 @@
-import alegreyaItalic from '@fontsource/alegreya/files/alegreya-latin-400-italic.woff2?inline'
-import alegreyaRegular from '@fontsource/alegreya/files/alegreya-latin-400-normal.woff2?inline'
-import alegreyaBold from '@fontsource/alegreya/files/alegreya-latin-700-normal.woff2?inline'
-import alegreyaSansRegular from '@fontsource/alegreya-sans/files/alegreya-sans-latin-400-normal.woff2?inline'
-import alegreyaSansBold from '@fontsource/alegreya-sans/files/alegreya-sans-latin-700-normal.woff2?inline'
+import alegreyaItalic from '@fontsource/alegreya/files/alegreya-latin-400-italic.woff2?url'
+import alegreyaRegular from '@fontsource/alegreya/files/alegreya-latin-400-normal.woff2?url'
+import alegreyaBold from '@fontsource/alegreya/files/alegreya-latin-700-normal.woff2?url'
+import alegreyaSansRegular from '@fontsource/alegreya-sans/files/alegreya-sans-latin-400-normal.woff2?url'
+import alegreyaSansBold from '@fontsource/alegreya-sans/files/alegreya-sans-latin-700-normal.woff2?url'
 import DOMPurify from 'dompurify'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { safeUrl } from '../../shared/html'
@@ -55,10 +55,11 @@ const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
  * `@font-face` belongs to the document that declares it, and the frame is a
  * separate `about:srcdoc` document, so the app's own faces do not reach it:
  * without this a text-structured letter fell back to the system serif beside
- * a plain-text one set in Alegreya. The frame's CSP allows `data:` and the
- * app is loaded from `file:` in a packaged build, so the bytes have to travel
- * in the stylesheet rather than behind a URL. Built once; only the native
- * surface pays for it, and a sender's own page keeps Arial and pays nothing.
+ * a plain-text one set in Alegreya. The URLs are the app's own bundled assets,
+ * which the frame reaches because a srcdoc document inherits the parent's
+ * origin and base URL. That keeps `font-src` at `'self'`: a sender embedding
+ * `@font-face` with a `data:` source still loads nothing. Built once; only the
+ * native surface pays for it, and a sender's own page keeps Arial.
  */
 const MAIL_FRAME_FACES = [
   ['Alegreya', 400, 'normal', alegreyaRegular],
@@ -77,7 +78,12 @@ const MAIL_FRAME_CSP = [
   "default-src 'none'",
   'img-src data: http: https:',
   'media-src data: http: https:',
-  'font-src data: http: https:',
+  // `'self'` and nothing else. The frame's faces are the app's own bundled
+  // assets, which it reaches because a srcdoc document inherits the parent's
+  // origin and base URL; a sender's `@font-face`, whether it names a `data:`
+  // source or a remote one, loads nothing. The parent policy is intersected
+  // with this one, so both have to name it.
+  "font-src 'self'",
   "style-src 'unsafe-inline' http: https:"
 ].join('; ')
 /** Schemes main will actually open; a display link outside them is dropped. */

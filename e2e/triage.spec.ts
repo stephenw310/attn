@@ -53,7 +53,12 @@ test('makes a failed token refresh visibly reconnectable', async ({ app, page, m
   await page.keyboard.press('e')
 
   await expect.poll(mainLog).toContain('token refresh returned invalid_grant for seed@attn.test')
-  await expect(page.getByTestId('action-reconnect')).toContainText('1 held. Reconnect Google')
+  // The log line is main's; the readout is the renderer's, and it arrives on a
+  // later push. Polling the log is the weaker precondition of the two, so give
+  // the UI its own window rather than racing the default one under load.
+  await expect(page.getByTestId('action-reconnect')).toContainText('1 held. Reconnect Google', {
+    timeout: 15_000
+  })
   await expect(page.getByTestId('paused-count')).toContainText('1 held')
   // The pending readout still counts the row: a paused action is queued work,
   // not a separate category, and the reconnect control sits beside it rather

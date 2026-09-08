@@ -73,7 +73,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
         <span
           data-testid="chip-snooze-due"
           title={thread.dueLabel}
-          className="app-small-caps min-w-0 shrink-[3] truncate text-accent"
+          className="app-small-caps min-w-0 shrink-[9999] truncate text-accent"
         >
           {thread.dueLabel}
         </span>
@@ -83,7 +83,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           data-testid="chip-follow-up-due"
           data-follow-up-awaiting={thread.followUpAwaiting ?? undefined}
           title={`Follow up if no reply — ${thread.followUpDueLabel}`}
-          className="app-small-caps min-w-0 shrink-[3] truncate text-accent"
+          className="app-small-caps min-w-0 shrink-[9999] truncate text-accent"
         >
           {`Follow up ${thread.followUpDueLabel}`}
           {thread.followUpAwaiting === 'origin'
@@ -405,9 +405,13 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         >
           {thread.from}
         </span>
-        {/* `overflow-hidden` is load-bearing: the subject and the chips are
-            `flex-none`, so without it a long follow-up chip on a narrow window
-            paints across the labels and the timestamp instead of ellipsizing. */}
+        {/* This column clips its own content, and everything in it can give way
+            in a fixed order: the snippet first, because it grows from a zero
+            basis; then the dated chips, whose shrink factor dwarfs the
+            subject's so flexbox takes almost the whole deficit from them
+            before the subject moves; then the subject. Without the clip, a
+            follow-up chip on a narrow window painted across the labels and the
+            timestamp rather than ellipsizing inside its own column. */}
         <span className="flex min-w-0 flex-1 items-baseline gap-3 overflow-hidden text-[14.5px] text-ink-faint">
           {thread.hasDraft && (
             <span data-testid="chip-draft" className="app-small-caps flex-none text-accent">

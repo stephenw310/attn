@@ -219,6 +219,33 @@ test('blocking cancels every request type; overrides, live policy changes, and r
   }
 })
 
+test('a sender cannot load a font of its own, even from a data: source', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  // A non-neutral canvas keeps the sender's <style> block, which is the one
+  // surface where an @font-face of theirs survives sanitizing. The frame needs
+  // `font-src` for Attn's own faces; naming `'self'` rather than `data:` is
+  // what keeps that from becoming a way for a sender to ship a typeface.
+  await setMessageHtml(
+    app,
+    'm-lunch',
+    `<style>@font-face{font-family:SenderFace;src:url(data:font/woff2;base64,d09GMgABAAAAAAAA)}</style>` +
+      `<div style="background:#0aa3d2;font-family:SenderFace,serif">Lunch plans</div>`
+  )
+  await openLunch(page)
+  const frame = page.getByTestId('html-body-frame')
+  await expect(frame).toBeVisible()
+  const faces = await frame
+    .contentFrame()
+    .locator('body')
+    .evaluate(async (body) => {
+      const fonts = body.ownerDocument.fonts
+      await fonts.ready.catch(() => undefined)
+      return [...fonts].map((face) => `${face.family}:${face.status}`)
+    })
+  expect(faces.filter((face) => face.startsWith('SenderFace'))).not.toContain('SenderFace:loaded')
+  await closeReader(page)
+})
+
 test('a per-sender exception covers the composer quote, and its removal blocks it again', async ({
   app,
   page
