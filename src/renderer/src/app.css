@@ -1,4 +1,15 @@
 @import "@fontsource-variable/inter";
+@import "@fontsource/alegreya/400.css";
+@import "@fontsource/alegreya/400-italic.css";
+@import "@fontsource/alegreya/700.css";
+@import "@fontsource/alegreya-sans/400.css";
+@import "@fontsource/alegreya-sans/400-italic.css";
+@import "@fontsource/alegreya-sans/500.css";
+@import "@fontsource/alegreya-sans/500-italic.css";
+@import "@fontsource/alegreya-sans/700.css";
+@import "@fontsource/grenze/500.css";
+@import "@fontsource/grenze/500-italic.css";
+@import "@fontsource/grenze-gotisch/500.css";
 @import "tailwindcss";
 @import "./scrollbars.css";
 
@@ -16,8 +27,11 @@
   --color-star: var(--attn-star);
   --color-danger: var(--attn-danger);
   --color-on-danger: var(--attn-on-danger);
+  --color-on-accent: var(--attn-on-accent);
   --color-status-live: var(--attn-status-live);
   --color-status-offline: var(--attn-status-offline);
+  --color-indigo: var(--attn-indigo);
+  --color-leaf: var(--attn-leaf);
   --color-overlay: var(--attn-overlay);
   --color-mail-link: var(--attn-mail-link);
   --color-mail-light-link: #1a73e8;
@@ -30,100 +44,126 @@
   --shadow-menu: var(--attn-shadow-menu);
   --shadow-dialog: var(--attn-shadow-dialog);
   --shadow-toast: var(--attn-shadow-toast);
-  --shadow-footer: var(--attn-shadow-footer);
   --shadow-composer: var(--attn-shadow-composer);
+  /* Alegreya Sans letters the rows, where the eye does its work. Inter follows
+     it for the scripts Alegreya Sans does not cover, and the platform's own
+     fallback follows both for the scripts neither covers. Grenze and Grenze
+     Gotisch are reserved for what a scribe would letter
+     by hand: the wordmark, the view title and its initial. */
   --font-sans:
-    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    "Alegreya Sans", "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-serif: Grenze, "Iowan Old Style", Georgia, serif;
+  /* A letter is read as prose, so it is set in the text serif Alegreya Sans was
+     drawn to pair with. The list is scanned as a table and stays in the sans. */
+  --font-letter: Alegreya, "Iowan Old Style", Georgia, serif;
+  --font-gotisch: "Grenze Gotisch", Grenze, Georgia, serif;
 }
 
 @layer base {
   :root {
-    --attn-ground: #101114;
-    --attn-raised: #17181c;
-    --attn-active: #1f2127;
-    --attn-edge: #262931;
-    --attn-ink: #e9eaee;
-    --attn-ink-dim: #9da2ac;
-    --attn-ink-faint: #737985;
-    --attn-accent: #ffb224;
-    --attn-star: #ffb224;
-    --attn-danger: #e06c75;
-    --attn-on-danger: #ffffff;
-    --attn-status-live: #4ade80;
-    --attn-status-offline: #737985;
-    --attn-overlay: rgb(8 9 11 / 72%);
-    --attn-mail-link: #60a5fa;
-    --attn-shadow-menu: 0 12px 32px rgb(0 0 0 / 50%);
-    --attn-shadow-dialog: 0 24px 64px rgb(0 0 0 / 65%);
-    --attn-shadow-toast: 0 12px 40px rgb(0 0 0 / 65%);
-    --attn-shadow-footer: 0 -8px 24px rgb(0 0 0 / 32%);
-    --attn-shadow-composer: 0 18px 44px rgb(0 0 0 / 24%);
+    --attn-ground: #15171e;
+    --attn-raised: #101218;
+    --attn-band: #101218;
+    --attn-leaf: #1e222c;
+    --attn-scrap-shadow: rgb(0 0 0 / 55%);
+    --attn-enclosure-shadow: rgb(0 0 0 / 46%);
+    --attn-active: #22252e;
+    --attn-edge: #2c303b;
+    --attn-ink: #e9e4d8;
+    --attn-ink-dim: #b8b2a5;
+    --attn-ink-faint: #989287;
+    --attn-accent: #e86d4c;
+    --attn-indigo: #93a8db;
+    --attn-star: #e86d4c;
+    --attn-danger: #f2766a;
+    --attn-on-danger: #15171e;
+    --attn-on-accent: #15171e;
+    --attn-status-live: #7fb374;
+    --attn-status-offline: #989287;
+    --attn-overlay: rgb(6 7 10 / 72%);
+    --attn-mail-link: #93a8db;
+    --attn-shadow-menu: 0 12px 32px rgb(0 0 0 / 55%);
+    --attn-shadow-dialog: 0 24px 64px rgb(0 0 0 / 68%);
+    --attn-shadow-toast: 0 12px 40px rgb(0 0 0 / 68%);
+    --attn-shadow-composer: 0 18px 44px rgb(0 0 0 / 28%);
     --attn-login-glow:
-      radial-gradient(circle at 50% 38%, rgb(255 178 36 / 11%), transparent 29%),
-      radial-gradient(circle at 12% 100%, rgb(72 82 112 / 13%), transparent 34%);
-    --attn-label-1-bg: #44351b;
-    --attn-label-1-edge: #765b26;
-    --attn-label-1-ink: #ffd789;
-    --attn-label-2-bg: #193b4a;
-    --attn-label-2-edge: #28647d;
-    --attn-label-2-ink: #8cdbff;
-    --attn-label-3-bg: #263d2a;
-    --attn-label-3-edge: #3f6a48;
-    --attn-label-3-ink: #a9e8b3;
-    --attn-label-4-bg: #402b43;
-    --attn-label-4-edge: #704a76;
-    --attn-label-4-ink: #e6abe9;
-    --attn-label-5-bg: #452a2d;
-    --attn-label-5-edge: #75464b;
-    --attn-label-5-ink: #ffadb3;
-    --attn-label-6-bg: #28334c;
-    --attn-label-6-edge: #465985;
-    --attn-label-6-ink: #b8c9ff;
+      radial-gradient(circle at 50% 38%, rgb(232 109 76 / 10%), transparent 29%),
+      radial-gradient(circle at 12% 100%, rgb(147 168 219 / 10%), transparent 34%);
+    /* The sheet the window is painted on. `paper.ts` reads these: three RGB
+       triples, then the strengths that turn indigo stock into laid paper. */
+    --attn-paper-fibre: 150 166 206;
+    --attn-paper-lift: 92 104 138;
+    --attn-paper-fleck: 8 9 13;
+    --attn-paper-cloud: 120 140 190;
+    --attn-paper-cloud-lit: 120 140 190;
+    --attn-paper-shadow: 4 5 9;
+    --attn-paper-fibre-alpha: 0.022;
+    --attn-paper-fleck-alpha: 0.2;
+    --attn-paper-lift-mix: 0.5;
+    --attn-paper-cloud-alpha: 0.018;
+    --attn-paper-cloud-lit-alpha: 0;
+    --attn-paper-vignette: 0;
+    /* What a hand draws over the sheet: the rules, and the wash of a torn
+       highlight. `Hand.tsx` fills its paths from these two. */
+    --attn-hand-ink: 233 228 216;
+    --attn-hand-rule-alpha: 0.3;
+    --attn-hand-wash: 160 180 230;
+    --attn-hand-wash-alpha: 0.11;
     color-scheme: dark;
   }
 
   :root[data-theme="dispatch-light"] {
-    --attn-ground: #f6f4ef;
-    --attn-raised: #ffffff;
-    --attn-active: #ebe7de;
-    --attn-edge: #d8d3c9;
-    --attn-ink: #1c1d21;
-    --attn-ink-dim: #555b66;
-    --attn-ink-faint: #737985;
-    --attn-accent: #925700;
-    --attn-star: #a86100;
-    --attn-danger: #b42318;
-    --attn-on-danger: #ffffff;
-    --attn-status-live: #167647;
-    --attn-status-offline: #68707d;
-    --attn-overlay: rgb(45 40 32 / 38%);
-    --attn-mail-link: #1a5fb4;
-    --attn-shadow-menu: 0 12px 32px rgb(55 45 30 / 18%);
-    --attn-shadow-dialog: 0 24px 64px rgb(55 45 30 / 24%);
-    --attn-shadow-toast: 0 12px 40px rgb(55 45 30 / 24%);
-    --attn-shadow-footer: 0 -8px 24px rgb(55 45 30 / 10%);
-    --attn-shadow-composer: 0 18px 44px rgb(55 45 30 / 16%);
+    --attn-ground: #e9dec6;
+    --attn-raised: #ddceac;
+    --attn-band: #ddceac;
+    --attn-leaf: #f2ead7;
+    --attn-scrap-shadow: rgb(70 52 28 / 34%);
+    --attn-enclosure-shadow: rgb(70 52 28 / 30%);
+    --attn-active: #ded0b0;
+    --attn-edge: #c9b791;
+    --attn-ink: #2a2015;
+    --attn-ink-dim: #54432f;
+    --attn-ink-faint: #63523e;
+    --attn-accent: #a02e15;
+    --attn-indigo: #3f4f7c;
+    --attn-star: #a02e15;
+    --attn-danger: #8c2412;
+    --attn-on-danger: #f4ecd8;
+    --attn-on-accent: #f4ecd8;
+    --attn-status-live: #3f6b3a;
+    --attn-status-offline: #63523e;
+    --attn-overlay: rgb(42 32 21 / 42%);
+    --attn-mail-link: #3f4f7c;
+    --attn-shadow-menu: 0 12px 32px rgb(60 44 22 / 22%);
+    --attn-shadow-dialog: 0 24px 64px rgb(60 44 22 / 28%);
+    --attn-shadow-toast: 0 12px 40px rgb(60 44 22 / 26%);
+    --attn-shadow-composer: 0 18px 44px rgb(60 44 22 / 18%);
     --attn-login-glow:
-      radial-gradient(circle at 50% 38%, rgb(146 87 0 / 11%), transparent 29%),
-      radial-gradient(circle at 12% 100%, rgb(119 131 160 / 12%), transparent 34%);
-    --attn-label-1-bg: #f8e8c2;
-    --attn-label-1-edge: #d3a64d;
-    --attn-label-1-ink: #654200;
-    --attn-label-2-bg: #dbeef6;
-    --attn-label-2-edge: #77afc8;
-    --attn-label-2-ink: #174f67;
-    --attn-label-3-bg: #e0efdf;
-    --attn-label-3-edge: #82b087;
-    --attn-label-3-ink: #295f32;
-    --attn-label-4-bg: #f0e1f1;
-    --attn-label-4-edge: #b88fbb;
-    --attn-label-4-ink: #693b6d;
-    --attn-label-5-bg: #f7e0e1;
-    --attn-label-5-edge: #c79196;
-    --attn-label-5-ink: #773a40;
-    --attn-label-6-bg: #e2e8f7;
-    --attn-label-6-edge: #929fc4;
-    --attn-label-6-ink: #3b4d82;
+      radial-gradient(circle at 50% 38%, rgb(160 46 21 / 9%), transparent 29%),
+      radial-gradient(circle at 12% 100%, rgb(63 79 124 / 10%), transparent 34%);
+    --attn-paper-fibre: 112 90 58;
+    --attn-paper-lift: 255 248 228;
+    --attn-paper-fleck: 92 70 44;
+    --attn-paper-cloud: 120 92 52;
+    --attn-paper-cloud-lit: 255 247 226;
+    --attn-paper-shadow: 70 52 28;
+    --attn-paper-fibre-alpha: 0.022;
+    --attn-paper-fleck-alpha: 0.2;
+    --attn-paper-lift-mix: 0.4;
+    /* Halved when the seeded generator was fixed. The old one drew every cloud
+       from a degenerate sequence, so the mottling it asked for never landed and
+       the sheet was nearly flat; at full strength a correct generator put a
+       dark patch beside the sidebar band and flattened its torn edge. */
+    --attn-paper-cloud-alpha: 0.03;
+    --attn-paper-cloud-lit-alpha: 0.035;
+    --attn-paper-vignette: 0.05;
+    --attn-hand-ink: 42 32 21;
+    --attn-hand-rule-alpha: 0.34;
+    --attn-hand-wash: 150 108 44;
+    /* 0.18 dropped rubric text on a marked row to 4.48:1, just under the
+       threshold; the tear still reads clearly at this strength. */
+    --attn-hand-wash-alpha: 0.15;
     color-scheme: light;
   }
 
@@ -138,7 +178,9 @@
     background: var(--color-ground);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 14px;
+    /* Alegreya Sans runs a smaller x-height than Inter at the same size, and
+       the design is drawn at 16px. */
+    font-size: 16px;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -146,10 +188,72 @@
     outline: 1px solid var(--color-accent);
     outline-offset: 2px;
   }
+
+  /* Native controls default to the operating system's blue, which is the one
+     color in the window that belongs to no palette. */
+  input[type="checkbox"],
+  input[type="radio"],
+  progress {
+    accent-color: var(--color-accent);
+  }
 }
 
 .app-login-backdrop {
   background: var(--attn-login-glow);
+}
+
+/* Section headings, date groups and label names are set as small capitals
+   rather than uppercased text, so they keep their letterforms. */
+.app-small-caps {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.07em;
+}
+
+/* Old-style figures sit on the baseline like lowercase letters, which is what
+   keeps a count beside a mailbox name from shouting. */
+.app-figures {
+  font-variant-numeric: oldstyle-nums tabular-nums;
+}
+
+/* The sheet: one seeded paper texture painted behind the whole window. */
+.app-paper {
+  position: fixed;
+  inset: 0;
+  /* A canvas is a replaced element: `inset` alone leaves it at its intrinsic
+     300 by 150. It also has to sit behind every sibling, none of which are
+     positioned. */
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Hand-drawn ornament. The paths come from `hand.ts`; the ink comes from the
+   palette, so neither theme needs its own component. */
+.app-hand-rule {
+  fill: rgb(var(--attn-hand-ink) / var(--attn-hand-rule-alpha));
+}
+
+.app-hand-wash {
+  fill: rgb(var(--attn-hand-wash) / var(--attn-hand-wash-alpha));
+}
+
+.app-seal {
+  color: var(--color-accent);
+}
+
+/* The sender's own page arrives as a printed enclosure: guillotined edges and
+   a hard shadow, so it reads as something that came in the post rather than as
+   part of the letter around it. Ours is torn; theirs is cut. */
+.app-enclosure {
+  margin-block: 6px;
+  box-shadow: 0 10px 26px var(--attn-enclosure-shadow);
+}
+
+/* A scrap of paper: its own stock, and the shadow of a leaf laid on the desk. */
+.app-scrap {
+  fill: var(--color-leaf);
+  filter: drop-shadow(0 14px 26px var(--attn-scrap-shadow));
 }
 
 /* Fixed photo-overlay colors keep contrast stable across both app themes. */
@@ -273,11 +377,10 @@
 
 /* Row flags key off data attributes so keyboard feedback can land in the same
    event turn, before the local SQLite round-trip confirms the React state. */
-.app-thread-unread-dot {
-  background: transparent;
+.app-thread-sender {
+  color: var(--color-ink-faint);
 }
 
-.app-thread-sender,
 .app-thread-subject {
   color: var(--color-ink-dim);
 }
@@ -290,20 +393,20 @@
   display: none;
 }
 
-[data-unread="true"] .app-thread-unread-dot {
-  background: var(--color-accent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 45%, transparent);
+/* An unread row is marked the way a scribe marks one: weight and ink in the
+   line itself, with nothing in the margin. */
+[data-unread="true"] .app-thread-sender {
+  color: var(--color-ink-dim);
+  font-weight: 700;
 }
 
-[data-unread="true"] .app-thread-sender,
 [data-unread="true"] .app-thread-subject {
   color: var(--color-ink);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 [data-unread="true"] .app-thread-time {
-  color: var(--color-accent);
-  font-weight: 500;
+  color: var(--color-ink-dim);
 }
 
 [data-starred="true"] .app-thread-star {
@@ -400,7 +503,6 @@
 .gmail_signature[data-attn-signature-collapsed="true"]::before {
   display: block;
   width: fit-content;
-  border-radius: 0.25rem;
   padding: 0 0.125rem;
   color: var(--color-ink-faint);
   font-family: inherit;

@@ -1,3 +1,9 @@
+import alegreyaItalic from '@fontsource/alegreya/files/alegreya-latin-400-italic.woff2?url'
+import alegreyaRegular from '@fontsource/alegreya/files/alegreya-latin-400-normal.woff2?url'
+import alegreyaBold from '@fontsource/alegreya/files/alegreya-latin-700-normal.woff2?url'
+import alegreyaSansItalic from '@fontsource/alegreya-sans/files/alegreya-sans-latin-400-italic.woff2?url'
+import alegreyaSansRegular from '@fontsource/alegreya-sans/files/alegreya-sans-latin-400-normal.woff2?url'
+import alegreyaSansBold from '@fontsource/alegreya-sans/files/alegreya-sans-latin-700-normal.woff2?url'
 import DOMPurify from 'dompurify'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { safeUrl } from '../../shared/html'
@@ -44,11 +50,44 @@ const VIEWPORT_HEIGHT_UNIT = /(-?(?:\d+(?:\.\d+)?|\.\d+))(?:(?:d|l|s)?vh)\b/gi
  * frame's registration, remains the authority on whether any of them may go
  * out at all.
  */
+/**
+ * The frame's own faces.
+ *
+ * `@font-face` belongs to the document that declares it, and the frame is a
+ * separate `about:srcdoc` document, so the app's own faces do not reach it:
+ * without this a text-structured letter fell back to the system serif beside
+ * a plain-text one set in Alegreya. The URLs are the app's own bundled assets,
+ * which the frame reaches because a srcdoc document inherits the parent's
+ * origin and base URL. That keeps `font-src` at `'self'`: a sender embedding
+ * `@font-face` with a `data:` source still loads nothing. Built once; only the
+ * native surface pays for it, and a sender's own page keeps Arial.
+ */
+const MAIL_FRAME_FACES = [
+  ['Alegreya', 400, 'normal', alegreyaRegular],
+  ['Alegreya', 400, 'italic', alegreyaItalic],
+  ['Alegreya', 700, 'normal', alegreyaBold],
+  ['Alegreya Sans', 400, 'normal', alegreyaSansRegular],
+  ['Alegreya Sans', 400, 'italic', alegreyaSansItalic],
+  ['Alegreya Sans', 700, 'normal', alegreyaSansBold]
+]
+  .map(
+    ([family, weight, style, source]) =>
+      `@font-face{font-family:"${family}";font-style:${style};font-weight:${weight};font-display:block;src:url(${source}) format("woff2")}`
+  )
+  .join('')
+
 const MAIL_FRAME_CSP = [
   "default-src 'none'",
   'img-src data: http: https:',
   'media-src data: http: https:',
-  'font-src data: http: https:',
+  // `'self'` and nothing else. The frame's faces are the app's own bundled
+  // assets, which it reaches because a srcdoc document inherits the parent's
+  // origin and base URL; the parent policy is intersected with this one, so
+  // both have to name it. This is the backstop rather than the guard: under
+  // file: `'self'` matches any file: URL, so what actually keeps a sender from
+  // shipping a typeface is `stripFontFaceRules`, which drops the rule before
+  // the frame ever sees it.
+  "font-src 'self'",
   "style-src 'unsafe-inline' http: https:"
 ].join('; ')
 /** Schemes main will actually open; a display link outside them is dropped. */
@@ -69,21 +108,79 @@ export interface MailFramePresentation {
 function frameReset({ surface, layout, appearance, scrollable }: MailFramePresentation): string {
   const senderCanvas = surface === 'light'
   const light = senderCanvas || appearance === 'light'
+  // A page the sender designed keeps their stock and their sans. A letter that
+  // is only text with structure is written on our sheet, in our ink, in the
+  // same serif the reader sets everything else in. The frame is its own
+  // document and cannot read the app's tokens, so the palette is passed in.
+  const ink = appearance === 'light' ? '#2a2015' : '#e9e4d8'
+  const dim = appearance === 'light' ? '#54432f' : '#b8b2a5'
+  const rubric = appearance === 'light' ? '#a02e15' : '#e86d4c'
+  const indigo = appearance === 'light' ? '#3f4f7c' : '#93a8db'
+  const rule = appearance === 'light' ? '#c9b791' : '#2c303b'
   return `
+  ${senderCanvas ? '' : MAIL_FRAME_FACES}
   :root { color-scheme: only ${light ? 'light' : 'dark'}; }
   html, body {
     margin: 0;
     padding: 0;
     background: ${senderCanvas ? '#fff' : 'transparent'};
-    color: ${light ? '#202124' : '#e9eaee'};
+    color: ${senderCanvas ? '#202124' : ink};
   }
   html { overflow-x: auto; overflow-y: ${scrollable ? 'auto' : 'hidden'}; }
   body { overflow: visible; }
   body {
-    font: ${light ? '14px/1.6 Arial, Helvetica, sans-serif' : '15px/1.7 Arial, Helvetica, sans-serif'};
+    font: ${
+      senderCanvas
+        ? '14px/1.6 Arial, Helvetica, sans-serif'
+        : '17px/1.62 Alegreya, "Iowan Old Style", Georgia, serif'
+    };
     overflow-wrap: break-word;
     box-sizing: border-box;
     padding: 0;
+  }
+  ${
+    senderCanvas
+      ? ''
+      : `
+  /* Structure the sender wrote, set the way the rest of the page is set. */
+  #attn-mail-body :is(h1, h2, h3, h4) {
+    font-family: "Alegreya Sans", system-ui, sans-serif;
+    font-weight: 700;
+    line-height: 1.3;
+    margin: 1.1em 0 .4em;
+    color: ${ink};
+  }
+  #attn-mail-body h1 { font-size: 21px; }
+  #attn-mail-body h2 { font-size: 19px; }
+  #attn-mail-body :is(h3, h4) { font-size: 17px; }
+  #attn-mail-body :is(ul, ol) { padding-left: 22px; }
+  #attn-mail-body li { margin: 0 0 3px; }
+  #attn-mail-body table:not([role="presentation"]) {
+    border-collapse: collapse;
+    font-family: "Alegreya Sans", system-ui, sans-serif;
+    font-size: 15px;
+  }
+  #attn-mail-body table:not([role="presentation"]) th {
+    text-align: left;
+    padding: 0 14px 4px 0;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    font-variant-caps: all-small-caps;
+    color: ${rubric};
+  }
+  #attn-mail-body table:not([role="presentation"]) td {
+    padding: 5px 14px 5px 0;
+    border-top: 1px solid ${rule};
+    color: ${dim};
+  }
+  #attn-mail-body :is(blockquote, .gmail_quote) {
+    margin-inline: 0;
+    padding-left: 16px;
+    border-left: 2px solid ${rubric};
+    font-style: italic;
+  }
+  #attn-mail-body hr { border: 0; border-top: 1px solid ${rule}; }`
   }
   ${
     senderCanvas && layout === 'centered'
@@ -106,14 +203,15 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
   }`
   }
   ${
-    light
+    senderCanvas
       ? ''
       : `
   #attn-mail-body :is(blockquote, .gmail_quote) {
-    color: #9da2ac;
+    color: ${dim};
   }
   #attn-mail-body a {
-    color: #60a5fa !important;
+    color: ${indigo} !important;
+    text-underline-offset: 3px;
   }`
   }
   img { max-width: 100%; height: auto; }

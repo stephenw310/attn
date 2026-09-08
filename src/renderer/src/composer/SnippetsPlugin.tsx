@@ -200,7 +200,7 @@ export function SnippetsPlugin({ onInserted }: SnippetsPluginProps): React.JSX.E
         }
       }}
     >
-      <div className="w-full max-w-md overflow-hidden rounded-lg border border-edge bg-raised shadow-2xl">
+      <div className="w-full max-w-md overflow-hidden border border-edge bg-raised shadow-2xl">
         <input
           className="h-9 w-full border-b border-edge bg-transparent px-3 text-sm text-ink outline-none placeholder:text-ink-faint"
           data-testid="snippet-picker-input"

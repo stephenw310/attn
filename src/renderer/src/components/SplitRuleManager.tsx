@@ -12,6 +12,7 @@ import {
   type SplitState,
   type SplitSummary
 } from '../../../shared/splits'
+import { ScrapEdge } from './Hand'
 
 interface SplitRuleManagerProps {
   state: SplitState
@@ -132,7 +133,7 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
       aria-hidden={isOverlay || undefined}
       inert={isOverlay || undefined}
       style={rowStyle}
-      className={`relative grid min-h-[72px] grid-cols-[36px_minmax(0,1fr)_96px_112px] items-center gap-3 rounded-lg border px-3 transition-[border-color,background-color,box-shadow,opacity] ${
+      className={`relative grid min-h-[72px] grid-cols-[36px_minmax(0,1fr)_96px_112px] items-center gap-3 border px-3 transition-[border-color,background-color,box-shadow,opacity] ${
         isOverlay
           ? 'z-70 cursor-grabbing border-accent bg-raised shadow-dialog'
           : isDragSource
@@ -164,7 +165,7 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
               onMove(1)
             }
           }}
-          className="flex size-8 touch-none cursor-grab items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink active:cursor-grabbing disabled:cursor-default disabled:opacity-30"
+          className="flex size-8 touch-none cursor-grab items-center justify-center text-ink-faint hover:bg-active hover:text-ink active:cursor-grabbing disabled:cursor-default disabled:opacity-30"
         >
           <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 fill-current">
             <circle cx="5" cy="3" r="1.25" />
@@ -182,7 +183,7 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-semibold text-ink">{split.name}</span>
           <span className="text-[10px] tabular-nums text-ink-faint">
-            {split.total.toLocaleString()} total · {split.unread.toLocaleString()} unread
+            {split.total.toLocaleString()} total, {split.unread.toLocaleString()} unread
           </span>
         </div>
         <p className="truncate text-[11px] text-ink-faint">
@@ -210,7 +211,7 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
           <button
             type="button"
             onClick={onEdit}
-            className="h-8 cursor-pointer rounded-md px-2 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+            className="h-8 cursor-pointer px-2 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
           >
             Edit
           </button>
@@ -220,7 +221,7 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
             aria-label={`Delete ${split.name}`}
             disabled={busy}
             onClick={onDelete}
-            className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-danger hover:text-on-danger"
+            className="size-8 cursor-pointer text-ink-faint hover:bg-danger hover:text-on-danger"
           >
             ×
           </button>
@@ -360,20 +361,23 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
         aria-modal="true"
         aria-labelledby="split-rules-title"
         data-testid="split-rules"
-        className="relative flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="relative isolate flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col px-7 py-6"
       >
-        <header className="flex h-14 flex-none items-center border-b border-edge px-5">
+        <ScrapEdge />
+        <header className="flex flex-none items-baseline pb-3">
           <div>
-            <h2 id="split-rules-title" className="text-sm font-semibold text-ink">
-              Split inbox
+            <h2 id="split-rules-title" className="font-serif text-[26px] leading-none text-ink">
+              Inbox splits
             </h2>
-            <p className="text-[11px] text-ink-faint">First matching split wins. Other is always last.</p>
+            <p className="font-letter mt-1 text-[15px] text-ink-faint italic">
+              First matching split wins. Other is always last.
+            </p>
           </div>
           <button
             type="button"
             aria-label="Close split rules"
             onClick={onClose}
-            className="ml-auto size-8 cursor-pointer rounded-md text-xl text-ink-faint hover:bg-active hover:text-ink"
+            className="ml-auto size-8 cursor-pointer text-xl text-ink-faint hover:bg-active hover:text-ink"
           >
             ×
           </button>
@@ -402,7 +406,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                 value={draft.name}
                 maxLength={64}
                 onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                className="mt-1.5 h-9 w-full rounded-md border border-edge bg-ground px-3 text-sm text-ink outline-none focus:border-accent"
+                className="mt-1.5 h-9 w-full border border-edge bg-ground px-3 text-sm text-ink outline-none focus:border-accent"
               />
             </label>
             <div className="mt-4 flex items-center gap-3">
@@ -416,7 +420,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                 onChange={(event) =>
                   setDraft({ ...draft, operator: event.target.value === 'all' ? 'all' : 'any' })
                 }
-                className="h-8 rounded-md border border-edge bg-ground px-2 text-xs text-ink"
+                className="h-8 border border-edge bg-ground px-2 text-xs text-ink"
               >
                 <option value="any">Any condition</option>
                 <option value="all">All conditions on one message</option>
@@ -435,7 +439,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                       conditions[index] = { key, condition: next }
                       setDraft({ ...draft, conditions })
                     }}
-                    className="h-9 w-52 rounded-md border border-edge bg-ground px-2 text-xs text-ink"
+                    className="h-9 w-52 border border-edge bg-ground px-2 text-xs text-ink"
                   >
                     {CONDITION_TYPES.map((type) => (
                       <option key={type} value={type}>
@@ -456,7 +460,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                         setDraft({ ...draft, conditions })
                       }}
                       placeholder={condition.type === 'label' ? 'IMPORTANT' : 'Value'}
-                      className="h-9 min-w-0 flex-1 rounded-md border border-edge bg-ground px-3 text-sm text-ink outline-none focus:border-accent"
+                      className="h-9 min-w-0 flex-1 border border-edge bg-ground px-3 text-sm text-ink outline-none focus:border-accent"
                     />
                   ) : (
                     <div className="flex h-9 min-w-0 flex-1 items-center px-3 text-xs text-ink-faint">
@@ -473,7 +477,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                         conditions: draft.conditions.filter((_, conditionIndex) => conditionIndex !== index)
                       })
                     }
-                    className="size-9 cursor-pointer rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-30"
+                    className="size-9 cursor-pointer text-ink-faint hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-30"
                   >
                     ×
                   </button>
@@ -500,12 +504,12 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               />
               Show native notifications for this split
             </label>
-            <p className="mt-4 rounded-md border border-edge bg-ground/60 p-3 text-[11px] leading-5 text-ink-faint">
+            <p className="mt-4 border border-edge bg-ground/60 p-3 text-[11px] leading-5 text-ink-faint">
               Attachment rules use cached message metadata. After a database upgrade, Attn refreshes older
               Inbox metadata in the background. Reading a split never starts a network request.
             </p>
             {error && (
-              <p role="alert" className="mt-3 text-xs text-danger">
+              <p role="alert" className="font-letter mt-3 text-[15px] text-danger italic">
                 {error}
               </p>
             )}
@@ -514,14 +518,14 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                 type="button"
                 disabled={busy}
                 onClick={() => setDraft(null)}
-                className="h-9 cursor-pointer rounded-md px-4 text-xs font-semibold text-ink-dim hover:bg-active"
+                className="h-9 cursor-pointer px-4 text-xs font-semibold text-ink-dim hover:bg-active"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={busy}
-                className="h-9 cursor-pointer rounded-md bg-accent px-4 text-xs font-semibold text-ground disabled:opacity-50"
+                className="cursor-pointer px-1 py-1 text-[15.5px] font-bold text-accent underline decoration-1 underline-offset-4 disabled:opacity-50"
               >
                 Save split
               </button>
@@ -598,7 +602,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               <button
                 type="button"
                 onClick={() => setDraft(draftFor())}
-                className="h-9 cursor-pointer rounded-md bg-accent px-4 text-xs font-semibold text-ground"
+                className="h-9 cursor-pointer bg-accent px-4 text-xs font-semibold text-on-accent"
               >
                 New split
               </button>
@@ -609,7 +613,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   data-testid="split-rule-restore"
                   disabled={busy}
                   onClick={() => void run(() => onRestore(id))}
-                  className="h-9 cursor-pointer rounded-md border border-edge px-3 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+                  className="cursor-pointer px-1 py-1 text-[15.5px] text-ink-dim underline decoration-1 underline-offset-4 hover:text-ink"
                 >
                   Restore {PRESET_NAMES[id]}
                 </button>

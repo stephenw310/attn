@@ -7,6 +7,7 @@ import { MessageBody } from '../MessageBody'
 import { mailReadingForHtml } from '../mailReading'
 import { useTheme } from '../theme'
 import { useShowToast } from '../toastContext'
+import { TornRule } from './Hand'
 
 function firstName(address: MailAddress, account: string | null): string {
   if (account && normalizeEmailKey(address.email) === normalizeEmailKey(account)) return 'me'
@@ -60,17 +61,17 @@ function RecipientLine({
       {open && (
         <div
           data-testid="recipient-details"
-          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-edge bg-active/60 p-3 text-xs text-ink-faint"
+          className="mt-3 grid grid-cols-[88px_1fr] gap-x-4 gap-y-1 text-[14.5px] text-ink-dim"
         >
           {groups
             .filter((group) => group.addresses.length > 0)
             .map((group) => (
               <div key={group.label} className="contents">
-                <span className="font-medium text-ink-dim">{group.label}</span>
+                <span className="app-small-caps text-[13px] text-accent">{group.label}</span>
                 <span className="min-w-0 break-words">{group.addresses.map(fullAddress).join(', ')}</span>
               </div>
             ))}
-          <span className="font-medium text-ink-dim">Date</span>
+          <span className="app-small-caps text-[13px] text-accent">Sent</span>
           <span>{message.fullDate}</span>
         </div>
       )}
@@ -83,8 +84,6 @@ interface MessageCardProps {
   message: DisplayMessage
   account: string | null
   collapsed?: boolean
-  active?: boolean
-  hasInlineComposer?: boolean
   onToggleCollapsed?: () => void
   trimExpanded?: boolean
   onToggleTrim: () => void
@@ -97,8 +96,6 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     message,
     account,
     collapsed = false,
-    active = false,
-    hasInlineComposer = false,
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
@@ -146,8 +143,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className={`border border-edge ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-sm bg-active' : 'rounded-sm bg-ground'}`}
       >
+        <TornRule className="w-full" />
         <button
           type="button"
           data-testid="older-message-toggle"
@@ -157,13 +154,13 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             onToggleCollapsed?.()
             event.currentTarget.blur()
           }}
-          className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-5 py-3 text-left hover:bg-active/50"
+          className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 px-1 py-2.5 text-left text-ink-faint hover:text-ink-dim"
         >
-          <span className="min-w-0 font-semibold">{message.fromName}</span>
-          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+          <span className="min-w-0 font-bold text-ink-dim">{message.fromName}</span>
+          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] text-ink-faint">
             {message.text || 'HTML message'}
           </span>
-          <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
+          <span className="app-figures flex items-baseline gap-2 text-[14px] text-ink-faint">
             {visibleAttachments.length > 0 && <span title="Has attachment">📎</span>}
             {message.at}
             <span aria-hidden>▾</span>
@@ -178,8 +175,9 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`border border-edge px-5 py-4 ${hasInlineComposer ? 'rounded-t-[10px] border-b-0 bg-raised' : active ? 'rounded-[10px] bg-active/50' : 'rounded-[10px] bg-ground'}`}
+      className="relative px-1 pt-5 pb-4"
     >
+      <TornRule className="mb-4 w-full" />
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
       <div
@@ -193,13 +191,13 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2.5">
-            <span className="font-semibold">{message.fromName}</span>
+            <span className="text-[17px] font-bold text-ink">{message.fromName}</span>
             <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
               &lt;{message.fromEmail}&gt;
             </span>
           </div>
         </div>
-        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint tabular-nums">
+        <span className="app-figures flex flex-none items-center gap-2 text-[14px] text-ink-faint">
           {message.at}
           {onToggleCollapsed && (
             <button
@@ -211,7 +209,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                 onToggleCollapsed()
                 event.currentTarget.blur()
               }}
-              className="cursor-pointer rounded px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
+              className="cursor-pointer px-1 text-ink-faint hover:text-ink-dim"
             >
               <span aria-hidden>▴</span>
             </button>
@@ -228,15 +226,26 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
               setViewOriginal((current) => !current)
               event.currentTarget.blur()
             }}
-            className="col-span-2 mt-1 w-fit cursor-pointer text-[11px] text-ink-faint hover:text-ink-dim hover:underline"
+            className="app-small-caps col-span-2 mt-1 w-fit cursor-pointer text-[13px] text-accent hover:underline"
           >
             {viewOriginal ? 'Use dark view' : 'View original'}
           </button>
         )}
       </div>
+      {/* A page the sender designed is named as what it is before it appears, so
+          the white stock below reads as an enclosure rather than a change of
+          surface halfway down the letter. */}
+      {htmlSurface && (
+        <div
+          data-testid="enclosure-caption"
+          className="app-small-caps mb-2 flex items-baseline gap-3 text-[13px] text-ink-faint"
+        >
+          <span>{`Printed enclosure · ${message.fromEmail.split('@').pop() ?? ''}`}</span>
+        </div>
+      )}
       <div
         data-testid="message-content"
-        className={`min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
+        className={`min-w-0 ${htmlSurface ? 'app-enclosure overflow-hidden bg-mail-light-ground' : ''}`}
       >
         <MessageBody
           bodyText={message.text}
@@ -254,7 +263,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         />
         <p
           data-testid="body-hydration-status"
-          className={bodyHydrationMessage ? 'mt-3 text-xs text-ink-faint' : 'sr-only'}
+          className={bodyHydrationMessage ? 'font-letter mt-3 text-[15px] text-ink-faint italic' : 'sr-only'}
           aria-live="polite"
           aria-atomic="true"
         >
@@ -265,7 +274,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             data-testid="message-accessories"
             className={htmlSurface ? 'bg-mail-light-ground px-3 pb-3' : ''}
           >
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-col gap-1">
               {visibleAttachments.map((attachment) => (
                 <button
                   key={attachment.attachmentId}
@@ -275,19 +284,27 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                     download(attachment)
                     event.currentTarget.blur()
                   }}
-                  className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
+                  className={`flex w-fit cursor-pointer items-center gap-2.5 py-0.5 text-left text-[14.5px] ${
                     htmlSurface
-                      ? 'border-mail-light-edge bg-mail-light-raised text-mail-light-ink-dim hover:border-mail-light-edge-hover hover:text-mail-light-ink'
-                      : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'
+                      ? 'text-mail-light-ink-dim hover:text-mail-light-ink'
+                      : 'text-ink-dim hover:text-ink'
                   }`}
                   title={`Download ${attachment.filename}`}
                 >
-                  <span className="mr-2" aria-hidden>
-                    📎
-                  </span>
-                  <span className="font-medium">{attachment.filename}</span>
+                  <svg
+                    aria-hidden="true"
+                    focusable="false"
+                    viewBox="0 0 24 24"
+                    className="size-[15px] flex-none fill-none stroke-current"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m19.4 11.1-7.3 7.3a4.2 4.2 0 0 1-6-6l8-8a2.8 2.8 0 0 1 4 4l-8 8a1.4 1.4 0 0 1-2-2l7.2-7.2" />
+                  </svg>
+                  <span>{attachment.filename}</span>
                   <span
-                    className={`ml-2 tabular-nums ${htmlSurface ? 'text-mail-light-ink-dim' : 'text-ink-faint'}`}
+                    className={`app-figures text-[13.5px] ${htmlSurface ? 'text-mail-light-ink-dim' : 'text-ink-faint'}`}
                   >
                     {formatBytes(attachment.sizeBytes)}
                   </span>

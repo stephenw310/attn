@@ -81,6 +81,130 @@ export function stripUnsafeQuoteCss(style: string): string {
     .join('; ')
 }
 
+/**
+ * Drop every `@font-face` a sender wrote.
+ *
+ * The mail frame needs `font-src` open enough to load Attn's own faces, so the
+ * policy alone cannot tell our typeface from theirs. This is the half that can:
+ * the rule never reaches the frame, and the policy stays as the backstop. The
+ * name is read through CSS escapes, because `@\66 ont-face` is the same at-rule
+ * to a parser and a plain string match would walk past it.
+ */
+export function stripFontFaceRules(css: string): string {
+  let output = ''
+  let kept = 0
+  let cursor = 0
+  while (cursor < css.length) {
+    const skipped = skipOpaque(css, cursor)
+    if (skipped !== cursor) {
+      cursor = skipped
+      continue
+    }
+    if (css[cursor] !== '@') {
+      cursor += 1
+      continue
+    }
+    const rule = readAtKeyword(css, cursor)
+    if (rule.name.toLowerCase() !== 'font-face') {
+      cursor = rule.end
+      continue
+    }
+    output += css.slice(kept, cursor)
+    cursor = skipRule(css, rule.end)
+    kept = cursor
+  }
+  return output + css.slice(kept)
+}
+
+/**
+ * Past a comment, a string, or an unquoted `url()` — the three places a brace
+ * or an `@` means nothing. Returns `index` unchanged when it points at none of
+ * them, which is how the callers tell "skipped" from "not mine".
+ */
+function skipOpaque(css: string, index: number): number {
+  const char = css[index]
+  if (char === '/' && css[index + 1] === '*') {
+    const close = css.indexOf('*/', index + 2)
+    return close === -1 ? css.length : close + 2
+  }
+  if (char === '"' || char === "'") {
+    let scan = index + 1
+    while (scan < css.length) {
+      if (css[scan] === '\\') scan += 2
+      else if (css[scan] === char) return scan + 1
+      // A newline ends a bad string rather than running to the end of the sheet.
+      else if (css[scan] === '\n') return scan
+      else scan += 1
+    }
+    return css.length
+  }
+  if (/^url\(/i.test(css.slice(index, index + 4)) && !/["']/.test(css[index + 4] ?? '')) {
+    const close = css.indexOf(')', index + 4)
+    return close === -1 ? css.length : close + 1
+  }
+  return index
+}
+
+/** The at-keyword at `index`, read the way a tokenizer reads it. */
+function readAtKeyword(css: string, index: number): { name: string; end: number } {
+  let scan = index + 1
+  let name = ''
+  while (scan < css.length && !/[\s{};:,()"'/[\]]/.test(css[scan])) {
+    if (css[scan] !== '\\') {
+      name += css[scan]
+      scan += 1
+      continue
+    }
+    // An escape swallows one following whitespace, and CSS counts a form feed
+    // and a carriage return as whitespace even though a plain `\s` class here
+    // would let `@\66 <FF>ont-face` read as two names and slip through.
+    const escaped = /^\\([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\f\r])?/.exec(css.slice(scan))
+    if (escaped) {
+      name += String.fromCodePoint(Number.parseInt(escaped[1], 16))
+      scan += escaped[0].length
+      continue
+    }
+    name += css[scan + 1] ?? ''
+    scan += 2
+  }
+  return { name, end: scan }
+}
+
+/**
+ * Past a whole at-rule: its prelude, then either the block it opens or the
+ * semicolon that ends it without one. Comments count as nothing here, so a
+ * `@font-face/**·/{…}` is the same rule to this as to a parser.
+ */
+function skipRule(css: string, from: number): number {
+  let cursor = from
+  while (cursor < css.length) {
+    const skipped = skipOpaque(css, cursor)
+    if (skipped !== cursor) {
+      cursor = skipped
+      continue
+    }
+    if (css[cursor] === ';') return cursor + 1
+    if (css[cursor] === '{') break
+    cursor += 1
+  }
+  if (cursor >= css.length) return css.length
+  let depth = 0
+  while (cursor < css.length) {
+    const skipped = skipOpaque(css, cursor)
+    if (skipped !== cursor) {
+      cursor = skipped
+      continue
+    }
+    if (css[cursor] === '{') depth += 1
+    else if (css[cursor] === '}') {
+      depth -= 1
+      if (depth === 0) return cursor + 1
+    }
+    cursor += 1
+  }
+  return css.length
+}
+
 const quoteHooked = new WeakSet<DOMPurify>()
 let quoting = false
 
@@ -119,6 +243,16 @@ function installDisplayLinkHook(purifier: DOMPurify): void {
     if (typeof link.setAttribute !== 'function') return
     link.setAttribute('target', '_blank')
     link.setAttribute('rel', 'noopener noreferrer')
+  })
+  purifier.addHook('afterSanitizeElements', (node) => {
+    // `localName`, not `nodeName`: a `<style>` inside inline SVG is in the SVG
+    // namespace, where `nodeName` is lowercase — and it still styles the whole
+    // document, `@font-face` included.
+    if (!displaying || (node as Element).localName !== 'style') return
+    const style = node as Element
+    const css = style.textContent ?? ''
+    if (!css.includes('@')) return
+    style.textContent = stripFontFaceRules(css)
   })
 }
 

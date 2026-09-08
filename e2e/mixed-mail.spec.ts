@@ -29,15 +29,15 @@ for (const appearance of ['light', 'dark'] as const) {
     const quoteBody = quote.frameLocator('iframe')
     const toggle = page.getByTestId('mail-trim-toggle')
     await expect(authoredFrame).toBeVisible()
-    await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '20px')
-    await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '20px')
+    await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '4px')
+    await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '4px')
     await expect(page.getByTestId('message-content')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
     await expect(authored.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'native')
     await expect(authoredBody.locator('body')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
     await expect(authoredBody.locator('#current-answer')).toContainText('configuration changes')
     await expect(authoredBody.locator('#current-answer')).toHaveCSS(
       'color',
-      appearance === 'light' ? 'rgb(32, 33, 36)' : 'rgb(233, 234, 238)'
+      appearance === 'light' ? 'rgb(42, 32, 21)' : 'rgb(233, 228, 216)'
     )
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await expect(quote).toBeHidden()

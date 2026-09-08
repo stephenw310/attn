@@ -7,6 +7,7 @@ import {
 } from '../../../shared/auth'
 import { clearAccountView } from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
+import { ScrapEdge } from '../components/Hand'
 import type { ShowToast } from './useToast'
 
 interface Options {
@@ -253,9 +254,10 @@ export function useAccountSession(options: Options): AccountSession {
           role="dialog"
           aria-modal="true"
           aria-label={`Sign out of ${activeAccount}?`}
-          className="w-[460px] rounded-lg border border-edge bg-raised p-5 shadow-menu"
+          className="relative isolate w-[460px] p-8"
           onClick={(event) => event.stopPropagation()}
         >
+          <ScrapEdge />
           <h2 className="text-sm font-semibold text-ink">Sign out of {activeAccount}?</h2>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
             This signs the account out and stops its sync. Choose what happens to its mail cached on this
@@ -268,7 +270,7 @@ export function useAccountSession(options: Options): AccountSession {
               data-testid="remove-account-delete"
               ref={removeAccountDeleteRef}
               onClick={() => removeActiveAccount(true)}
-              className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
+              className="w-full cursor-pointer border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
             >
               Sign out and delete local data
             </button>
@@ -276,7 +278,7 @@ export function useAccountSession(options: Options): AccountSession {
               type="button"
               data-testid="remove-account-keep"
               onClick={() => removeActiveAccount(false)}
-              className="w-full cursor-pointer rounded-md border border-edge px-3 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
+              className="w-full cursor-pointer border border-edge px-3 py-1.5 text-[13px] text-ink-dim hover:bg-active hover:text-ink"
             >
               Sign out and keep local data
             </button>
@@ -284,7 +286,7 @@ export function useAccountSession(options: Options): AccountSession {
               type="button"
               data-testid="remove-account-cancel"
               onClick={() => setRemoveAccountConfirm(false)}
-              className="w-full cursor-pointer rounded-md px-3 py-1.5 text-[13px] text-ink-faint hover:bg-active hover:text-ink"
+              className="w-full cursor-pointer px-3 py-1.5 text-[13px] text-ink-faint hover:bg-active hover:text-ink"
             >
               Cancel
             </button>

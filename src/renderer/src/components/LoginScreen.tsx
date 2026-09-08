@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
+import { PaperSheet, Seal } from './Hand'
 
 interface LoginScreenProps {
   status: AuthStatus | null
@@ -42,18 +43,22 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
   return (
     <div
       data-testid="login-screen"
-      className="app-drag relative flex h-full flex-col overflow-hidden bg-ground"
+      // No background here: the sheet is painted behind the window at a negative
+      // z-index, and a positioned wrapper with its own ground would cover it.
+      className="app-drag relative flex h-full flex-col overflow-hidden"
     >
+      <PaperSheet bandWidth={0} />
       <div className="app-login-backdrop pointer-events-none absolute inset-0 opacity-80" />
       <header className="relative flex items-center px-7 py-5">
-        <div className="text-base font-bold tracking-tight">
-          attn<span className="text-accent">:</span>
+        <div className="font-gotisch flex items-center gap-2 text-[26px] leading-none text-ink">
+          attn
+          <Seal letter="a" />
         </div>
       </header>
 
       <main className="relative flex min-h-0 flex-1 items-center justify-center px-6 pb-14">
         <section className="app-no-drag w-full max-w-[430px] text-center">
-          <div className="mx-auto mb-7 flex size-14 items-center justify-center rounded-2xl border border-accent/25 bg-accent/[0.08] text-accent shadow-dialog">
+          <div className="mx-auto mb-7 flex size-14 items-center justify-center border border-accent/25 bg-accent/[0.08] text-accent shadow-dialog">
             <svg aria-hidden viewBox="0 0 24 24" className="size-6" fill="none">
               <title>Mail</title>
               <path
@@ -65,13 +70,9 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
               />
             </svg>
           </div>
-          <p className="mb-3 text-[11px] font-semibold tracking-[0.18em] text-accent uppercase">
-            Your inbox, in focus
-          </p>
-          <h1 className="text-[32px] font-semibold tracking-[-0.035em] text-ink">
-            Make space for what matters.
-          </h1>
-          <p className="mx-auto mt-4 max-w-[390px] text-sm leading-6 text-ink-dim">
+          <p className="app-small-caps mb-3 text-[14px] text-accent">Your inbox, in focus</p>
+          <h1 className="font-serif text-[38px] leading-[46px] text-ink">Make space for what matters.</h1>
+          <p className="font-letter mx-auto mt-3 max-w-[44ch] text-[17.5px] leading-[28px] text-ink-dim">
             Sign in with Google to bring your Gmail into a fast, keyboard-first inbox that keeps its local
             copy on this device.
           </p>
@@ -84,7 +85,7 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
             autoFocus
             disabled={!configured || busy || !bridgeAvailable}
             onClick={signIn}
-            className="mt-8 flex h-12 w-full cursor-pointer items-center justify-center gap-3 rounded-[9px] border border-white/15 bg-[#f3f4f7] px-5 text-sm font-semibold text-[#202124] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:bg-white disabled:cursor-default disabled:opacity-45"
+            className="mt-8 flex h-12 w-full cursor-pointer items-center justify-center gap-3 border border-white/15 bg-[#f3f4f7] px-5 text-sm font-semibold text-[#202124] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:bg-white disabled:cursor-default disabled:opacity-45"
           >
             <span className="flex size-5 items-center justify-center rounded-full border border-[#dadce0] bg-white text-[12px] font-bold text-[#4285f4]">
               G
@@ -112,11 +113,9 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
             )}
           </div>
 
-          <div className="mt-7 flex items-center justify-center gap-3 text-[11px] text-ink-faint">
+          <div className="app-small-caps mt-7 flex items-center justify-center gap-6 text-[12px] text-ink-faint">
             <span>Local-first</span>
-            <span className="text-edge">•</span>
             <span>Keyboard-first</span>
-            <span className="text-edge">•</span>
             <span>Private by design</span>
           </div>
         </section>

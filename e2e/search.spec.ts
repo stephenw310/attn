@@ -241,7 +241,7 @@ test('enters result browsing and returns to the query with its text intact', asy
   await input.fill('visualsort')
   await expect(list).toHaveAttribute('data-thread-count', '3')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('Entersearch')
+  await expect(page.getByTestId('footer-shortcut-search-browse')).toContainText('↵search')
   await expect(page.getByTestId('footer-shortcut-navigate')).toHaveCount(0)
 
   const firstResult = page.locator('[data-testid="thread-row"][data-thread-id="t-search-origin"]')

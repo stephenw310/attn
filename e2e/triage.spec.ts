@@ -14,10 +14,10 @@ test('archives with auto-advance and undoes durably', async ({ page }) => {
   await expect(rows).toHaveCount(7)
   await expect(rows.first()).toContainText('Northstar Books')
   await expect(rows.first()).toHaveAttribute('data-selected', 'true')
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(8)
-  await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('2 letters waiting')
 })
 
 test('self-heals a permanently rejected archive and invalidates its undo', async ({ app, page }) => {
@@ -53,12 +53,17 @@ test('makes a failed token refresh visibly reconnectable', async ({ app, page, m
   await page.keyboard.press('e')
 
   await expect.poll(mainLog).toContain('token refresh returned invalid_grant for seed@attn.test')
-  await expect(page.getByTestId('action-reconnect')).toContainText('1 paused · Reconnect Google')
-  await expect(page.getByTestId('paused-count')).toContainText('1 paused')
+  // The log line is main's; the readout is the renderer's, and it arrives on a
+  // later push. Polling the log is the weaker precondition of the two, so give
+  // the UI its own window rather than racing the default one under load.
+  await expect(page.getByTestId('action-reconnect')).toContainText('1 held. Reconnect Google', {
+    timeout: 15_000
+  })
+  await expect(page.getByTestId('paused-count')).toContainText('1 held')
   // The pending readout still counts the row: a paused action is queued work,
   // not a separate category, and the reconnect control sits beside it rather
   // than replacing it.
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
@@ -128,12 +133,12 @@ test('does not drop rapid archives or an undo during the exit animation', async 
   expect(
     framePositions.every(({ listScrollLeft, windowScrollX }) => listScrollLeft === 0 && windowScrollX === 0)
   ).toBe(true)
-  await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('2 letters waiting')
   await expect(rows).toHaveCount(6)
 
   await page.keyboard.press('e')
   await page.keyboard.press('z')
-  await expect(page.getByTestId('pending-count')).toContainText('4 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('4 letters waiting')
   await expect(rows).toHaveCount(6)
 })
 
@@ -157,14 +162,17 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
   await expect(rows.nth(1)).toHaveAttribute('data-checked', 'true')
   await expect(rows.nth(2)).toHaveAttribute('data-checked', 'true')
   await expect(rows.nth(2)).toHaveAttribute('data-selected', 'true')
+  // Only the row the keyboard is on carries the torn highlight, even though
+  // all three are checked.
   await expect
     .poll(() =>
-      rows.evaluateAll((items) => {
-        const borders = items.slice(0, 3).map((item) => getComputedStyle(item).borderLeftColor)
-        return [borders[0] === 'rgba(0, 0, 0, 0)', borders[1] === 'rgba(0, 0, 0, 0)', borders[2]]
-      })
+      rows.evaluateAll((items) =>
+        items
+          .slice(0, 3)
+          .map((item) => item.querySelectorAll('[data-testid="thread-selection-strip"]').length)
+      )
     )
-    .toEqual([true, true, 'rgb(255, 178, 36)'])
+    .toEqual([0, 0, 1])
 
   // Reader Escape always returns to the list; a second list Escape clears selection.
   await page.keyboard.press('k')
@@ -184,14 +192,14 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
   await page.keyboard.press('e')
   await expect(rows).toHaveCount(5)
   await expect(page.getByTestId('selection-count')).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('3 letters waiting')
   await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(0)
   await expect(rows.filter({ hasText: 'Your receipt' })).toHaveCount(0)
   await expect(rows.filter({ hasText: 'Design notes' })).toHaveCount(0)
 
   await page.keyboard.press('z')
   await expect(rows).toHaveCount(8)
-  await expect(page.getByTestId('pending-count')).toContainText('6 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('6 letters waiting')
   await expect(rows.filter({ hasText: 'Q3 roadmap review' })).toHaveCount(1)
   await expect(rows.filter({ hasText: 'Your receipt' })).toHaveCount(1)
   await expect(rows.filter({ hasText: 'Design notes' })).toHaveCount(1)
@@ -327,12 +335,19 @@ test('toggles star and unread, then trashes', async ({ page }) => {
   await page.keyboard.press('s')
   const star = first.getByTitle('Starred')
   await expect(star).toBeVisible()
+  // The star sits in the fixed marks column after the subject, where it cannot
+  // shift the subject or the time as it appears and disappears.
   expect(
     await first.evaluate((row) => {
       const star = row.querySelector('[title="Starred"]')
       const subject = row.querySelector('[data-testid="thread-subject"]')
+      const time = row.querySelector('[data-testid="thread-time"]')
       return Boolean(
-        star && subject && star.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING
+        star &&
+          subject &&
+          time &&
+          subject.compareDocumentPosition(star) & Node.DOCUMENT_POSITION_FOLLOWING &&
+          star.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING
       )
     })
   ).toBe(true)
@@ -340,7 +355,7 @@ test('toggles star and unread, then trashes', async ({ page }) => {
   await expect(first).not.toHaveAttribute('data-unread')
   await page.keyboard.press('#')
   await expect(page.getByTestId('thread-row')).toHaveCount(7)
-  await expect(page.getByTestId('pending-count')).toContainText('3 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('3 letters waiting')
 })
 
 // F2's airplane-mode criterion is twenty archives, not a handful (GAP-4), and
@@ -361,11 +376,13 @@ test.describe('offline replay at the F2 criterion', () => {
     for (let archived = 1; archived <= OFFLINE_ARCHIVE_COUNT; archived++) {
       await page.keyboard.press('e')
       await expect(rows).toHaveCount(OFFLINE_SEED_THREADS - archived)
-      await expect(page.getByTestId('pending-count')).toContainText(`${archived} pending`)
+      await expect(page.getByTestId('pending-count')).toContainText(
+        `${archived} letter${archived === 1 ? '' : 's'} waiting`
+      )
     }
     ;({ page } = await boot.relaunch())
     await expect(page.getByTestId('thread-row')).toHaveCount(OFFLINE_SEED_THREADS - OFFLINE_ARCHIVE_COUNT)
-    await expect(page.getByTestId('pending-count')).toContainText(`${OFFLINE_ARCHIVE_COUNT} pending`)
+    await expect(page.getByTestId('pending-count')).toContainText(`${OFFLINE_ARCHIVE_COUNT} letters waiting`)
     // Every archive applied to its own thread and none was lost: All Mail
     // still holds the whole seed after the restart.
     await goTo(page, 'a')

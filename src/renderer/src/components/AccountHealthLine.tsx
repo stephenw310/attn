@@ -21,7 +21,7 @@ export function AccountHealthLine({
       className={`text-[11px] ${attention ? 'font-medium text-accent' : 'text-ink-faint'}`}
     >
       {ACCOUNT_SYNC_PHASE_LABELS[health.phase]}
-      {health.unread > 0 ? ` · ${health.unread} unread` : ''}
+      {health.unread > 0 ? `, ${health.unread} unread` : ''}
     </span>
   )
 }

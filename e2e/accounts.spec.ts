@@ -256,8 +256,8 @@ test('the account menu shows a one-line status for every account', async ({ page
   await page.getByTestId('account-menu').getByRole('button').first().click()
   const statuses = page.getByTestId('account-status')
   await expect(statuses).toHaveCount(2)
-  await expect(statuses.first()).toHaveText('Live · 1 unread')
-  await expect(statuses.nth(1)).toHaveText('Live · 2 unread')
+  await expect(statuses.first()).toHaveText('Live, 1 unread')
+  await expect(statuses.nth(1)).toHaveText('Live, 2 unread')
 })
 
 for (const holdSnapshot of [false, true]) {
@@ -633,7 +633,7 @@ test('auth pause on one account stays its own: banner, chip mark, and reconnect'
     threadId: 't-alpha-roadmap'
   })
   await page.keyboard.press('e')
-  await expect(page.getByTestId('action-reconnect')).toContainText('1 paused · Reconnect Google')
+  await expect(page.getByTestId('action-reconnect')).toContainText('1 held. Reconnect Google')
 
   // The chip marks the roster while any account needs reauth (F18)…
   const chip = page.getByTestId('account-menu').getByRole('button').first()

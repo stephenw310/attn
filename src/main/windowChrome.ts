@@ -16,7 +16,7 @@ export function titleBarOverlayOptions(
   const appearance = themeAppearance(resolveTheme(preference, prefersDark))
   return {
     color: '#00000000',
-    symbolColor: appearance === 'dark' ? '#9da2ac' : '#555b66',
+    symbolColor: appearance === 'dark' ? '#b8b2a5' : '#54432f',
     height: TITLE_BAR_HEIGHT
   }
 }

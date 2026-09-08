@@ -126,7 +126,9 @@ test('the sidebar reaches every mailbox by pointer without moving', async ({ pag
   }
   await expect(page.getByTestId('sidebar-outbox').getByTestId('sidebar-count')).toHaveText('0')
   const inbox = page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })
-  await expect(inbox.locator('kbd')).toHaveText('G I')
+  // The chord stays discoverable in the tooltip and the cheat sheet rather
+  // than printed beside every mailbox name.
+  await expect(inbox).toHaveAttribute('title', 'Inbox (G I)')
   await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Trash' }).click()
   await expect(page.getByTestId('mailbox-title')).toHaveText('Trash')
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
@@ -146,8 +148,8 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   if (process.platform === 'darwin') expect(titleBarPadding.left).toBeGreaterThan(24)
   if (process.platform === 'win32') expect(titleBarPadding.right).toBeGreaterThan(24)
   const sidebar = page.getByTestId('mail-sidebar')
-  await expect(page.getByTestId('sidebar-brand')).toHaveText('attn:')
-  await expect(page.getByTestId('sidebar-brand')).toHaveCSS('font-size', '40px')
+  await expect(page.getByTestId('sidebar-brand')).toContainText('attn')
+  await expect(page.getByTestId('sidebar-brand').locator('div').first()).toHaveCSS('font-size', '40px')
   expect((await sidebar.boundingBox())?.width).toBe(216)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute(

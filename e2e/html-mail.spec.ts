@@ -258,6 +258,24 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     'background-color',
     'rgba(0, 0, 0, 0)'
   )
+  // `@font-face` belongs to the document that declares it, so a native letter
+  // needs its own copy of the faces or it falls back to the system serif
+  // beside a plain-text letter set in Alegreya. Naming the family in the CSS
+  // does not prove it resolved; only a loaded face does.
+  const nativeFaces = await page
+    .frameLocator('[data-testid="html-body-frame"]')
+    .locator('body')
+    .evaluate(async (body) => {
+      const fonts = body.ownerDocument.fonts
+      await fonts.ready
+      return {
+        families: [...new Set([...fonts].map((face) => face.family))],
+        alegreya: [...fonts].some((face) => face.family === 'Alegreya' && face.status === 'loaded')
+      }
+    })
+  // Before the frame carried its own faces this set was empty.
+  expect(nativeFaces.families).toEqual(expect.arrayContaining(['Alegreya', 'Alegreya Sans']))
+  expect(nativeFaces.alegreya).toBe(true)
   await page.evaluate(() => window.getSelection()?.removeAllRanges())
   await page
     .frameLocator('[data-testid="html-body-frame"]')
@@ -272,8 +290,10 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   await expect(page.getByTestId('plain-text-body')).toHaveCount(1)
   await expect(page.getByTestId('message-card').first()).toHaveAttribute('data-collapsed', 'true')
-  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-left', '20px')
-  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-right', '20px')
+  // The letter is written on the sheet rather than inside a card, so the
+  // reading measure comes from the content column, not from card padding.
+  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-left', '4px')
+  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-right', '4px')
   await expect(page.getByTestId('plain-text-body').last().getByTestId('plain-text-visible')).toHaveText(
     'I added the launch milestones and owner notes.'
   )

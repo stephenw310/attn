@@ -183,7 +183,10 @@ test('classifies once, navigates locally, and restores each split selection', as
   await allMail.focus()
   await expect(allMail).toBeFocused()
   await expect(page.getByTestId('view-title')).toHaveText('All Mail')
-  await expect(strip).toHaveCount(0)
+  // The strip row keeps its place for the search affordance; only the split
+  // tabs and their manager belong to the Inbox.
+  await expect(tabs).toHaveCount(0)
+  await expect(page.getByTestId('split-rules-settings')).toHaveCount(0)
   await page.keyboard.press('Tab')
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')
   await expect(strip).toBeVisible()
@@ -251,7 +254,7 @@ test('changes Gmail importance without presenting splits as move destinations', 
   await testInfo.attach('move-picker', { path: pickerPath, contentType: 'image/png' })
   await page.getByTestId('move-mark-not-important').click()
   await expect(boardMemo).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
   await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
   await expect(boardMemo).toBeVisible()
@@ -263,7 +266,7 @@ test('changes Gmail importance without presenting splits as move destinations', 
   await expect(page.getByTestId('move-mark-important')).toHaveText(/Mark as important/)
   await page.getByTestId('move-mark-important').click()
   await expect(boardMemo).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('2 letters waiting')
 
   await page.locator('[data-testid="split-tab"][data-split-id="base:important"]').click()
   await expect(boardMemo).toBeVisible()

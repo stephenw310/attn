@@ -32,22 +32,21 @@ test('searches, applies, and undoes a user label', async ({ page }) => {
     projectChip.boundingBox(),
     first.getByTestId('thread-subject').boundingBox()
   ])
-  expect(chipBox?.x).toBeLessThan(subjectBox?.x ?? 0)
-  const projectColor = await projectChip.evaluate((element) => getComputedStyle(element).backgroundColor)
-  const receiptColor = await page
-    .getByTestId('thread-row')
-    .nth(1)
-    .getByTestId('label-chip')
-    .evaluate((element) => getComputedStyle(element).backgroundColor)
-  expect(projectColor).not.toBe('rgba(0, 0, 0, 0)')
-  expect(projectColor).not.toBe(receiptColor)
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  // Labels are set after the subject, in their own ink, so a long subject
+  // never pushes them out of the row.
+  expect(chipBox?.x).toBeGreaterThan(subjectBox?.x ?? 0)
+  const [labelColor, subjectColor] = await Promise.all([
+    projectChip.evaluate((element) => getComputedStyle(element).color),
+    first.getByTestId('thread-subject').evaluate((element) => getComputedStyle(element).color)
+  ])
+  expect(labelColor).not.toBe(subjectColor)
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
   await page.keyboard.press('Escape')
   await expect(picker).toHaveCount(0)
   await page.keyboard.press('z')
   await expect(first.getByTestId('label-chip')).toHaveCount(0)
-  await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('2 letters waiting')
 })
 
 test('keeps picker typing isolated and opens it over a conversation', async ({ page }, testInfo) => {
@@ -57,12 +56,12 @@ test('keeps picker typing isolated and opens it over a conversation', async ({ p
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('l')
   await expect(page.getByTestId('label-picker')).toBeVisible()
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
   const search = page.getByTestId('label-search')
   await search.fill('s')
   await expect(first.getByTitle('Starred')).toBeHidden()
-  await expect(page.getByTestId('pending-count')).toContainText('1 pending')
+  await expect(page.getByTestId('pending-count')).toContainText('1 letter waiting')
 
   const dir = join(__dirname, '.artifacts')
   mkdirSync(dir, { recursive: true })
@@ -163,4 +162,68 @@ test('wraps picker navigation at both ends and scrolls the highlight into view',
   await expect(options.first()).toHaveAttribute('data-highlighted', 'true')
   const [scrollerBox, firstBox] = await Promise.all([scroller.boundingBox(), options.first().boundingBox()])
   expect(firstBox?.y).toBeGreaterThanOrEqual(scrollerBox?.y ?? 0)
+})
+
+test('shows two labels on a row and counts the rest', async ({ page }) => {
+  const first = page.getByTestId('thread-row').first()
+  await expect(first).toContainText('Maya Lin')
+  await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
+
+  for (const name of ['projects', 'receipts', 'design']) {
+    await page.keyboard.press('l')
+    const search = page.getByTestId('label-search')
+    await search.fill(name)
+    await expect(page.getByTestId('label-option')).toHaveCount(1)
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('label-picker')).toHaveCount(0)
+  }
+
+  await expect(first.getByTestId('label-chip')).toHaveCount(2)
+  await expect(first.getByTestId('label-overflow')).toContainText('+1')
+  await expect(first.getByTestId('label-overflow')).toContainText('1 more label: design')
+})
+
+test('keeps the subject readable beside labels at the narrowest window', async ({ app, page }) => {
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(900, 600))
+  const first = page.getByTestId('thread-row').first()
+  await expect(first).toContainText('Maya Lin')
+  await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
+
+  for (const name of ['projects', 'receipts']) {
+    await page.keyboard.press('l')
+    await page.getByTestId('label-search').fill(name)
+    await expect(page.getByTestId('label-option')).toHaveCount(1)
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('label-picker')).toHaveCount(0)
+  }
+
+  await expect(first.getByTestId('label-chip')).toHaveCount(2)
+  // Labels give way before the subject does: the subject is what a reader scans,
+  // so it must still fit inside the span that clips the line.
+  const line = await first.evaluate((row) => {
+    const subject = row.querySelector('[data-testid="thread-subject"]')
+    const labels = row.querySelector('[data-testid="label-chip"]')?.parentElement
+    const time = row.lastElementChild
+    if (!subject || !labels || !time) return null
+    return {
+      rowHeight: row.getBoundingClientRect().height,
+      subjectRight: subject.getBoundingClientRect().right,
+      subjectShown: (subject as HTMLElement).clientWidth,
+      labelsLeft: labels.getBoundingClientRect().left,
+      labelsRight: labels.getBoundingClientRect().right,
+      timeLeft: time.getBoundingClientRect().left
+    }
+  })
+  expect(line).not.toBeNull()
+  // One line, whatever the labels do.
+  expect(line?.rowHeight).toBe(46)
+  // Labels are a column of their own, set after the subject and before the
+  // timestamp; neither neighbour is allowed to reach into them.
+  expect(line?.subjectRight ?? 0).toBeLessThanOrEqual((line?.labelsLeft ?? 0) + 1)
+  expect(line?.labelsRight ?? 0).toBeLessThanOrEqual((line?.timeLeft ?? 0) + 1)
+  // And the subject still shows enough of itself to be worth scanning. At this
+  // window it is truncated; the failure this guards is truncation to nothing.
+  expect(line?.subjectShown ?? 0).toBeGreaterThan(60)
 })

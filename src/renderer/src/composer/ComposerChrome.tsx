@@ -55,18 +55,7 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
       }`}
       data-testid={mode === 'inline' ? 'composer-inline-header' : undefined}
     >
-      {mode === 'full' ? (
-        <button
-          type="button"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
-          data-testid="composer-close"
-          aria-label="Save draft and go back"
-          disabled={props.attaching || props.closing}
-          onClick={props.closeAndSave}
-        >
-          <span aria-hidden>←</span> Back
-        </button>
-      ) : (
+      {mode === 'inline' && (
         <span className="flex size-7 flex-none items-center justify-center rounded-full bg-accent/10 text-sm text-accent">
           {draft.kind === 'forward' ? '↪' : '↩'}
         </span>
@@ -93,28 +82,26 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
         </span>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        {mode === 'full' ? (
-          <span className="flex items-center gap-2 text-[11px] text-ink-faint">
+        {mode === 'full' && (
+          <span className="flex items-center gap-4 text-[13px] text-ink-faint">
             <span className="flex items-center gap-1.5" data-testid="composer-undo-hint">
               undo <Kbd>{modKeyLabel()}Z</Kbd>
             </span>
-            <span aria-hidden>·</span>
             <span className="flex items-center gap-1.5">
               save &amp; close <Kbd>Esc</Kbd>
             </span>
           </span>
-        ) : (
-          <button
-            type="button"
-            className="flex size-7 items-center justify-center rounded-md text-lg text-ink-faint hover:bg-active hover:text-ink"
-            data-testid="composer-close"
-            aria-label="Save and close draft"
-            title="Save and close draft (Esc)"
-            onClick={props.closeAndSave}
-          >
-            ×
-          </button>
         )}
+        <button
+          type="button"
+          className="flex size-7 items-center justify-center text-lg text-ink-faint hover:bg-active hover:text-ink"
+          data-testid="composer-close"
+          aria-label="Save and close draft"
+          title="Save and close draft (Esc)"
+          onClick={props.closeAndSave}
+        >
+          ×
+        </button>
       </div>
     </header>
   )
@@ -125,12 +112,12 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
   return (
     <>
       <div
-        className="flex min-h-10 shrink-0 items-center border-b border-edge px-4"
+        className="flex min-h-11 shrink-0 items-baseline gap-4 border-b border-edge px-6 pt-2 pb-1.5"
         data-testid="composer-from"
         data-email={draft.accountId}
       >
-        <span className="w-10 shrink-0 text-sm font-medium text-ink-faint">From</span>
-        <span className="min-w-0 truncate text-sm text-ink">{draft.accountId}</span>
+        <span className="app-small-caps w-14 shrink-0 text-[13.5px] text-accent">From</span>
+        <span className="min-w-0 truncate text-[16px] text-ink">{draft.accountId}</span>
       </div>
       <div className="relative">
         <RecipientField
@@ -148,7 +135,7 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
         {!props.showCopies && (
           <button
             type="button"
-            className="absolute right-3 top-1.5 inline-flex h-7 items-center gap-1 rounded-md border border-transparent px-2 text-xs text-ink-faint hover:border-edge hover:bg-active hover:text-ink"
+            className="app-small-caps absolute top-2 right-5 inline-flex h-7 items-center gap-1 px-1 text-[13px] text-ink-faint hover:text-ink"
             data-testid="composer-show-copies"
             aria-label="Show Cc and Bcc fields"
             aria-expanded="false"
@@ -197,7 +184,7 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
       )}
       {mode === 'full' && (
         <input
-          className="h-12 shrink-0 border-b border-edge bg-transparent px-4 text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
+          className="font-serif h-14 shrink-0 border-b border-edge bg-transparent px-6 text-[26px] text-ink outline-none placeholder:text-ink-faint"
           data-testid="composer-subject"
           aria-label="Subject"
           placeholder="Subject"

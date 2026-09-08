@@ -98,7 +98,7 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(details).toContainText('priya@example.com')
   await expect(details).toContainText('daniel@example.com')
   await expect(details).toContainText('maya+roadmap@example.com')
-  await expect(details).toContainText('Date')
+  await expect(details).toContainText('Sent')
   const timezone = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
     .formatToParts(new Date(1_754_800_000_000))
     .find((part) => part.type === 'timeZoneName')?.value
@@ -168,7 +168,7 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'native')
   await expect(frameBody.locator('body')).toHaveCSS('padding-left', '0px')
   await expect(frameBody.locator('body')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(frameBody.locator('body')).toHaveCSS('color', 'rgb(233, 234, 238)')
+  await expect(frameBody.locator('body')).toHaveCSS('color', 'rgb(233, 228, 216)')
   await expect(frameBody.locator('#plain-html-copy')).toContainText('Your order total was $24.00.')
   await expect(frameBody.locator('#plain-export-styles')).toHaveCount(0)
   await expect(frameBody.locator('#plain-layout')).not.toHaveAttribute('bgcolor')
@@ -183,7 +183,7 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   })
   await expect(generatedLink).toHaveAttribute('href', 'https://northstar.test/orders/24.pdf')
   await expect(generatedLink).toHaveAttribute('target', '_blank')
-  await expect(generatedLink).toHaveCSS('color', 'rgb(96, 165, 250)')
+  await expect(generatedLink).toHaveCSS('color', 'rgb(147, 168, 219)')
   await expect
     .poll(() =>
       frame.evaluate((element) => {
@@ -208,8 +208,8 @@ test('shows attachment metadata and explains offline downloads', async ({ page }
   await toggle.click()
   await expect(frameBody.locator('#decorated-signature-copy')).toContainText('-- The Northstar Books Team --')
   await expect(frameBody.locator('#signature-disclaimer')).toContainText('Confidential order information.')
-  await expect(frameBody.locator('#native-signature-copy')).toHaveCSS('color', 'rgb(233, 234, 238)')
-  await expect(frameBody.locator('#native-signature-link')).toHaveCSS('color', 'rgb(96, 165, 250)')
+  await expect(frameBody.locator('#native-signature-copy')).toHaveCSS('color', 'rgb(233, 228, 216)')
+  await expect(frameBody.locator('#native-signature-link')).toHaveCSS('color', 'rgb(147, 168, 219)')
   expect(
     await attachment.evaluate((element) => element.closest('[data-testid="message-content"]') !== null)
   ).toBe(true)
@@ -228,7 +228,7 @@ test('linkifies plain-text mail and collapses decorated signature lines', async 
   })
   await expect(generatedLink).toHaveAttribute('href', 'https://research.example/findings')
   await expect(generatedLink).toHaveAttribute('target', '_blank')
-  await expect(generatedLink).toHaveCSS('color', 'rgb(96, 165, 250)')
+  await expect(generatedLink).toHaveCSS('color', 'rgb(147, 168, 219)')
 
   const toggle = page.getByTestId('mail-trim-toggle')
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -252,7 +252,7 @@ test('keeps HTML fallbacks readable and never collapses an all-quote message', a
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   const fallback = page.getByTestId('plain-text-body')
   await expect(fallback).toHaveText('I found three routes for the conference.')
-  await expect(fallback).toHaveCSS('color', 'rgb(233, 234, 238)')
+  await expect(fallback).toHaveCSS('color', 'rgb(233, 228, 216)')
   await expect(fallback).toHaveCSS('padding-left', '0px')
 })
 

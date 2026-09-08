@@ -237,71 +237,80 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     ])
   }, [activeMessageId, conversation.messages, onReply, replyToMessage, revealedTrashedIds])
 
-  const items = conversation.messages.map((message) => (
-    <div
-      key={`message:${message.id}`}
-      ref={(element) => {
-        if (element) messageElementsRef.current.set(message.id, element)
-        else messageElementsRef.current.delete(message.id)
-      }}
-      data-testid="conversation-message"
-      data-message-id={message.id}
-      data-active-message={activeMessageId === message.id ? 'true' : undefined}
-      aria-current={activeMessageId === message.id ? 'true' : undefined}
-      data-latest-conversation-item={!inlineComposer && activeMessageId === message.id ? '' : undefined}
-      className="relative"
-      onPointerDownCapture={() => {
-        if (!inlineComposer) setActiveMessageId(message.id)
-      }}
-      onFocusCapture={() => {
-        if (!inlineComposer) setActiveMessageId(message.id)
-      }}
-    >
-      {activeMessageId === message.id && (
-        <span
-          data-testid="message-cursor"
-          aria-hidden
-          className={`pointer-events-none absolute left-0 z-10 w-0.5 bg-accent/40 ${inlineComposer && inlineComposerSourceMessageId === message.id ? 'top-1.5 bottom-0 rounded-t-full' : 'inset-y-1.5 rounded-full'}`}
-        />
-      )}
-      {message.trashed && !revealedTrashedIds.has(message.id) ? (
-        <div
-          data-testid="trashed-message-marker"
-          className="flex items-center gap-2 rounded-lg border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
-        >
-          This message was moved to Trash.
-          <button
-            type="button"
-            data-testid="trashed-message-reveal"
-            onClick={(event) => {
-              revealTrashed(message.id)
-              event.currentTarget.blur()
-            }}
-            className="cursor-pointer font-medium text-accent hover:underline"
+  const items = conversation.messages.map((message) => {
+    const hidden = message.trashed && !revealedTrashedIds.has(message.id)
+    const shut = !expandedMessageIds.has(message.id)
+    // The bar marks the sender line, and that line starts at a different
+    // height in each of the three shapes a message takes: an open card pads
+    // itself and draws a rule first, a shut one only draws the rule, and a
+    // trashed marker has a border and its own padding. One fixed offset put
+    // the bar on the seam under a shut row and hanging into the next.
+    const cursor = hidden ? { top: 15, height: 18 } : shut ? { top: 15, height: 20 } : { top: 42, height: 19 }
+    return (
+      <div
+        key={`message:${message.id}`}
+        ref={(element) => {
+          if (element) messageElementsRef.current.set(message.id, element)
+          else messageElementsRef.current.delete(message.id)
+        }}
+        data-testid="conversation-message"
+        data-message-id={message.id}
+        data-active-message={activeMessageId === message.id ? 'true' : undefined}
+        aria-current={activeMessageId === message.id ? 'true' : undefined}
+        data-latest-conversation-item={!inlineComposer && activeMessageId === message.id ? '' : undefined}
+        className="relative"
+        onPointerDownCapture={() => {
+          if (!inlineComposer) setActiveMessageId(message.id)
+        }}
+        onFocusCapture={() => {
+          if (!inlineComposer) setActiveMessageId(message.id)
+        }}
+      >
+        {activeMessageId === message.id && (
+          <span
+            data-testid="message-cursor"
+            aria-hidden
+            style={cursor}
+            className="pointer-events-none absolute left-0 z-10 w-[3px] bg-accent"
+          />
+        )}
+        {hidden ? (
+          <div
+            data-testid="trashed-message-marker"
+            className="flex items-center gap-3 border border-edge border-dashed px-4 py-3 text-[14.5px] text-ink-faint"
           >
-            Show message
-          </button>
-        </div>
-      ) : (
-        <MessageCard
-          threadId={conversation.threadId}
-          message={message}
-          account={account}
-          active={activeMessageId === message.id}
-          hasInlineComposer={Boolean(inlineComposer && inlineComposerSourceMessageId === message.id)}
-          bodyHydrationMessage={bodyHydrationStatusMessage(
-            message.bodyState,
-            online,
-            conversation.bodyHydrationFailed
-          )}
-          collapsed={!expandedMessageIds.has(message.id)}
-          onToggleCollapsed={() => toggleMessage(message.id)}
-          trimExpanded={expandedTrimIds.has(message.id)}
-          onToggleTrim={() => toggleTrim(message.id)}
-        />
-      )}
-    </div>
-  ))
+            This message was moved to Trash.
+            <button
+              type="button"
+              data-testid="trashed-message-reveal"
+              onClick={(event) => {
+                revealTrashed(message.id)
+                event.currentTarget.blur()
+              }}
+              className="cursor-pointer font-medium text-accent hover:underline"
+            >
+              Show message
+            </button>
+          </div>
+        ) : (
+          <MessageCard
+            threadId={conversation.threadId}
+            message={message}
+            account={account}
+            bodyHydrationMessage={bodyHydrationStatusMessage(
+              message.bodyState,
+              online,
+              conversation.bodyHydrationFailed
+            )}
+            collapsed={shut}
+            onToggleCollapsed={() => toggleMessage(message.id)}
+            trimExpanded={expandedTrimIds.has(message.id)}
+            onToggleTrim={() => toggleTrim(message.id)}
+          />
+        )}
+      </div>
+    )
+  })
   if (inlineComposer) {
     const sourceIndex = conversation.messages.findIndex(
       (message) => message.id === inlineComposerSourceMessageId
@@ -316,12 +325,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         data-latest-conversation-item=""
         className={sourceIndex >= 0 ? 'relative -mt-3.5' : undefined}
       >
-        {sourceIndex >= 0 && (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute top-0 bottom-1.5 left-0 z-10 w-0.5 rounded-b-full bg-accent/40"
-          />
-        )}
         {inlineComposer}
       </div>
     )
@@ -334,7 +337,6 @@ interface ConversationViewProps {
   selectedIndex: number
   threadCount: number
   threadCountExact: boolean
-  mailboxTitle: string
   conversation: DisplayConversation | null
   account: string | null
   online: boolean
@@ -343,7 +345,6 @@ interface ConversationViewProps {
   inlineComposer: ReactNode | null
   inlineComposerDraftId: string | null
   inlineComposerSourceMessageId: string | null
-  onClose: () => void
   onReply: (kind: Exclude<DraftKind, 'new'>, messageId: string) => void
 }
 
@@ -355,7 +356,6 @@ export const ConversationView = memo(function ConversationView(
     selectedIndex,
     threadCount,
     threadCountExact,
-    mailboxTitle,
     conversation,
     account,
     online,
@@ -364,7 +364,6 @@ export const ConversationView = memo(function ConversationView(
     inlineComposer,
     inlineComposerDraftId,
     inlineComposerSourceMessageId,
-    onClose,
     onReply
   } = props
 
@@ -446,28 +445,20 @@ export const ConversationView = memo(function ConversationView(
   }, [pendingFocusMessageId, scrollRef])
 
   return (
-    <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
-      <div className="flex items-center gap-4 border-b border-edge px-6 pt-3 pb-3">
-        <button
-          type="button"
-          data-testid="conversation-back"
-          className="app-no-drag flex cursor-pointer items-center gap-1.5 rounded-[7px] px-2.5 py-1.5 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
-          onClick={onClose}
-        >
-          <span aria-hidden>←</span> {mailboxTitle}
-        </button>
+    <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col">
+      <div className="flex items-baseline gap-4 px-6 pt-4 pb-3">
         <h1
           data-testid="conversation-subject"
-          className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-lg font-bold tracking-tight"
+          className="font-serif min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[30px] leading-none text-ink"
         >
           {conversation?.subject ?? selected.subject}
         </h1>
-        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
+        <span className="flex flex-none items-baseline gap-2 text-[14px] text-ink-faint">
           <span data-testid="conversation-position" className="tabular-nums">
             {selectedIndex + 1} of {threadCount}
             {threadCountExact ? '' : '+'}
-          </span>{' '}
-          · <Kbd>Esc</Kbd>
+          </span>
+          <Kbd>Esc</Kbd>
         </span>
       </div>
       <div
@@ -479,7 +470,7 @@ export const ConversationView = memo(function ConversationView(
         {conversation || inlineComposer ? (
           <div
             data-testid="conversation-content"
-            className="mx-auto flex w-full flex-col gap-3.5"
+            className="mx-auto flex w-full flex-col"
             style={{ maxWidth: 'clamp(576px, 57.6vw, 896px)' }}
           >
             <ConversationMessages

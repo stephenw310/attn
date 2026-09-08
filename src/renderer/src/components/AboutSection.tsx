@@ -47,7 +47,7 @@ export function AboutSection(): React.JSX.Element {
   }
 
   const buildLine = info
-    ? `${BUILD_LABELS[info.distribution]}${info.feed ? ` · updates from ${info.feed}` : ''}`
+    ? `${BUILD_LABELS[info.distribution]}${info.feed ? `. Updates from ${info.feed}` : ''}`
     : 'Loading…'
 
   return (

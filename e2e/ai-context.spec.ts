@@ -38,7 +38,7 @@ for (const kind of ['reply', 'replyAll'] as const) {
     const draftId = await composer.root.getAttribute('data-draft-id')
     await page.getByTestId('composer-close').click()
     await expect(composer.root).toHaveCount(0)
-    await page.getByTestId('conversation-back').click()
+    await page.keyboard.press('Escape')
     await page.getByTestId('thread-row').click()
     await expect(composer.root).toHaveAttribute('data-draft-id', draftId ?? '')
     await expect(page.getByTestId('conversation-latest-item')).toHaveAttribute(

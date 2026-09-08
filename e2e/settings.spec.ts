@@ -28,7 +28,7 @@ function row(page: Page, subject: string) {
 test.describe('settings surface', () => {
   test.use({ seed: 'fixtures/seed-inbox.json' })
 
-  test('opens by keyboard, account menu, and palette; Esc and Back restore the prior view exactly', async ({
+  test('opens by keyboard, account menu, and palette; Esc restores the prior view exactly', async ({
     page
   }, testInfo) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(8)
@@ -45,12 +45,15 @@ test.describe('settings surface', () => {
     await expect(settings.getByTestId('settings-account-row')).toContainText('seed@attn.test')
     const accountScope = settings.getByTestId('settings-account-scope')
     const allAccountsScope = settings.getByTestId('settings-all-accounts-scope')
-    await expect(accountScope).toContainText('This account')
+    // The scope headings moved into the contents column; each section still
+    // says in its own words whose settings it holds.
+    await expect(settings.getByTestId('settings-contents')).toContainText('This account')
+    await expect(settings.getByTestId('settings-contents')).toContainText('All accounts')
+    await expect(accountScope).toContainText('These settings apply only to')
     await expect(accountScope).toContainText('seed@attn.test')
     await expect(accountScope.getByTestId('settings-sync')).toBeVisible()
     await expect(accountScope.getByTestId('settings-compose')).toBeVisible()
     await expect(accountScope.getByTestId('settings-split-rules')).toHaveCount(0)
-    await expect(allAccountsScope).toContainText('All accounts')
     await expect(allAccountsScope).toContainText('every signed-in account and mailbox')
     await expect(allAccountsScope.getByTestId('settings-triage')).toBeVisible()
     await expect(allAccountsScope.getByTestId('settings-security')).toBeVisible()
@@ -108,14 +111,14 @@ test.describe('settings surface', () => {
     await expect(settings).toHaveCount(0)
     await expect(row(page, 'Your receipt')).toHaveAttribute('data-selected', 'true')
 
-    // From the reader, Back restores the same conversation.
+    // From the reader, Escape restores the same conversation.
     await row(page, 'Lunch next week').click()
     await expect(page.getByTestId('conversation-view')).toBeVisible()
     await page.getByTestId('account-menu').getByRole('button').first().click()
     await page.getByTestId('account-settings').click()
     await expect(settings).toBeVisible()
     await expect(page.getByTestId('conversation-view')).toBeHidden()
-    await page.getByTestId('settings-back').click()
+    await page.keyboard.press('Escape')
     await expect(settings).toHaveCount(0)
     await expect(page.getByTestId('conversation-view')).toBeVisible()
     await expect(page.getByTestId('conversation-subject')).toHaveText('Lunch next week')

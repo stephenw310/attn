@@ -18,6 +18,7 @@ import {
 } from '../commands'
 import { wrappedIndex } from '../hooks/useHighlightedOption'
 import { formatShortcut } from '../platform'
+import { ScrapEdge } from './Hand'
 import { Kbd } from './Kbd'
 
 interface CommandPaletteProps {
@@ -215,10 +216,11 @@ export function CommandPalette({
         aria-label="Command palette"
         data-testid="command-palette"
         data-usage-loaded={usageLoaded ? 'true' : 'false'}
-        className="fixed top-[15vh] left-1/2 z-[90] flex max-h-[70vh] w-[min(640px,92vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-[15vh] left-1/2 isolate z-[90] flex max-h-[70vh] w-[min(640px,92vw)] -translate-x-1/2 flex-col px-4 py-4"
         onKeyDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b border-edge px-4 py-3">
+        <ScrapEdge />
+        <div className="flex items-center gap-3 px-5 pt-4 pb-2">
           <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-ink-faint">
             <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
             <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
@@ -280,7 +282,7 @@ export function CommandPalette({
                 data-testid="command-palette-result"
                 data-command-id={result.command.id}
                 data-active={index === activeIndex || undefined}
-                className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${
+                className={`flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left text-sm ${
                   index === activeIndex
                     ? 'bg-active text-ink'
                     : 'text-ink-dim hover:bg-active/60 hover:text-ink'

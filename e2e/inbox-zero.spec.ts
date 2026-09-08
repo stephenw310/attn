@@ -41,12 +41,14 @@ test.describe('complete Inbox metadata', () => {
     await expect(page.getByTestId('inbox-zero-message')).toContainText('Inbox zero')
     await expect(page.getByTestId('inbox-zero-message').locator('time')).toHaveText(/\d{1,2}:\d{2}/)
     await expect(page.getByTestId('inbox-zero-split')).toHaveText([
-      'Calendar: 2 total',
-      'GitHub: 1 total',
-      'Newsletters: 2 total',
-      'Other: 2 total'
+      /Calendar\s*2 waiting/,
+      /GitHub\s*1 waiting/,
+      /Newsletters\s*2 waiting/,
+      /Other\s*2 waiting/
     ])
-    expect(await zero.locator('img').getAttribute('src')).not.toMatch(/^https?:/)
+    // The empty day is the desk itself now: no photograph, so nothing here can
+    // reach the network for one.
+    await expect(zero.locator('img')).toHaveCount(0)
 
     await expect(page.getByTestId('toast')).toHaveCount(0, { timeout: 5_000 })
     const artifactDirectory = join(__dirname, '.artifacts')

@@ -7,6 +7,7 @@ import {
   subscribeCommandRegistry
 } from '../commands'
 import { formatShortcut } from '../platform'
+import { ScrapEdge } from './Hand'
 import { Kbd } from './Kbd'
 
 interface CheatSheetProps {
@@ -124,9 +125,10 @@ export function CheatSheet({
         aria-modal="true"
         aria-label="Keyboard shortcuts"
         data-testid="cheat-sheet"
-        className="fixed top-1/2 left-1/2 z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-1/2 left-1/2 isolate z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col px-5 py-5"
       >
-        <div className="flex flex-none items-center gap-3 border-b border-edge px-5 py-3">
+        <ScrapEdge />
+        <div className="flex flex-none items-center gap-3 px-6 pt-5 pb-2">
           <h2 className="text-sm font-semibold text-ink">Keyboard shortcuts</h2>
           <span className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-faint">
             <Kbd>Esc</Kbd> closes
@@ -136,9 +138,7 @@ export function CheatSheet({
           <div className="columns-1 gap-8 sm:columns-2 lg:columns-3">
             {groups.map((group) => (
               <div key={group.label} data-testid="cheat-sheet-group" className="mb-6 break-inside-avoid">
-                <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
-                  {group.label}
-                </h3>
+                <h3 className="app-small-caps text-[13px] font-semibold text-accent">{group.label}</h3>
                 <ul className="mt-2 flex flex-col gap-1">
                   {group.commands.map((command) => (
                     <li

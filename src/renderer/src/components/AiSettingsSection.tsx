@@ -17,9 +17,9 @@ import { ACTION_BUTTON, INPUT, NOTE, ROW, SELECT } from './settingsStyles'
 // shows its disclosure first, and only the confirm button writes. The key is
 // write-only — it is never echoed back into the UI after saving.
 
-const CONFIRM_PANEL = 'mx-3 mt-1 rounded-md border border-accent/40 bg-accent/10 px-3 py-2'
+const CONFIRM_PANEL = 'mx-3 mt-1 border border-accent/40 bg-accent/10 px-3 py-2'
 const CONFIRM_APPLY =
-  'cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20'
+  'cursor-pointer border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent hover:bg-accent/20'
 
 const REPLY_DISCLOSURE =
   'When you invoke Draft AI reply, the open conversation, any reply text you have already written, your ' +

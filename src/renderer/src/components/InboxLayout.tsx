@@ -3,17 +3,19 @@ import type { InboxController } from '../hooks/useInboxController'
 import { type MailView, userLabelId } from '../list/mailDisplay'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
+import { PaperSheet } from './Hand'
 import { InboxOverlays } from './InboxOverlays'
 import { InboxZero } from './InboxZero'
 import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
-import { MailSidebar } from './MailSidebar'
+import { MailSidebar, SIDEBAR_WIDTH } from './MailSidebar'
 import { OutboxList } from './OutboxList'
 import { SearchHeader, searchCoverageText } from './SearchHeader'
 import { ServerSearchRow } from './ServerSearchRow'
 import { SettingsView } from './SettingsView'
 import { SplitStrip } from './SplitStrip'
 import { ThreadList } from './ThreadList'
+import { ViewTitle } from './ViewTitle'
 
 function threadListKind(view: MailView): ThreadListView | 'label' {
   if (userLabelId(view)) return 'label'
@@ -24,11 +26,12 @@ function threadListKind(view: MailView): ThreadListView | 'label' {
 export function InboxLayout({ controller: c }: { controller: InboxController }): React.JSX.Element {
   return (
     <div className="flex h-full flex-col">
+      <PaperSheet bandWidth={c.sidebarCollapsed || c.fullWindowComposerDraft ? 0 : SIDEBAR_WIDTH} />
       <MailHeader
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
         outboxCount={c.realOutbox.length}
-        selectionCount={c.searchOpen || (c.view !== 'drafts' && c.view !== 'outbox') ? c.selectedIds.size : 0}
+        selectionCount={selectedForCount(c)}
         composerOpen={c.fullWindowComposerDraft !== null}
         sidebarCollapsed={c.sidebarCollapsed}
         status={c.status}
@@ -50,7 +53,11 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         className={`min-h-0 flex-1 ${c.fullWindowComposerDraft ? 'hidden' : 'flex'}`}
         aria-hidden={!!c.fullWindowComposerDraft}
       >
-        {!c.sidebarCollapsed && (
+        {/* A full-window composer hides this column. Unmount the sidebar with
+            it rather than leaving it in the page behind `hidden`: a hidden copy
+            still answers Playwright's strict-mode selectors and still holds
+            focusable rows. */}
+        {!c.sidebarCollapsed && !c.fullWindowComposerDraft && (
           <MailSidebar
             view={c.view}
             labels={c.labels}
@@ -61,55 +68,68 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             onOpenOutbox={c.openOutbox}
           />
         )}
-        {c.settingsOpen && c.activeAccount && (
-          <SettingsView
-            status={c.status}
-            accountStatuses={c.accounts.accountStatuses}
-            settings={c.appSettings}
-            accountSettings={c.accountSettings}
-            onUpdateSetting={c.updateAppSetting}
-            onUpdateAccountSetting={c.updateAccountSetting}
-            onReorderAccounts={c.onReorderAccounts}
-            onAddAccount={c.accounts.addAccount}
-            onReconnect={c.accounts.reconnectActions}
-            onSignOut={c.accounts.requestRemoveAccount}
-            onClose={c.closeSettings}
-            focusControl={c.settingsFocus}
-          />
-        )}
-        <div
-          className={`min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
-          aria-hidden={c.settingsOpen || undefined}
-        >
-          <MailboxTop controller={c} />
-          <MailboxBody controller={c} />
+        {/* The footer belongs to this column, not to the window: the sidebar
+            runs the full height of the page beside it, as the sheet does. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+            {c.settingsOpen && c.activeAccount && (
+              <SettingsView
+                status={c.status}
+                accountStatuses={c.accounts.accountStatuses}
+                settings={c.appSettings}
+                accountSettings={c.accountSettings}
+                onUpdateSetting={c.updateAppSetting}
+                onUpdateAccountSetting={c.updateAccountSetting}
+                onReorderAccounts={c.onReorderAccounts}
+                onAddAccount={c.accounts.addAccount}
+                onReconnect={c.accounts.reconnectActions}
+                onSignOut={c.accounts.requestRemoveAccount}
+                focusControl={c.settingsFocus}
+              />
+            )}
+            <div
+              className={`min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
+              aria-hidden={c.settingsOpen || undefined}
+            >
+              <MailboxTop controller={c} />
+              <MailboxBody controller={c} />
+            </div>
+          </div>
+
+          {/* A full-window composer brings its own footer, and Settings is not a
+              mailbox: neither wants the list's shortcuts or its sync line. */}
+          {!c.fullWindowComposerDraft && !c.settingsOpen && (
+            <MailFooter
+              context={
+                c.inlineComposerDraft
+                  ? 'composer'
+                  : c.searchOpen && c.search.keyboardTarget === 'query' && !c.readerOpen
+                    ? 'search'
+                    : c.readerOpen
+                      ? 'reader'
+                      : !c.searchOpen && c.view === 'outbox'
+                        ? 'outbox'
+                        : 'list'
+              }
+              pendingChord={c.pendingChord}
+              sync={c.sync}
+              networkOnline={c.networkOnline}
+              onRetry={c.retrySync}
+              onCopyError={c.copySyncError}
+            />
+          )}
         </div>
       </div>
-
-      {!c.fullWindowComposerDraft && (
-        <MailFooter
-          context={
-            c.inlineComposerDraft
-              ? 'composer'
-              : c.searchOpen && c.search.keyboardTarget === 'query' && !c.readerOpen
-                ? 'search'
-                : c.readerOpen
-                  ? 'reader'
-                  : !c.searchOpen && c.view === 'outbox'
-                    ? 'outbox'
-                    : 'list'
-          }
-          pendingChord={c.pendingChord}
-          sync={c.sync}
-          networkOnline={c.networkOnline}
-          onRetry={c.retrySync}
-          onCopyError={c.copySyncError}
-        />
-      )}
 
       <InboxOverlays controller={c} />
     </div>
   )
+}
+
+/** Rows the keyboard has checked, only in the views that can check them. */
+function selectedForCount(c: InboxController): number {
+  if (c.fullWindowComposerDraft) return 0
+  return c.searchOpen || (c.view !== 'drafts' && c.view !== 'outbox') ? c.selectedIds.size : 0
 }
 
 function MailboxTop({ controller: c }: { controller: InboxController }): React.JSX.Element | null {
@@ -129,33 +149,27 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
       ) : (
         <div
           data-testid="mail-view-header"
-          className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
+          className="app-drag flex h-[68px] flex-none items-baseline gap-5 pt-4 pr-7 pl-[60px]"
         >
-          <h1 data-testid="mailbox-title" className="text-base font-semibold text-ink">
-            <span data-testid="view-title">{c.activeViewTitle}</span>
+          <h1 data-testid="mailbox-title" className="font-serif text-[44px] leading-none text-ink">
+            <span data-testid="view-title">
+              <ViewTitle title={c.activeViewTitle} />
+            </span>
           </h1>
-          <button
-            type="button"
-            data-testid="search-open"
-            aria-label="Search mail"
-            title="Search mail (/)"
-            onClick={c.openSearch}
-            className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
-              <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
-              <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-            <span>/</span>
-          </button>
+          <span data-testid="view-count" className="app-figures flex-none text-[16px] text-ink-faint">
+            {`${c.conversationThreadCount.toLocaleString()}${c.conversationThreadCountExact ? '' : '+'} ${
+              c.conversationThreadCount === 1 ? 'conversation' : 'conversations'
+            }`}
+          </span>
         </div>
       )}
-      {!c.searchOpen && c.view === 'inbox' && c.splits.state && (
+      {!c.searchOpen && (
         <SplitStrip
-          splits={c.splits.state.splits}
+          splits={c.view === 'inbox' ? (c.splits.state?.splits ?? []) : []}
           activeSplitId={c.splits.activeSplitId}
           onSelect={c.switchSplit}
           onManage={() => c.setSplitRulesOpen(true)}
+          onOpenSearch={c.openSearch}
         />
       )}
     </>
@@ -251,7 +265,6 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
           selectedIndex={c.conversationSelectedIndex}
           threadCount={c.conversationThreadCount}
           threadCountExact={c.conversationThreadCountExact}
-          mailboxTitle={c.searchOpen ? 'Search' : c.activeViewTitle}
           conversation={c.conversation}
           account={c.activeAccount}
           online={c.online}
@@ -261,7 +274,6 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
           inlineComposerDraftId={c.inlineComposerDraft?.id ?? null}
           inlineComposerSourceMessageId={c.inlineComposerDraft?.sourceMessageId ?? null}
           onReply={c.openReply}
-          onClose={c.closeReader}
         />
       )}
     </div>

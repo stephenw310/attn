@@ -66,7 +66,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
           {props.visibleAttachments.map((attachment) => (
             <div
               key={attachment.id}
-              className="flex min-w-0 max-w-72 items-center gap-2 rounded-lg border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
+              className="flex min-w-0 max-w-72 items-center gap-2 border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
               data-testid="composer-attachment-chip"
               data-attachment-id={attachment.id}
             >
@@ -75,7 +75,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
               <span className="shrink-0 text-ink-faint">{formatBytes(attachment.sizeBytes)}</span>
               <button
                 type="button"
-                className="flex size-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-edge hover:text-ink"
+                className="flex size-5 shrink-0 items-center justify-center text-ink-faint hover:bg-edge hover:text-ink"
                 aria-label={`Remove ${attachment.filename}`}
                 data-testid="composer-attachment-remove"
                 disabled={props.attaching || props.closing}
@@ -89,13 +89,13 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
       )}
       <footer
         data-testid="composer-footer"
-        className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-t border-edge px-4"
+        className="flex min-h-14 shrink-0 items-center justify-between gap-4 border-t border-edge px-6"
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible">
+        <div className="flex min-w-0 flex-1 items-center gap-3 overflow-visible">
           <EditorToolbar />
           <button
             type="button"
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
+            className="flex size-8 shrink-0 items-center justify-center text-ink-faint hover:text-ink disabled:cursor-wait disabled:opacity-50"
             data-testid="composer-attach"
             aria-label="Attach files"
             title={`Attach files (${modKeyLabel()}⇧A)`}
@@ -106,7 +106,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
           </button>
           {props.visibleAttachments.length > 0 && (
             <div
-              className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
+              className="app-figures shrink-0 text-[13.5px] text-ink-faint"
               data-testid="composer-attachments"
             >
               {props.visibleAttachments.length} attachment{props.visibleAttachments.length === 1 ? '' : 's'}
@@ -125,7 +125,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
           />
           <button
             type="button"
-            className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
+            className="flex size-8 items-center justify-center text-ink-faint hover:text-danger disabled:cursor-wait disabled:opacity-50"
             data-testid="composer-discard"
             aria-label="Discard draft"
             title={`Discard draft (${modKeyLabel()}⇧D)`}
@@ -138,11 +138,11 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
             type="button"
             data-testid="composer-send"
             disabled={props.attaching || props.closing}
-            className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
+            className="cursor-pointer px-1 py-2 text-[16px] font-bold text-ink hover:underline hover:underline-offset-4 disabled:cursor-wait disabled:opacity-50"
             title="Send message"
             onClick={props.send}
           >
-            Send <span className="ml-1 opacity-65">{modKeyLabel()}↵</span>
+            Send <span className="app-small-caps ml-2 font-semibold text-accent">{`${modKeyLabel()}↵`}</span>
           </button>
         </div>
       </footer>

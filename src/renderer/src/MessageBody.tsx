@@ -138,7 +138,7 @@ export function MessageBody(props: MessageBodyProps): React.JSX.Element {
       <div
         data-testid="mail-quoted-section"
         hidden={!expanded}
-        className="order-3 min-w-0 overflow-hidden rounded-[10px] bg-mail-light-ground"
+        className="order-3 min-w-0 overflow-hidden bg-mail-light-ground"
       >
         <SingleMessageBody
           {...props}
@@ -301,7 +301,7 @@ function SingleMessageBody({
       return (
         <div
           data-testid="plain-text-body"
-          className={`whitespace-pre-wrap leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
+          className={`font-letter text-[17px] whitespace-pre-wrap leading-[1.62] [overflow-wrap:break-word] ${surfaceClass}`}
         >
           <LinkedMailText text={bodyText} lightSurface={lightSurface} />
         </div>
@@ -312,7 +312,7 @@ function SingleMessageBody({
     return (
       <div
         data-testid="plain-text-body"
-        className={`leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
+        className={`font-letter text-[17px] leading-[1.62] [overflow-wrap:break-word] ${surfaceClass}`}
       >
         <div data-testid="plain-text-visible" className="whitespace-pre-wrap">
           <LinkedMailText text={visibleText} lightSurface={lightSurface} />
@@ -343,7 +343,7 @@ function SingleMessageBody({
       {remoteImagesBanner && (
         <div
           data-testid="remote-images-banner"
-          className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-1.5 text-xs ${
+          className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 border px-3 py-1.5 text-xs ${
             surface === 'light'
               ? 'border-mail-light-ink-dim/30 text-mail-light-ink-dim'
               : 'border-edge text-ink-faint'

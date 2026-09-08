@@ -189,7 +189,7 @@ test('replies to an earlier message without reusing a colleague draft or quoting
   await page.getByTestId('composer-close').click()
   await expect(composer.root).toHaveCount(0)
 
-  await page.getByTestId('conversation-back').click()
+  await page.keyboard.press('Escape')
   await page.getByTestId('thread-row').first().click()
   await expect(composer.root).toHaveAttribute('data-draft-id', customerDraftId ?? '')
   await expectComposerAfter(page, 'm-customer')
@@ -308,7 +308,7 @@ test.describe('revealed Trash messages', () => {
     expect(draft?.quoteText).toContain('This deleted reply belongs only in Trash.')
     await page.getByTestId('composer-close').click()
     await expect(composer.root).toHaveCount(0)
-    await page.getByTestId('conversation-back').click()
+    await page.keyboard.press('Escape')
     await expect(page.getByTestId('thread-list')).toBeVisible()
     await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
     await expect(page.getByTestId('trashed-message-marker')).toHaveCount(1)

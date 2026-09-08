@@ -67,13 +67,13 @@ export function LabelPicker({ labels, targets, onClose, onToggle }: LabelPickerP
               data-highlighted={index === highlight.index || undefined}
               onMouseEnter={() => highlight.setIndex(index)}
               onClick={() => onToggle(label, state)}
-              className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${
+              className={`flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left text-sm ${
                 index === highlight.index ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
               }`}
             >
               <span
-                className={`flex size-4 items-center justify-center rounded border text-[11px] font-bold ${
-                  state === 'off' ? 'border-edge text-transparent' : 'border-accent bg-accent text-ground'
+                className={`flex size-4 items-center justify-center border text-[11px] font-bold ${
+                  state === 'off' ? 'border-edge text-transparent' : 'border-accent bg-accent text-on-accent'
                 }`}
                 aria-hidden
               >

@@ -1,27 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncStage, SyncState } from '../../../shared/mail'
 import { blurActive } from './blurActive'
+import { ScrapEdge } from './Hand'
 
 const SYNC_STAGES: SyncStage[] = ['metadata', 'bodies', 'drafts', 'all-mail', 'spam', 'trash', 'reconcile']
 
+/**
+ * The seven stages of a first sync, as the app tells them. Nothing here
+ * renames a feature: the courier is what the app is doing, not a place the
+ * user can go or a control they can press.
+ */
 function syncStageLabel(stage: SyncStage): string {
-  if (stage === 'metadata') return 'Message list'
-  if (stage === 'bodies') return 'Recent mail'
-  if (stage === 'drafts') return 'Drafts'
-  if (stage === 'all-mail') return 'All mail'
-  if (stage === 'spam') return 'Spam'
-  if (stage === 'trash') return 'Trash'
-  return 'Finishing up'
+  if (stage === 'metadata') return 'Courier unpacking the ledger'
+  if (stage === 'bodies') return 'Courier unpacking recent letters'
+  if (stage === 'drafts') return 'Courier unpacking your drafts'
+  if (stage === 'all-mail') return 'Courier unpacking the whole archive'
+  if (stage === 'spam') return 'Courier unpacking the spam pile'
+  if (stage === 'trash') return 'Courier unpacking the trash'
+  return 'Courier sealing the ledger'
 }
 
 function lifetimeEta(etaMs: number | undefined): string {
   if (etaMs === undefined) return ''
   const minutes = Math.max(1, Math.ceil(etaMs / 60_000))
-  if (minutes < 60) return ` · ${minutes} min remaining`
+  if (minutes < 60) return `, ${minutes} min remaining`
   const hours = Math.ceil(minutes / 60)
-  if (hours < 24) return ` · ${hours} hr remaining`
+  if (hours < 24) return `, ${hours} hr remaining`
   const days = Math.ceil(hours / 24)
-  return ` · ${days} day${days === 1 ? '' : 's'} remaining`
+  return `, ${days} day${days === 1 ? '' : 's'} remaining`
 }
 
 function SyncProgress({ stage }: { stage: SyncStage }): React.JSX.Element {
@@ -88,26 +94,27 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           lifetimeTotal === undefined ? '' : ` of ${lifetimeTotal.toLocaleString()}`
         } threads`
       : ''
-  const indexedLifetimeCount = `${lifetimeCount} indexed`
+  const indexedLifetimeCount = `${lifetimeCount} copied`
+  const resting = sync.phase === 'indexing' && (sync.reason === 'retry-wait' || sync.reason === 'paused')
   const lifetimeDetail =
     sync.phase !== 'indexing'
       ? ''
       : sync.reason === 'quota-wait'
-        ? `Quota pacing · ${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
+        ? `Gmail rations its pages. ${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
         : sync.reason === 'foreground-yield'
-          ? `Foreground work first · ${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
+          ? `Your work first. ${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
           : sync.reason === 'retry-wait'
-            ? `Indexing paused · retrying soon · ${indexedLifetimeCount}`
+            ? `Back to the archive soon. ${indexedLifetimeCount}`
             : sync.reason === 'paused'
-              ? `Indexing paused · ${indexedLifetimeCount}`
+              ? indexedLifetimeCount
               : sync.stage === 'attachments'
-                ? `Attachment index · ${lifetimeCount} flagged`
+                ? `Noting which letters carry enclosures, ${lifetimeCount} marked`
                 : sync.stage === 'split-metadata'
-                  ? `Split inbox metadata · ${lifetimeCount} refreshed`
+                  ? `Sorting into inbox splits, ${lifetimeCount} refreshed`
                   : `${indexedLifetimeCount}${lifetimeEta(sync.etaMs)}`
   const quotaEvidence =
     sync.phase === 'indexing' && sync.quotaWaitMs !== undefined && sync.quotaWaitMs >= 1_000
-      ? ` · ${Math.round(sync.quotaWaitMs / 1000).toLocaleString()}s quota wait`
+      ? `, ${Math.round(sync.quotaWaitMs / 1000).toLocaleString()}s quota wait`
       : ''
 
   const closeDetails = useCallback(() => {
@@ -141,27 +148,29 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
 
   const label =
     displayState === 'live'
-      ? 'Live'
+      ? 'All letters received'
       : displayState === 'indexing'
-        ? 'Live · indexing older mail'
+        ? resting
+          ? 'Scribes resting'
+          : 'Scribes copying the archive'
         : displayState === 'offline'
-          ? 'Offline'
+          ? 'No road out'
           : displayState === 'error'
-            ? 'Error'
+            ? 'Courier turned back'
             : displayState === 'checking'
-              ? 'Checking mail'
-              : `Syncing · ${syncStageLabel(syncingStage)}`
+              ? 'Courier at the gate'
+              : syncStageLabel(syncingStage)
   const detail =
     displayState === 'live'
-      ? 'Up to date'
+      ? 'Nothing on the road'
       : displayState === 'indexing'
         ? lifetimeDetail
         : displayState === 'offline'
-          ? 'Local mail available'
+          ? 'Your letters are still here to read'
           : displayState === 'error'
-            ? 'Click for details'
+            ? 'Click for what happened'
             : displayState === 'checking'
-              ? 'Looking for new mail'
+              ? 'Asking after new letters'
               : null
   const title =
     displayState === 'error' && sync.phase === 'error'
@@ -169,28 +178,28 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       : displayState === 'offline' && sync.phase === 'offline'
         ? sync.message
         : displayState === 'syncing' && sync.phase === 'syncing'
-          ? `${label} — ${sync.threadsDone} processed`
+          ? `${label}, ${sync.threadsDone} unpacked`
           : displayState === 'indexing' && sync.phase === 'indexing'
-            ? `${label} — ${lifetimeDetail}${quotaEvidence}${
+            ? `${label}. ${lifetimeDetail}${quotaEvidence}${
                 sync.messagesTotal === undefined
                   ? ''
-                  : ` · ${sync.messagesTotal.toLocaleString()} messages in account`
+                  : `, ${sync.messagesTotal.toLocaleString()} messages in account`
               }`
-            : `${label} — ${detail}`
+            : `${label}. ${detail}`
   const liveAnnouncement =
     displayState === 'indexing' && sync.phase === 'indexing'
       ? sync.reason === 'retry-wait'
-        ? 'Older mail indexing paused; retrying soon'
+        ? 'The scribes are resting and will return to the archive soon'
         : sync.reason === 'paused'
-          ? 'Older mail indexing paused'
-          : 'Older mail indexing in progress'
+          ? 'The scribes are resting'
+          : 'The scribes are copying the archive'
       : `${label}${detail ? `: ${detail}` : ''}`
 
   const body = (
     <>
       <span className="app-status-dot row-start-1 size-[7px] rounded-full" aria-hidden />
       <span
-        className={`row-start-1 whitespace-nowrap text-[11.5px] font-semibold ${
+        className={`row-start-1 whitespace-nowrap text-[14px] font-semibold ${
           displayState === 'error' ? 'text-danger' : 'text-ink-dim'
         }`}
       >
@@ -211,12 +220,12 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
                 'aria-valuemax': lifetimeTotal,
                 'aria-valuenow': sync.threadsDone
               })}
-          className="col-start-2 row-start-2 whitespace-nowrap text-[9.5px] leading-[10px] text-ink-faint"
+          className="col-start-2 row-start-2 whitespace-nowrap text-[11.5px] leading-[13px] text-ink-faint"
         >
           {detail}
         </span>
       ) : (
-        <span className="col-start-2 row-start-2 text-[9.5px] leading-[10px] text-ink-faint">{detail}</span>
+        <span className="col-start-2 row-start-2 text-[11.5px] leading-[13px] text-ink-faint">{detail}</span>
       )}
     </>
   )
@@ -226,7 +235,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       ref={wrapRef}
       data-testid="status-note"
       data-status={displayState}
-      className="relative ml-auto flex min-w-[196px] flex-none justify-end"
+      className="relative ml-auto flex min-w-[210px] flex-none justify-end"
       title={title}
     >
       <span className="sr-only" aria-live="polite">
@@ -236,7 +245,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
         <button
           type="button"
           data-testid="status-error-button"
-          className="grid w-fit cursor-pointer grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2 text-left"
+          className="grid w-fit cursor-pointer grid-cols-[7px_auto] grid-rows-[20px_13px] items-center gap-x-2 text-left"
           aria-expanded={detailsOpen}
           aria-controls="sync-error-details"
           onClick={() => setDetailsOpen((open) => !open)}
@@ -246,7 +255,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       ) : (
         <div
           data-testid="status-content"
-          className="grid w-fit grid-cols-[7px_auto] grid-rows-[17px_10px] items-center gap-x-2"
+          className="grid w-fit grid-cols-[7px_auto] grid-rows-[20px_13px] items-center gap-x-2"
         >
           {body}
         </div>
@@ -258,13 +267,14 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           data-testid="status-error-details"
           role="dialog"
           aria-label="Sync error details"
-          className="absolute right-0 bottom-full z-50 mb-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
+          className="absolute right-0 bottom-full isolate z-50 mb-2 w-[330px] p-5 text-left"
         >
+          <ScrapEdge />
           <div className="flex items-center gap-2 text-xs font-bold text-ink">
             <span className="text-danger" aria-hidden>
               ●
             </span>
-            Gmail sync error
+            The courier could not reach Gmail
           </div>
           <p
             data-testid="status-error-message"
@@ -276,7 +286,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
             <button
               type="button"
               data-testid="status-retry"
-              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              className="cursor-pointer border border-edge bg-active px-2.5 py-1.5 text-[12px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
               onClick={() => {
                 setDetailsOpen(false)
                 onRetry()
@@ -287,7 +297,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
             <button
               type="button"
               data-testid="status-copy-error"
-              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              className="cursor-pointer border border-edge bg-active px-2.5 py-1.5 text-[12px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
               onClick={() => onCopyError(sync.message)}
             >
               Copy details

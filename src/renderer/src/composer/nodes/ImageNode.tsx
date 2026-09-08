@@ -55,7 +55,7 @@ function ComposerImage({
       width={width ?? undefined}
       height={height ?? undefined}
       style={style ? undefined : { maxWidth: '100%', height: 'auto' }}
-      className="max-w-full rounded-sm"
+      className="max-w-full"
       referrerPolicy="no-referrer"
       ref={(element) => {
         if (element && style) element.setAttribute('style', style)

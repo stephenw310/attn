@@ -31,7 +31,7 @@ for (const appearance of ['Dark', 'Light'] as const) {
         width: '10px',
         height: '10px',
         display: 'block',
-        thumb: 'rgb(184, 178, 167)',
+        thumb: 'rgb(189, 174, 142)',
         radius: '999px',
         track: 'rgba(0, 0, 0, 0)',
         standardWidth: 'auto'

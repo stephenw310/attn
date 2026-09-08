@@ -3,9 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <title>Attn</title>
+    <!--
+      `font-src` covers the mail frame too: an about:srcdoc document inherits
+      this policy and intersects its own with it, so the frame's own `font-src`
+      never applied on its own. It is named here rather than left to
+      `default-src` so the mail frame can load the app's bundled faces, which
+      @font-face cannot inherit across documents. `'self'` and nothing else,
+      which is the same set `default-src` already permitted. It is not the
+      whole guard: a packaged build is served from file:, where `'self'`
+      matches any file: URL, so the sanitizer drops a sender's @font-face
+      before it reaches the frame and this stands behind that.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; frame-src 'self' about:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https: http:; frame-src 'self' about:"
     />
   </head>
   <body>

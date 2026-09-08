@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
@@ -217,6 +217,44 @@ test('blocking cancels every request type; overrides, live policy changes, and r
       probe.server.close(() => resolve())
     })
   }
+})
+
+test('a sender cannot ship a typeface of its own', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  // A non-neutral canvas keeps the sender's <style> block, the one surface
+  // where an @font-face of theirs would otherwise survive. Two things stop it:
+  // the sanitizer drops the rule, so it never reaches the frame at all, and
+  // `font-src 'self'` is the backstop if that ever regresses. The source is a
+  // real face rather than a stub — an invalid one fails to load whatever the
+  // policy says, which would make this assert nothing. Asserting the family is
+  // absent rather than merely unloaded is what separates the two halves: a
+  // blocked fetch would still leave it registered, in `error`.
+  const face = readFileSync(
+    require.resolve('@fontsource/alegreya/files/alegreya-latin-400-normal.woff2')
+  ).toString('base64')
+  await setMessageHtml(
+    app,
+    'm-lunch',
+    `<style>@font-face{font-family:SenderFace;src:url(data:font/woff2;base64,${face})}</style>` +
+      `<div style="background:#0aa3d2;font-family:SenderFace,serif">Lunch plans</div>`
+  )
+  await openLunch(page)
+  const frame = page.getByTestId('html-body-frame')
+  await expect(frame).toBeVisible()
+  const seen = await frame
+    .contentFrame()
+    .locator('body')
+    .evaluate(async (body) => {
+      const fonts = body.ownerDocument.fonts
+      await fonts.ready.catch(() => undefined)
+      return {
+        families: [...new Set([...fonts].map((registered) => registered.family))],
+        css: body.ownerDocument.querySelector('style')?.textContent ?? ''
+      }
+    })
+  expect(seen.families).not.toContain('SenderFace')
+  expect(seen.css).not.toContain('font-face')
+  await closeReader(page)
 })
 
 test('a per-sender exception covers the composer quote, and its removal blocks it again', async ({

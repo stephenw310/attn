@@ -79,13 +79,13 @@ export default function App(): React.JSX.Element {
         <div
           role="alert"
           data-testid="account-removal-error"
-          className="fixed bottom-14 left-1/2 z-50 flex w-[460px] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-start gap-4 rounded-lg border border-edge bg-raised p-4 text-sm text-ink shadow-menu"
+          className="fixed bottom-14 left-1/2 z-50 flex w-[460px] max-w-[calc(100vw-2rem)] -translate-x-1/2 items-start gap-4 border border-edge bg-raised p-4 text-sm text-ink shadow-menu"
         >
           <p className="min-w-0 flex-1 break-words">{removalError}</p>
           <button
             type="button"
             data-testid="account-removal-error-dismiss"
-            className="cursor-pointer rounded px-2 py-1 text-accent hover:bg-active"
+            className="cursor-pointer px-2 py-1 text-accent hover:bg-active"
             onClick={() => setRemovalError(null)}
           >
             Dismiss

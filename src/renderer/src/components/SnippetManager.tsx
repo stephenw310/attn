@@ -24,7 +24,7 @@ import { ACTION_BUTTON, NOTE } from './settingsStyles'
 // the serialize on save both run the composer sanitize path.
 
 const FIELD =
-  'h-9 w-full rounded-md border border-edge bg-ground px-2.5 text-sm text-ink outline-none focus:border-accent'
+  'h-9 w-full border border-edge bg-ground px-2.5 text-sm text-ink outline-none focus:border-accent'
 
 function validateSnippetLinkUrl(url: string): boolean {
   return /^(?:https?:|mailto:)/i.test(url)
@@ -167,14 +167,14 @@ export function SnippetManager(): React.JSX.Element {
       {(snippets ?? []).map((snippet) => (
         <div
           key={snippet.id}
-          className="flex items-center justify-between gap-4 rounded-md border border-edge px-3 py-2"
+          className="flex items-center justify-between gap-4 border border-edge px-3 py-2"
           data-testid="settings-snippet-row"
           data-snippet-name={snippet.name}
         >
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm text-ink">{snippet.name}</span>
             {snippet.trigger && (
-              <span className="shrink-0 rounded bg-active px-1.5 py-0.5 font-mono text-[11px] text-ink-dim">
+              <span className="shrink-0 bg-active px-1.5 py-0.5 font-mono text-[11px] text-ink-dim">
                 ;{snippet.trigger}
               </span>
             )}
@@ -210,10 +210,7 @@ export function SnippetManager(): React.JSX.Element {
         </p>
       )}
       {editing ? (
-        <div
-          className="flex flex-col gap-2 rounded-md border border-edge p-3"
-          data-testid="settings-snippet-editor"
-        >
+        <div className="flex flex-col gap-2 border border-edge p-3" data-testid="settings-snippet-editor">
           <div className="grid grid-cols-[1fr_140px] gap-2">
             <label className="flex flex-col gap-1 text-[11px] text-ink-faint">
               Name
@@ -253,9 +250,9 @@ export function SnippetManager(): React.JSX.Element {
           <div className="flex flex-col gap-1 text-[11px] text-ink-faint">
             Body — <span className="font-mono">{'{cursor}'}</span> marks where the caret lands
             {/* Keyed per target so switching rows remounts the editor: fresh
-                document, fresh undo history. */}
+                  document, fresh undo history. */}
             <LexicalComposer key={editing.id ?? 'new'} initialConfig={editorConfig}>
-              <div className="relative rounded-md border border-edge bg-ground">
+              <div className="relative border border-edge bg-ground">
                 <RichTextPlugin
                   contentEditable={
                     <ContentEditable

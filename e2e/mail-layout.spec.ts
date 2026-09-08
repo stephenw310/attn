@@ -10,8 +10,8 @@ test('separates native, centered, and full-bleed sender canvases', async ({ page
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
-  await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '20px')
-  await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '20px')
+  await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '4px')
+  await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '4px')
   await expect
     .poll(() =>
       page.getByTestId('conversation-content').evaluate((content) => {
@@ -84,7 +84,7 @@ test('separates native, centered, and full-bleed sender canvases', async ({ page
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'native')
   await page.getByTestId('mail-trim-toggle').click()
   const coloredReply = page.frameLocator('[data-testid="html-body-frame"]')
-  await expect(coloredReply.locator('#quoted-question')).toHaveCSS('color', 'rgb(157, 162, 172)')
+  await expect(coloredReply.locator('#quoted-question')).toHaveCSS('color', 'rgb(184, 178, 165)')
   await expect(coloredReply.locator('#quoted-answer')).toHaveCSS('color', 'rgb(56, 123, 223)')
   await expect(coloredReply.locator('#quoted-answer-dark')).toHaveCSS('color', 'rgb(79, 125, 196)')
   const coloredReplyPath = join(dir, 'colored-reply.png')
@@ -105,7 +105,7 @@ test('keeps sender canvases solid and removes native line backgrounds in light t
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-surface', 'light')
   await expect(page.getByTestId('html-body-container')).toHaveAttribute('data-layout', 'centered')
   await expect(page.getByTestId('message-content')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
-  await expect(page.getByTestId('message-content')).toHaveCSS('border-radius', '10px')
+  await expect(page.getByTestId('message-content')).toHaveCSS('border-radius', '0px')
   await expect(page.getByTestId('html-body-container')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   const centeredNewsletter = page.frameLocator('[data-testid="html-body-frame"]')
   await expect(centeredNewsletter.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
@@ -170,9 +170,11 @@ for (const appearance of ['light', 'dark'] as const) {
       await expect(frame.locator(`#${id}`)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
       await expect(frame.locator(`#${id} > span`)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
     }
+    // A letter that is only text is written in our ink on our sheet in either
+    // palette; only a page the sender designed keeps their near-black.
     await expect(frame.locator('#apple-question')).toHaveCSS(
       'color',
-      appearance === 'light' ? 'rgb(32, 33, 36)' : 'rgb(233, 234, 238)'
+      appearance === 'light' ? 'rgb(42, 32, 21)' : 'rgb(233, 228, 216)'
     )
     await expect(frame.locator('#apple-question')).toContainText('Can we schedule a call?')
     if (appearance === 'dark') {

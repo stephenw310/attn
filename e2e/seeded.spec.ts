@@ -10,7 +10,7 @@ test('renders seeded mail through IPC and the real SQLite store', async ({ page,
   await expect(rows.first()).toContainText('Maya Lin')
   await expect(page.getByTestId('queue-readout')).toHaveCount(0)
   await expect(page.getByTestId('account-menu')).toContainText('seed@attn.test')
-  await expect(page.getByTestId('status-note')).toContainText('Live')
+  await expect(page.getByTestId('status-note')).toContainText('All letters received')
   await expect(page.getByTestId('status-note')).toHaveAttribute('data-status', 'live')
   const statusBox = await page.getByTestId('status-note').boundingBox()
   const contentBox = await page.getByTestId('status-content').boundingBox()
@@ -113,9 +113,9 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(status).toHaveAttribute('data-status', 'live')
 
   await setSyncState(app, { phase: 'syncing', stage: 'bodies', threadsDone: 428 })
-  await expect(status).toContainText('Syncing · Recent mail')
+  await expect(status).toContainText('Courier unpacking recent letters')
   await expect(status).toHaveAttribute('data-status', 'syncing')
-  await expect(status).toHaveAttribute('title', 'Syncing · Recent mail — 428 processed')
+  await expect(status).toHaveAttribute('title', 'Courier unpacking recent letters, 428 unpacked')
   const progress = page.getByTestId('sync-progress')
   await expect(progress).toHaveAttribute('aria-valuenow', '2')
   await expect(progress.locator('[data-phase-state]')).toHaveCount(7)
@@ -123,19 +123,19 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(progress.locator('[data-phase-state]').nth(1)).toHaveAttribute('data-phase-state', 'active')
 
   await setSyncState(app, { phase: 'syncing', stage: 'drafts', threadsDone: 470 })
-  await expect(status).toContainText('Syncing · Drafts')
+  await expect(status).toContainText('Courier unpacking your drafts')
   await expect(progress).toHaveAttribute('aria-valuenow', '3')
 
   await setSyncState(app, { phase: 'syncing', stage: 'all-mail', threadsDone: 512 })
-  await expect(status).toContainText('Syncing · All mail')
+  await expect(status).toContainText('Courier unpacking the whole archive')
   await expect(progress).toHaveAttribute('aria-valuenow', '4')
 
   await setSyncState(app, { phase: 'syncing', stage: 'spam', threadsDone: 530 })
-  await expect(status).toContainText('Syncing · Spam')
+  await expect(status).toContainText('Courier unpacking the spam pile')
   await expect(progress).toHaveAttribute('aria-valuenow', '5')
 
   await setSyncState(app, { phase: 'syncing', stage: 'trash', threadsDone: 544 })
-  await expect(status).toContainText('Syncing · Trash')
+  await expect(status).toContainText('Courier unpacking the trash')
   await expect(progress).toHaveAttribute('aria-valuenow', '6')
 
   await setSyncState(app, {
@@ -148,8 +148,8 @@ test('shows phased sync progress and keeps error details behind an accessible co
     quotaWaitMs: 500,
     reason: 'running'
   })
-  await expect(status).toContainText('Live · indexing older mail')
-  await expect(status).toContainText('750 of 2,000 threads indexed · 12 min remaining')
+  await expect(status).toContainText('Scribes copying the archive')
+  await expect(status).toContainText('750 of 2,000 threads copied, 12 min remaining')
   await expect(status).toHaveAttribute('data-status', 'indexing')
   const lifetimeProgress = page.getByTestId('lifetime-progress')
   await expect(lifetimeProgress).toHaveAttribute('aria-valuenow', '750')
@@ -158,7 +158,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
   expect(await lifetimeProgress.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect(status).toHaveAttribute(
     'title',
-    'Live · indexing older mail — 750 of 2,000 threads indexed · 12 min remaining · 3,200 messages in account'
+    'Scribes copying the archive. 750 of 2,000 threads copied, 12 min remaining, 3,200 messages in account'
   )
 
   // Never present a stale or corrupt denominator as meaningful progress. Old
@@ -171,7 +171,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
     threadsTotal: 201,
     reason: 'running'
   })
-  await expect(status).toContainText('86,200 threads indexed')
+  await expect(status).toContainText('86,200 threads copied')
   await expect(status).not.toContainText('of 201')
   await expect(lifetimeProgress).not.toHaveAttribute('aria-valuemax')
 
@@ -183,7 +183,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
     reason: 'quota-wait',
     waitMs: 1_000
   })
-  await expect(status).toContainText('Quota pacing · 750 of 2,000 threads indexed')
+  await expect(status).toContainText('Gmail rations its pages. 750 of 2,000 threads copied')
 
   await setSyncState(app, {
     phase: 'indexing',
@@ -193,31 +193,32 @@ test('shows phased sync progress and keeps error details behind an accessible co
     waitMs: 15_000,
     message: 'rate limited'
   })
-  await expect(status).toContainText('Indexing paused · retrying soon · 2,400 threads indexed')
+  await expect(status).toContainText('Scribes resting')
+  await expect(status).toContainText('Back to the archive soon. 2,400 threads copied')
   await expect(lifetimeProgress).not.toHaveAttribute('aria-valuenow')
   await expect(lifetimeProgress).not.toHaveAttribute('aria-valuemax')
   await expect(lifetimeProgress).toHaveAttribute(
     'aria-valuetext',
-    'Indexing paused · retrying soon · 2,400 threads indexed'
+    'Back to the archive soon. 2,400 threads copied'
   )
 
   // An incremental poll is not a backfill phase: no stage label, no progress bar.
   await setSyncState(app, { phase: 'checking' })
-  await expect(status).toContainText('Checking mail')
-  await expect(status).toContainText('Looking for new mail')
+  await expect(status).toContainText('Courier at the gate')
+  await expect(status).toContainText('Asking after new letters')
   await expect(status).toHaveAttribute('data-status', 'checking')
-  await expect(status).toHaveAttribute('title', 'Checking mail — Looking for new mail')
+  await expect(status).toHaveAttribute('title', 'Courier at the gate. Asking after new letters')
   await expect(page.getByTestId('sync-progress')).toHaveCount(0)
 
   await setSyncState(app, { phase: 'offline', message: 'fetch failed' })
-  await expect(status).toContainText('Offline')
-  await expect(status).toContainText('Local mail available')
+  await expect(status).toContainText('No road out')
+  await expect(status).toContainText('Your letters are still here to read')
   await expect(status).toHaveAttribute('data-status', 'offline')
 
   await page.evaluate(() => window.dispatchEvent(new Event('offline')))
   const message = `gmail history failed (403): ${'q'.repeat(300)}`
   await setSyncState(app, { phase: 'error', message })
-  await expect(status).toContainText('Error')
+  await expect(status).toContainText('Courier turned back')
   await expect(status).not.toContainText(message)
   await expect(status).toHaveAttribute('title', message)
 

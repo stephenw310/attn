@@ -20,17 +20,19 @@ export function formatShortcutKey(key: string): string {
   const lowered = key.toLowerCase()
   if (lowered === 'mod') return modKeyLabel()
   if (lowered === 'escape') return 'Esc'
+  if (lowered === 'enter') return '↵'
+  if (lowered === 'shift') return '⇧'
   return key.length === 1 ? key.toUpperCase() : key
 }
 
 /**
- * A whole shortcut as the UI shows it — `Mod+Shift+k` becomes `⌘+Shift+K`, and
+ * A whole shortcut as the UI shows it — `Mod+Shift+k` becomes `⌘⇧K`, and
  * a chord keeps its space (`g i` becomes `G I`). The footer renders each key in
  * its own Kbd and uses `formatShortcutKey` directly instead.
  */
 export function formatShortcut(shortcut: string): string {
   return shortcut
     .split(' ')
-    .map((keystroke) => keystroke.split('+').map(formatShortcutKey).join('+'))
+    .map((keystroke) => keystroke.split('+').map(formatShortcutKey).join(''))
     .join(' ')
 }

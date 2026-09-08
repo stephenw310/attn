@@ -13,6 +13,7 @@ import { forwardRef } from 'react'
 import type { AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { safeUrl } from '../../../shared/html'
+import { ScrapEdge } from '../components/Hand'
 import type { ShowToast } from '../hooks/useToast'
 import { AiAutocompletePlugin } from './AiAutocompletePlugin'
 import { AiDraftPlugin } from './AiDraftPlugin'
@@ -34,7 +35,6 @@ import { useComposerController } from './useComposerController'
 interface ComposerProps {
   draft: Draft
   mode?: 'full' | 'inline'
-  attachedToMessage?: boolean
   initialError?: string | null
   onClose: () => void
   onExit?: () => void
@@ -63,7 +63,7 @@ function validateComposerUrl(url: string): boolean {
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { draft, mode = 'full', attachedToMessage = false, initialError = null, onClose, onExit, onToast, aiDraft },
+  { draft, mode = 'full', initialError = null, onClose, onExit, onToast, aiDraft },
   ref
 ): React.JSX.Element {
   const {
@@ -131,8 +131,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? `flex w-full flex-none flex-col overflow-hidden border border-edge bg-raised ${attachedToMessage ? 'rounded-b-[10px]' : 'rounded-xl shadow-composer'}`
-          : 'flex min-h-0 flex-1 flex-col bg-raised/35'
+          ? 'relative isolate flex w-full flex-none flex-col px-1 py-1'
+          : 'flex min-h-0 flex-1 flex-col'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}
       data-draft-kind={draft.kind}
@@ -168,6 +168,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         event.stopPropagation()
       }}
     >
+      {mode === 'inline' && <ScrapEdge />}
       <ComposerHeader
         draft={draft}
         mode={mode}
@@ -182,10 +183,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <div
         className={
           mode === 'inline'
-            ? 'flex w-full flex-col bg-raised'
-            : 'mx-auto flex min-h-0 w-full max-w-[900px] flex-1 flex-col border-x border-edge bg-raised'
+            ? 'flex w-full flex-col'
+            : 'relative isolate mx-auto my-6 flex min-h-0 w-full max-w-[820px] flex-1 flex-col px-9 pt-5'
         }
       >
+        {mode === 'full' && <ScrapEdge />}
         <ComposerEnvelope
           draft={draft}
           mode={mode}
@@ -220,14 +222,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <RichTextPlugin
                   contentEditable={
                     <ContentEditable
-                      className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
+                      className="font-letter min-h-full px-6 py-5 text-[17px] leading-[28px] text-ink outline-none"
                       data-testid="composer-editor"
                       aria-label="Message body"
                     />
                   }
                   placeholder={
                     aiTipReady ? null : (
-                      <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
+                      <div className="font-letter pointer-events-none absolute top-5 left-6 text-[17px] leading-[28px] text-ink-faint">
                         Write a message…
                       </div>
                     )

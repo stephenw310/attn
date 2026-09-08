@@ -8,18 +8,16 @@ import {
   subscribeCommandRegistry
 } from '../commands'
 import { formatShortcutKey } from '../platform'
+import { TornRule } from './Hand'
 import { Kbd } from './Kbd'
 import { SyncStatus } from './SyncStatus'
 
 function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
   const parts = shortcut.split('+')
   return (
-    <span className="flex items-center gap-0.5">
-      {parts.map((part, index) => (
-        <span key={part} className="contents">
-          {index > 0 && <span aria-hidden>+</span>}
-          <Kbd>{formatShortcutKey(part)}</Kbd>
-        </span>
+    <span className="flex items-center">
+      {parts.map((part) => (
+        <Kbd key={part}>{formatShortcutKey(part)}</Kbd>
       ))}
     </span>
   )
@@ -37,7 +35,7 @@ function FooterShortcut({
   return (
     <span
       data-testid={`footer-shortcut-${id}`}
-      className="flex flex-none items-center gap-1.5 whitespace-nowrap text-ink-dim"
+      className="flex flex-none items-center gap-2 whitespace-nowrap text-ink-dim"
     >
       <span className="flex items-center gap-0.5">
         {shortcuts.map((shortcut, index) => (
@@ -59,7 +57,7 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
     <div
       data-testid="footer-chord-guide"
       data-prefix={prefix}
-      className="flex flex-none items-center gap-2 whitespace-nowrap text-[11px]"
+      className="flex flex-none items-center gap-2 whitespace-nowrap text-[13.5px]"
       aria-live="polite"
     >
       <span className="sr-only">Go to</span>
@@ -93,8 +91,11 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
   return (
     <footer
       data-testid="mail-footer"
-      className="relative z-40 flex min-h-11 items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
+      className="relative z-40 flex min-h-[54px] items-center gap-4 py-2.5 pr-7 pl-[60px] text-[14.5px] text-ink-faint"
     >
+      <span className="absolute top-0 right-7 left-[60px] block">
+        <TornRule />
+      </span>
       <div
         key={`${context}:${pendingChord ?? 'default'}`}
         data-testid="footer-shortcuts"

@@ -8,7 +8,11 @@ import {
   VIEW_TITLES
 } from '../list/mailDisplay'
 import { formatShortcut } from '../platform'
-import { Kbd } from './Kbd'
+import { Seal, TornRule } from './Hand'
+
+/** The width of the darker stock the sidebar is written on. `PaperSheet` tears
+    the sheet at this offset, so the two have to agree. */
+export const SIDEBAR_WIDTH = 216
 
 const MAILBOX_ITEMS: readonly { view: MailboxView; shortcut: string }[] = [
   { view: 'inbox', shortcut: COMMAND_SPECS['view.inbox'].shortcut },
@@ -49,29 +53,24 @@ function NavButton({
       data-testid={testId}
       data-active={active || undefined}
       aria-current={active ? 'page' : undefined}
+      title={shortcut ? `${title} (${formatShortcut(shortcut)})` : title}
       onClick={onClick}
-      className={`group flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-md border-l-2 px-2.5 text-left text-[13px] ${
-        active
-          ? 'border-l-accent bg-active font-semibold text-ink'
-          : 'border-l-transparent font-medium text-ink-dim hover:bg-active/70 hover:text-ink'
+      className={`group relative flex min-h-[30px] w-full cursor-pointer items-baseline gap-2 pr-1 pl-3.5 text-left text-[16px] ${
+        active ? 'font-bold text-ink' : 'text-ink-dim hover:text-ink'
       }`}
     >
+      {/* The mark a reader leaves in the margin against the line they are on. */}
+      {active && <span aria-hidden className="absolute top-[7px] left-0 h-4 w-[3px] bg-accent" />}
       <span className="min-w-0 flex-1 truncate">{title}</span>
-      {(shortcut || count != null) && (
-        <span className="w-10 flex-none text-right text-[11px] font-semibold tabular-nums">
-          {count !== undefined && count !== null && (
-            <span
-              data-testid="sidebar-count"
-              data-count={count}
-              title={count.toLocaleString()}
-              className={count > 0 ? 'text-accent' : 'text-ink-faint'}
-            >
-              {compactCount(count)}
-            </span>
-          )}
+      {count !== undefined && count !== null && (
+        <span
+          data-testid="sidebar-count"
+          data-count={count}
+          className={`app-figures flex-none text-[14px] ${count > 0 ? 'text-ink-dim' : 'text-ink-faint'}`}
+        >
+          {compactCount(count)}
         </span>
       )}
-      {shortcut && <Kbd>{formatShortcut(shortcut)}</Kbd>}
     </button>
   )
 }
@@ -94,18 +93,20 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
     <aside
       id="mail-sidebar"
       data-testid="mail-sidebar"
-      className="flex w-54 flex-none flex-col border-r border-edge bg-raised/45 px-3 py-3"
+      className="flex flex-none flex-col px-4 py-3"
+      style={{ width: SIDEBAR_WIDTH }}
       aria-label="Mail navigation"
     >
-      <div
-        data-testid="sidebar-brand"
-        className="flex h-14 flex-none items-center px-2.5 pb-2 text-[40px] leading-none font-bold tracking-[-0.04em]"
-      >
-        attn<span className="text-accent">:</span>
+      <div data-testid="sidebar-brand" className="flex-none px-1">
+        <div className="font-gotisch flex items-center gap-2.5 text-[40px] leading-none text-ink">
+          attn
+          <Seal letter="a" />
+        </div>
+        <TornRule className="mt-3 w-full" />
       </div>
-      <nav className="flex flex-none flex-col gap-0.5" aria-label="Mailboxes">
-        <div className="flex min-h-8 items-center px-2.5 pb-1.5">
-          <h2 className="text-[10px] font-bold tracking-[0.14em] text-ink-faint uppercase">Mailboxes</h2>
+      <nav className="mt-5 flex flex-none flex-col gap-0.5" aria-label="Mailboxes">
+        <div className="flex min-h-7 items-center px-1">
+          <h2 className="app-small-caps text-[14px] text-accent">Mailboxes</h2>
         </div>
         {MAILBOX_ITEMS.map((item) => (
           <NavButton
@@ -128,14 +129,11 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
         />
       </nav>
 
-      <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-edge pt-3">
-        <h2 className="flex items-center justify-between px-2.5 pb-1.5 text-[10px] font-bold tracking-[0.14em] text-ink-faint uppercase">
-          <span>Labels</span>
-          <span className="font-medium tracking-normal tabular-nums">{labels.length}</span>
-        </h2>
+      <div className="mt-6 flex min-h-0 flex-1 flex-col">
+        <h2 className="app-small-caps px-1 pb-1.5 text-[14px] text-accent">Labels</h2>
         <nav data-testid="sidebar-labels" className="min-h-0 overflow-y-auto" aria-label="Labels">
           {labels.length === 0 ? (
-            <p className="px-2.5 py-2 text-xs text-ink-faint">No labels</p>
+            <p className="px-1 py-2 text-[13px] text-ink-faint">No labels</p>
           ) : (
             <div className="flex flex-col gap-0.5">
               {labels.map((label) => (
