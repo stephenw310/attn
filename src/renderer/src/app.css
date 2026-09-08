@@ -101,7 +101,7 @@
     --attn-paper-fibre-alpha: 0.022;
     --attn-paper-fleck-alpha: 0.2;
     --attn-paper-lift-mix: 0.5;
-    --attn-paper-cloud-alpha: 0.035;
+    --attn-paper-cloud-alpha: 0.018;
     --attn-paper-cloud-lit-alpha: 0;
     --attn-paper-vignette: 0;
     /* What a hand draws over the sheet: the rules, and the wash of a torn
@@ -151,8 +151,12 @@
     --attn-paper-fibre-alpha: 0.022;
     --attn-paper-fleck-alpha: 0.2;
     --attn-paper-lift-mix: 0.4;
-    --attn-paper-cloud-alpha: 0.06;
-    --attn-paper-cloud-lit-alpha: 0.07;
+    /* Halved when the seeded generator was fixed. The old one drew every cloud
+       from a degenerate sequence, so the mottling it asked for never landed and
+       the sheet was nearly flat; at full strength a correct generator put a
+       dark patch beside the sidebar band and flattened its torn edge. */
+    --attn-paper-cloud-alpha: 0.03;
+    --attn-paper-cloud-lit-alpha: 0.035;
     --attn-paper-vignette: 0.05;
     --attn-hand-ink: 42 32 21;
     --attn-hand-rule-alpha: 0.34;
