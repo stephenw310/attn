@@ -123,13 +123,14 @@ describe('sender font faces', () => {
     expect(sanitized).toContain('p{color:red}')
   })
 
-  it('drops a sheet it cannot parse rather than guessing at its text', () => {
-    // jsdom has no `CSSStyleSheet.replaceSync`, so this is the fail-closed
-    // path: no parser, no sheet. The renderer never takes it.
+  it('deletes the face and keeps the rest of the sheet', () => {
+    // jsdom's parser is not Chromium's, so this pins the contract and no more:
+    // which sheets survive a hostile at-rule is settled in the e2e cases, where
+    // the parser that decides is the one that will render the mail.
     const html = '<style>@font-face{font-family:Sender;src:url(x)}p{color:red}</style><p>hi</p>'
     const sanitized = sanitizeMailHtml(createDOMPurify(window), html)
     expect(sanitized).not.toContain('font-face')
-    expect(sanitized).not.toContain('<style>')
+    expect(sanitized).toContain('color: red')
     expect(sanitized).toContain('<p>hi</p>')
   })
 })

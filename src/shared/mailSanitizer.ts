@@ -106,7 +106,8 @@ export function dropSenderFontFaces(style: Element): void {
   if (!Sheet || typeof Sheet.prototype.replaceSync !== 'function') {
     // Nothing here can agree with a parser that is not present, so drop the
     // sheet rather than guess at its text. Display runs in the renderer, where
-    // the parser is always there; this is the path a test environment takes.
+    // the parser is always there, so this is unreached in practice — it is the
+    // shape of the failure, not a path with a test behind it.
     style.remove()
     return
   }
