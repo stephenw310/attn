@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react'
 import type { ThreadListView } from '../../../shared/mail'
 import type { InboxController } from '../hooks/useInboxController'
 import { type MailView, userLabelId } from '../list/mailDisplay'
@@ -24,8 +25,14 @@ function threadListKind(view: MailView): ThreadListView | 'label' {
 }
 
 export function InboxLayout({ controller: c }: { controller: InboxController }): React.JSX.Element {
+  const rootRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    // Give the window a focus target before Electron selects the first button.
+    rootRef.current?.focus({ preventScroll: true })
+  }, [])
+
   return (
-    <div className="flex h-full flex-col">
+    <div ref={rootRef} tabIndex={-1} data-testid="mail-window" className="flex h-full flex-col outline-none">
       <MailHeader
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
