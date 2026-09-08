@@ -90,9 +90,13 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
         if (msg.text().includes('ERR_BLOCKED_BY_CLIENT')) return
         // A sender's `@import` refused by `style-src` is the policy doing its
         // job — that policy is the only thing standing between a kept <style>
-        // and a fetch. Scoped to a remote sheet: Attn's own styles are bundled
-        // and same-origin, so a violation naming one is still a failure.
+        // and a fetch. Confined on three axes: the mail frame is the only
+        // document it may come from, `style-src` the only directive, and a
+        // remote sheet the only subject. Attn's own styles are bundled and
+        // load from `file:` in the app document, so a violation naming one is
+        // still a failure.
         if (
+          msg.location().url === 'about:srcdoc' &&
           msg.text().includes('Content Security Policy') &&
           msg.text().includes('style-src') &&
           /'https?:\/\//.test(msg.text())

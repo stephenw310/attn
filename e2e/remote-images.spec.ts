@@ -234,7 +234,17 @@ test('a sender stylesheet cannot fetch another one', async ({ app, page }) => {
         `<div style="background:#0aa3d2">Lunch plans</div>`
     )
     await openLunch(page)
-    await expect(page.getByTestId('html-body-frame')).toBeVisible()
+    const frame = page.getByTestId('html-body-frame')
+    await expect(frame).toBeVisible()
+    // The sheet has to have reached the frame for the quiet below to mean
+    // anything: if sanitizing ever dropped it instead — the fail-closed path
+    // taken when the sheet cannot be parsed — nothing would be fetched either,
+    // and this would pass while proving nothing about the policy.
+    const kept = await frame
+      .contentFrame()
+      .locator('body')
+      .evaluate((body) => body.querySelectorAll('style').length)
+    expect(kept).toBe(1)
     await expectWireQuiet(probe, page, '/imported.css')
     await closeReader(page)
   } finally {
