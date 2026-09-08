@@ -122,7 +122,7 @@ export function InlineQuote({
           data-testid="composer-quote-toggle"
           aria-expanded={expanded}
           aria-label={expanded ? 'Hide quoted history' : 'Show quoted history'}
-          title={expanded ? 'Hide quoted history' : 'Show quoted history'}
+          data-tooltip={expanded ? 'Hide quoted history' : 'Show quoted history'}
           onClick={() => setLocalExpanded((current) => !current)}
         >
           ...

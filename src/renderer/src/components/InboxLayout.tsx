@@ -157,7 +157,7 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
             type="button"
             data-testid="search-open"
             aria-label="Search mail"
-            title="Search mail (/)"
+            data-tooltip="Search mail (/)"
             onClick={c.openSearch}
             className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
           >

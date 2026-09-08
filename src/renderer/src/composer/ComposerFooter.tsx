@@ -7,7 +7,7 @@ import { FollowUpControl } from './FollowUpControl'
 function TrashIcon(): React.JSX.Element {
   return (
     <svg
-      aria-hidden
+      aria-hidden="true"
       viewBox="0 0 24 24"
       className="size-4"
       fill="none"
@@ -20,17 +20,16 @@ function TrashIcon(): React.JSX.Element {
   )
 }
 
-export function PaperclipIcon({ title = 'Attachment' }: { title?: string }): React.JSX.Element {
+export function PaperclipIcon(): React.JSX.Element {
   return (
     <svg
-      aria-hidden
+      aria-hidden="true"
       viewBox="0 0 24 24"
       className="size-4"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.75"
     >
-      <title>{title}</title>
       <path
         d="m8.5 12.5 6.2-6.2a3 3 0 0 1 4.2 4.2l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5"
         strokeLinecap="round"
@@ -109,7 +108,7 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
             disabled={props.attaching || props.closing}
             onClick={props.pickAttachments}
           >
-            <PaperclipIcon title={`Attach files (${modKeyLabel()}⇧A)`} />
+            <PaperclipIcon />
           </button>
           <FollowUpControl
             followUpAt={props.followUpAt}

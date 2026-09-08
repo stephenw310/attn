@@ -30,10 +30,11 @@ export function FollowUpControl({
   const preset = (days: number): number => Date.now() + days * 24 * 60 * 60 * 1000
   // Focus follows the popover (PR #101 review): its Escape containment only
   // sees the key when focus is inside, so opening moves focus onto the
-  // popover and dismissing hands it back to the trigger — from where the
-  // next Escape reaches the composer's ordinary close handling.
+  // popover. Escape and selection return focus to the trigger, from where the
+  // next Escape closes the composer. Outside clicks keep their chosen focus.
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popoverRef = useRef<HTMLDivElement | null>(null)
+  const restoreTriggerFocus = useRef(true)
   const [position, setPosition] = useState({ right: 12, bottom: 12 })
   useLayoutEffect(() => {
     if (!open) return
@@ -57,15 +58,20 @@ export function FollowUpControl({
     if (!open) return
     const close = (event: PointerEvent): void => {
       const target = event.target as Node
-      if (!triggerRef.current?.contains(target) && !popoverRef.current?.contains(target)) onOpenChange(false)
+      if (!triggerRef.current?.contains(target) && !popoverRef.current?.contains(target)) {
+        restoreTriggerFocus.current = false
+        onOpenChange(false)
+      }
     }
     document.addEventListener('pointerdown', close)
     return () => document.removeEventListener('pointerdown', close)
   }, [open, onOpenChange])
   const wasOpenRef = useRef(false)
   useEffect(() => {
-    if (open) popoverRef.current?.focus()
-    else if (wasOpenRef.current) triggerRef.current?.focus()
+    if (open) {
+      restoreTriggerFocus.current = true
+      popoverRef.current?.focus()
+    } else if (wasOpenRef.current && restoreTriggerFocus.current) triggerRef.current?.focus()
     wasOpenRef.current = open
   }, [open])
   return (
