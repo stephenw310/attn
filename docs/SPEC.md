@@ -77,6 +77,8 @@ The top bar shows account controls and pending mail activity without an unread-p
 Reader, Settings, and new-message headers use one clickable `Esc` close control without a separate Back button.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
+The signed-in window initially focuses the mail view without highlighting a toolbar button or showing its hint. Toolbar controls retain keyboard focus hints.
+
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
 
 ## 4. Feature specifications

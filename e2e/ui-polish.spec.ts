@@ -5,6 +5,21 @@ import { expect, test } from './electron'
 
 test.use({ seed: 'fixtures/seed-splits.json' })
 
+test('opens with mail focus and preserves sidebar keyboard hints', async ({ page, boot }) => {
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await expect(page.getByTestId('mail-window')).toBeFocused()
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
+  await page.getByTestId('sidebar-toggle').focus()
+  await expect(page.getByTestId('sidebar-toggle')).toBeFocused()
+  await expect(page.getByRole('tooltip')).toContainText('Collapse sidebar')
+  const relaunched = await boot.relaunch()
+  await expect(relaunched.page.getByTestId('thread-list')).toBeVisible()
+  await expect(relaunched.page.getByTestId('mail-window')).toBeFocused()
+  await expect(relaunched.page.getByRole('tooltip')).toHaveCount(0)
+  mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+  await relaunched.page.screenshot({ path: join(__dirname, '.artifacts/window-initial-focus.png') })
+})
+
 test('exposes layout shortcuts and fast icon hints', async ({ page }) => {
   await expect(page.getByTestId('thread-list')).toBeVisible()
   const search = page.getByTestId('search-open')
