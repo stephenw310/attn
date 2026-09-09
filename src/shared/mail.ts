@@ -37,6 +37,8 @@ export interface SnoozedThreadRow extends ThreadRow {
 }
 
 export interface MailLabel {
+  /** Cached conversations visible in this label view. */
+  threadCount?: number
   id: string
   name: string
   type: string

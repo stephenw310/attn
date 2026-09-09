@@ -604,9 +604,14 @@ export function countSystemMailboxes(db: Db, accountId: string): SystemMailboxCo
 export function listUserLabels(db: Db, accountId: string): MailLabel[] {
   return db
     .prepare(
-      `SELECT id, name, type FROM labels
-       WHERE account_id = ? AND lower(type) = 'user'
-       ORDER BY name COLLATE NOCASE, id`
+      `SELECT catalog.id, catalog.name, catalog.type,
+         (SELECT COUNT(*) FROM thread_labels mailbox
+          JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
+          WHERE mailbox.account_id = catalog.account_id AND mailbox.label_id = catalog.id
+            AND (${labeledMailboxMembershipSql()})) AS threadCount
+       FROM labels catalog
+       WHERE catalog.account_id = ? AND lower(catalog.type) = 'user'
+       ORDER BY catalog.name COLLATE NOCASE, catalog.id`
     )
     .all(accountId) as MailLabel[]
 }

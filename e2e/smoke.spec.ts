@@ -128,7 +128,7 @@ test.describe('seeded inbox smoke coverage', () => {
     ])
     await expect(page.getByTestId('queue-readout')).toHaveCount(0)
     await expect(page.getByTestId('pending-count')).toHaveCount(0)
-    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knavigate')
+    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('JKnavigate')
     await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
     for (const [id, text] of [
       ['done', 'Edone'],
@@ -187,7 +187,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
     await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
     await expect(page.getByTestId('footer-shortcut-reply')).toContainText('Rreply')
-    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knext / previous')
+    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('JKnext / previous')
     await expect(page.getByTestId('footer-shortcut-back')).toContainText('Escback to list')
     await expect(page.getByTestId('footer-shortcut-done')).toContainText('Edone')
     // Pin the whole reader hint set rather than the absence of named hints: this

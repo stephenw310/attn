@@ -126,6 +126,11 @@ describe('two-account read isolation', () => {
     expect(countsA.inbox).toBe(3)
     expect(countsB.inbox).toBe(4)
     expect(queries.listUserLabels(db, A).map((label) => label.id)).toEqual(['alpha-label'])
+    for (const accountId of [A, B]) {
+      for (const label of queries.listUserLabels(db, accountId)) {
+        expect(label.threadCount).toBe(queries.listLabelThreads(db, accountId, label.id).length)
+      }
+    }
 
     expect(queries.getConversation(db, A, 'alpha-t1', 'unavailable')).not.toBeNull()
     expect(queries.getConversation(db, A, 'beta-t1', 'unavailable')).toBeNull()

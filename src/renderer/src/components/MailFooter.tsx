@@ -10,17 +10,7 @@ import { formatShortcutKey } from '../platform'
 import { Kbd } from './Kbd'
 
 function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
-  const parts = shortcut.split('+')
-  return (
-    <span className="flex items-center gap-0.5">
-      {parts.map((part, index) => (
-        <span key={part} className="contents">
-          {index > 0 && <span aria-hidden>+</span>}
-          <Kbd>{formatShortcutKey(part)}</Kbd>
-        </span>
-      ))}
-    </span>
-  )
+  return <Kbd>{shortcut.split('+').map(formatShortcutKey).join(' ')}</Kbd>
 }
 
 function FooterShortcut({
@@ -37,10 +27,9 @@ function FooterShortcut({
       data-testid={`footer-shortcut-${id}`}
       className="flex flex-none items-center gap-1.5 whitespace-nowrap text-ink-dim"
     >
-      <span className="flex items-center gap-0.5">
-        {shortcuts.map((shortcut, index) => (
+      <span className="flex items-center gap-1.5">
+        {shortcuts.map((shortcut) => (
           <span key={shortcut} className="contents">
-            {index > 0 && <span aria-hidden>/</span>}
             <Shortcut shortcut={shortcut} />
           </span>
         ))}

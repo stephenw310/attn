@@ -49,19 +49,16 @@ function NavButton({
       data-active={active || undefined}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
-      className={`group flex min-h-8 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-[12px] ${active ? 'bg-active font-medium text-ink' : 'text-ink-dim hover:bg-active hover:text-ink'}`}
+      className={`group flex min-h-8 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-[12px] ${active ? 'bg-active font-semibold text-ink' : 'text-ink-dim hover:bg-active hover:text-ink'}`}
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{title}</span>
       {count != null && (
-        <span className="min-w-[27px] flex-none text-right text-[10px] font-normal tabular-nums">
+        <span
+          className={`min-w-[27px] flex-none text-right text-[10px] tabular-nums ${active ? 'font-semibold' : 'font-normal'}`}
+        >
           {count !== undefined && count !== null && (
-            <span
-              data-testid="sidebar-count"
-              data-count={count}
-              title={count.toLocaleString()}
-              className={'text-ink-dim'}
-            >
+            <span data-testid="sidebar-count" data-count={count} title={count.toLocaleString()}>
               {compactCount(count)}
             </span>
           )}
@@ -137,6 +134,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
                   key={label.id}
                   active={activeLabelId === label.id}
                   title={label.name}
+                  count={label.threadCount}
                   icon={
                     <span
                       className="app-label-dot"

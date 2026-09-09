@@ -49,6 +49,12 @@ describe('mail data identity reuse', () => {
     expect(reuseSnoozedRows(currentSnoozed, [{ ...row(), dueAt: 10 }])).toBe(currentSnoozed)
     expect(reuseSnoozedRows(currentSnoozed, [{ ...row(), dueAt: 11 }])).not.toBe(currentSnoozed)
 
+    expect(
+      reuseLabels(
+        [{ id: 'Label_1', name: 'Projects', type: 'user', threadCount: 1 }],
+        [{ id: 'Label_1', name: 'Projects', type: 'user', threadCount: 2 }]
+      )[0].threadCount
+    ).toBe(2)
     const currentLabels: MailLabel[] = [{ id: 'Label_1', name: 'Projects', type: 'user' }]
     expect(reuseLabels(currentLabels, [{ id: 'Label_1', name: 'Projects', type: 'user' }])).toBe(
       currentLabels

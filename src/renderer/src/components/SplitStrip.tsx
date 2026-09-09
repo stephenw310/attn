@@ -80,7 +80,7 @@ export function SplitStrip({
                 <span
                   data-testid="split-unread-count"
                   data-count={split.unread}
-                  className="flex-none text-[10px] leading-none tabular-nums text-ink-dim"
+                  className="flex-none text-[10px] leading-none tabular-nums"
                 >
                   {split.unread > 999 ? '999+' : split.unread}
                 </span>

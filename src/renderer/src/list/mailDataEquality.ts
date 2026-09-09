@@ -56,7 +56,10 @@ export function reuseLabels(current: MailLabel[], next: MailLabel[]): MailLabel[
   return current.length === next.length &&
     current.every(
       (label, index) =>
-        label.id === next[index].id && label.name === next[index].name && label.type === next[index].type
+        label.id === next[index].id &&
+        label.name === next[index].name &&
+        label.type === next[index].type &&
+        label.threadCount === next[index].threadCount
     )
     ? current
     : next
