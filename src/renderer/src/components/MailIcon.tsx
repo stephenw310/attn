@@ -1,4 +1,6 @@
 const paths = {
+  sidebar: 'M4 4h16v16H4z M9 4v16',
+  splits: 'M4 4h16v16H4z M9 4v16M15 4v16',
   inbox: 'M3 4h18v16H3z M3 13h5l2 3h4l2-3h5',
   starred: 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z',
   snoozed: 'M12 7v5l3 2 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',

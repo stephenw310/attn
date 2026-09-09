@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SplitSummary } from '../../../shared/splits'
 import { modKeyLabel } from '../platform'
+import { MailIcon } from './MailIcon'
 
 interface SplitStripProps {
   splits: readonly SplitSummary[]
@@ -66,8 +67,8 @@ export function SplitStrip({
               data-active={active || undefined}
               aria-selected={active}
               data-tooltip={`${split.total.toLocaleString()} conversations`}
-              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-normal transition-colors ${
-                active ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active hover:text-ink'
+              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-2 py-1.5 text-[11px] font-normal transition-colors ${
+                active ? 'border-accent text-ink' : 'border-transparent text-ink-dim hover:text-ink'
               }`}
               onClick={(event) => {
                 onSelect(split.id)
@@ -75,7 +76,7 @@ export function SplitStrip({
               }}
             >
               <span>{split.name}</span>
-              <span className="w-6 flex-none text-center">
+              <span className="w-6 flex-none text-left">
                 {split.unread > 0 && (
                   <span
                     data-testid="split-unread-count"
@@ -98,18 +99,7 @@ export function SplitStrip({
         onClick={onManage}
         className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center rounded-md text-ink-faint hover:bg-active hover:text-ink"
       >
-        <svg
-          aria-hidden
-          viewBox="0 0 24 24"
-          className="size-4 fill-none stroke-current"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <title>Manage Inbox splits</title>
-          <rect x="3" y="4" width="18" height="16" rx="2" />
-          <path d="M9 4v16M15 4v16" />
-        </svg>
+        <MailIcon name="splits" />
       </button>
       {overflowSplits.length > 0 && (
         <div ref={overflowRef} className="relative flex-none">

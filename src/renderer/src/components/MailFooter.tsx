@@ -7,7 +7,6 @@ import {
   subscribeCommandRegistry
 } from '../commands'
 import { formatShortcutKey } from '../platform'
-import { Button } from './Button'
 import { Kbd } from './Kbd'
 
 function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
@@ -104,9 +103,14 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
         )}
       </div>
       {!pendingChord && (
-        <Button onClick={props.onOpenShortcuts} className="flex-none" data-testid="footer-all-shortcuts">
+        <button
+          type="button"
+          onClick={props.onOpenShortcuts}
+          className="flex flex-none cursor-pointer items-center gap-1.5 text-[11px] text-ink-dim hover:text-ink"
+          data-testid="footer-all-shortcuts"
+        >
           All shortcuts <Shortcut shortcut="Mod+/" />
-        </Button>
+        </button>
       )}
     </footer>
   )

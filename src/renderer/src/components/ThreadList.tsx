@@ -113,7 +113,7 @@ interface ThreadListProps {
   sectionDivider?: { beforeIndex: number; label: string }
 }
 
-const VIRTUAL_ROW_HEIGHT = 66
+const VIRTUAL_ROW_HEIGHT = 54
 const VIRTUAL_GROUP_HEIGHT = 44
 const VIRTUAL_SECTION_DIVIDER_HEIGHT = 34
 const VIRTUAL_OVERSCAN_PX = VIRTUAL_ROW_HEIGHT * 12

@@ -336,10 +336,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
             }}
             className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
-              <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
-              <path d="M8.5 4v16" strokeWidth="1.75" />
-            </svg>
+            <MailIcon name="sidebar" />
           </button>
           <button
             type="button"

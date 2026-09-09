@@ -160,8 +160,8 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
   await expect
     .poll(() =>
       rows.evaluateAll((items) => {
-        const markers = items.slice(0, 3).map((item) => getComputedStyle(item).boxShadow)
-        return [markers[0] === 'none', markers[1] === 'none', markers[2].includes('inset')]
+        const markers = items.slice(0, 3).map((item) => getComputedStyle(item).backgroundColor)
+        return [markers[0] === markers[1], markers[1] !== markers[2], markers[2] !== markers[0]]
       })
     )
     .toEqual([true, true, true])

@@ -95,7 +95,7 @@ test.describe('Tide split shell', () => {
     await page.getByTestId('footer-all-shortcuts').click()
     await expect(page.getByTestId('cheat-sheet')).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(page.getByTestId('thread-row').first()).toHaveCSS('height', '66px')
+    await expect(page.getByTestId('thread-row').first()).toHaveCSS('height', '54px')
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
     expect(overflow).toBe(false)
     mkdirSync(join(__dirname, '.artifacts'), { recursive: true })

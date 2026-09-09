@@ -695,7 +695,7 @@
   grid-row: 2;
 }
 .app-thread-row {
-  height: 66px;
+  height: 54px;
   border-radius: 5px;
   padding-inline: 12px;
 }
@@ -775,5 +775,5 @@
 }
 
 .app-thread-row[data-selected="true"][data-checked="true"] {
-  box-shadow: inset 2px 0 var(--attn-accent);
+  background: color-mix(in srgb, var(--attn-active) 85%, var(--attn-accent));
 }
