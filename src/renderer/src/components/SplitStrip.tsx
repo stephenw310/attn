@@ -67,7 +67,7 @@ export function SplitStrip({
               data-active={active || undefined}
               aria-selected={active}
               data-tooltip={`${split.total.toLocaleString()} conversations`}
-              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-2 py-1.5 text-[11px] font-normal transition-colors ${
+              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-2 py-1.5 text-[12px] font-normal transition-colors ${
                 active ? 'border-accent text-ink' : 'border-transparent text-ink-dim hover:text-ink'
               }`}
               onClick={(event) => {
@@ -76,17 +76,15 @@ export function SplitStrip({
               }}
             >
               <span>{split.name}</span>
-              <span className="w-6 flex-none text-left">
-                {split.unread > 0 && (
-                  <span
-                    data-testid="split-unread-count"
-                    data-count={split.unread}
-                    className="inline-block text-[10px] leading-none tabular-nums text-ink-dim"
-                  >
-                    {split.unread > 999 ? '999+' : split.unread}
-                  </span>
-                )}
-              </span>
+              {split.unread > 0 && (
+                <span
+                  data-testid="split-unread-count"
+                  data-count={split.unread}
+                  className="flex-none text-[10px] leading-none tabular-nums text-ink-dim"
+                >
+                  {split.unread > 999 ? '999+' : split.unread}
+                </span>
+              )}
             </button>
           )
         })}

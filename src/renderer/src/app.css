@@ -353,7 +353,8 @@
 
 .app-thread-sender,
 .app-thread-subject {
-  color: var(--color-ink-dim);
+  color: var(--color-ink);
+  font-weight: 400;
 }
 
 .app-thread-time {
@@ -753,6 +754,7 @@
   flex: none;
 }
 .app-mail-header {
+  padding-left: max(190px, calc(env(titlebar-area-x, 0px) + 0.75rem));
   height: 56px;
   gap: 8px;
 }

@@ -54,7 +54,7 @@ function NavButton({
       {icon}
       <span className="min-w-0 flex-1 truncate">{title}</span>
       {count != null && (
-        <span className="w-10 flex-none text-right text-[11px] font-semibold tabular-nums">
+        <span className="min-w-[27px] flex-none text-right text-[10px] font-normal tabular-nums">
           {count !== undefined && count !== null && (
             <span
               data-testid="sidebar-count"
@@ -89,7 +89,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
     <aside
       id="mail-sidebar"
       data-testid="mail-sidebar"
-      className="flex w-54 flex-none flex-col px-3 py-5"
+      className="flex w-[190px] flex-none flex-col px-2.5 py-5"
       aria-label="Mail navigation"
     >
       <div
@@ -124,9 +124,8 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
       </nav>
 
       <div className="mt-6 flex min-h-0 flex-1 flex-col">
-        <h2 className="flex items-center justify-between px-2.5 pb-1.5 text-[10px] font-normal text-ink-dim">
+        <h2 className="flex items-center gap-2.5 px-2.5 pb-1.5 text-[10px] font-normal text-ink-dim">
           <span>Labels</span>
-          <span className="font-medium tracking-normal tabular-nums">{labels.length}</span>
         </h2>
         <nav data-testid="sidebar-labels" className="min-h-0 overflow-y-auto" aria-label="Labels">
           {labels.length === 0 ? (

@@ -148,7 +148,7 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   const sidebar = page.getByTestId('mail-sidebar')
   await expect(page.getByTestId('sidebar-brand')).toHaveText('attn:')
   await expect(page.getByTestId('sidebar-brand')).toHaveCSS('font-size', '26px')
-  expect((await sidebar.boundingBox())?.width).toBe(216)
+  expect((await sidebar.boundingBox())?.width).toBe(190)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute(
     'aria-keyshortcuts',
@@ -197,7 +197,7 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
 
   await relaunched.page.getByTestId('sidebar-toggle').click()
   await expect(relaunchedSidebar).toBeVisible()
-  expect((await relaunchedSidebar.boundingBox())?.width).toBe(216)
+  expect((await relaunchedSidebar.boundingBox())?.width).toBe(190)
   await expect(relaunched.page.getByTestId('sidebar-mailbox')).toHaveCount(8)
   await expect(relaunched.page.getByTestId('sidebar-label')).toHaveCount(12)
 })

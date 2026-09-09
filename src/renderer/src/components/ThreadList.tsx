@@ -411,7 +411,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
             </span>
           </span>
         </span>
-        <span className="flex flex-none items-center gap-2 text-[11px] text-ink-dim">
+        <span className="flex flex-none items-center gap-2 text-[10px] text-ink-dim">
           {thread.hasAttachment && <MailIcon name="attachment" />}
           <span data-testid="thread-time" className="app-thread-time min-w-[62px] text-right tabular-nums">
             {thread.at}
