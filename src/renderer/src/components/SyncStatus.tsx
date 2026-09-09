@@ -159,9 +159,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
 
   const body = (
     <>
-      <span className="app-status-dot size-[7px] rounded-full" aria-hidden />
+      <span className="app-status-dot size-[5px] rounded-full" aria-hidden />
       <span
-        className={`whitespace-nowrap text-[11.5px] font-semibold ${
+        className={`whitespace-nowrap text-[11px] font-normal ${
           displayState === 'error' ? 'text-danger' : 'text-ink-dim'
         }`}
       >

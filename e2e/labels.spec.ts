@@ -32,7 +32,8 @@ test('searches, applies, and undoes a user label', async ({ page }) => {
     projectChip.boundingBox(),
     first.getByTestId('thread-subject').boundingBox()
   ])
-  expect(chipBox?.x).toBeLessThan(subjectBox?.x ?? 0)
+  expect(chipBox?.x).toBeCloseTo(subjectBox?.x ?? 0, 0)
+  expect(chipBox?.y).toBeGreaterThan(subjectBox?.y ?? 0)
   const projectColor = await projectChip.evaluate((element) => getComputedStyle(element).backgroundColor)
   const receiptColor = await page
     .getByTestId('thread-row')

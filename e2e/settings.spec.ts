@@ -38,8 +38,8 @@ test.describe('settings surface', () => {
     await page.keyboard.press('ControlOrMeta+,')
     const settings = page.getByTestId('settings-view')
     await expect(settings).toBeVisible()
-    // The prior list stays mounted and hidden; the sidebar stays visible.
-    await expect(page.getByTestId('mail-sidebar')).toBeVisible()
+    // The prior list stays mounted and hidden; settings hides the mail sidebar.
+    await expect(page.getByTestId('mail-sidebar')).toHaveCount(0)
     await expect(page.getByTestId('thread-list')).toBeHidden()
     await expect(settings.getByTestId('settings-account-row')).toHaveCount(1)
     await expect(settings.getByTestId('settings-account-row')).toContainText('seed@attn.test')

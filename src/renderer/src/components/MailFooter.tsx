@@ -7,6 +7,7 @@ import {
   subscribeCommandRegistry
 } from '../commands'
 import { formatShortcutKey } from '../platform'
+import { Button } from './Button'
 import { Kbd } from './Kbd'
 
 function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
@@ -76,6 +77,7 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
 }
 
 interface MailFooterProps {
+  onOpenShortcuts?: () => void
   context: FooterContext
   pendingChord: string | null
 }
@@ -88,7 +90,7 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
     <footer
       id="mail-footer"
       data-testid="mail-footer"
-      className="relative z-40 flex min-h-11 flex-none items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
+      className="relative z-40 flex min-h-11 flex-none items-center gap-4 bg-ground px-6 py-1.5 text-[11px] text-ink-dim"
     >
       <div
         key={`${context}:${pendingChord ?? 'default'}`}
@@ -101,6 +103,11 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
           hints.map((hint) => <FooterShortcut key={hint.id} {...hint} />)
         )}
       </div>
+      {!pendingChord && (
+        <Button onClick={props.onOpenShortcuts} className="flex-none" data-testid="footer-all-shortcuts">
+          All shortcuts <Shortcut shortcut="Mod+/" />
+        </Button>
+      )}
     </footer>
   )
 }

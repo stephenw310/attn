@@ -1,5 +1,5 @@
 import type { MailboxView, MailLabel, SystemMailboxCounts } from '../../../shared/mail'
-import { COMMAND_SPECS } from '../commands'
+import { labelColor } from '../list/labelColor'
 import {
   type MailView,
   type NavigableMailView,
@@ -7,18 +7,17 @@ import {
   userLabelView,
   VIEW_TITLES
 } from '../list/mailDisplay'
-import { formatShortcut } from '../platform'
-import { Kbd } from './Kbd'
+import { MailIcon } from './MailIcon'
 
-const MAILBOX_ITEMS: readonly { view: MailboxView; shortcut: string }[] = [
-  { view: 'inbox', shortcut: COMMAND_SPECS['view.inbox'].shortcut },
-  { view: 'starred', shortcut: COMMAND_SPECS['view.starred'].shortcut },
-  { view: 'snoozed', shortcut: COMMAND_SPECS['view.snoozed'].shortcut },
-  { view: 'drafts', shortcut: COMMAND_SPECS['view.drafts'].shortcut },
-  { view: 'sent', shortcut: COMMAND_SPECS['view.sent'].shortcut },
-  { view: 'allMail', shortcut: COMMAND_SPECS['view.allMail'].shortcut },
-  { view: 'spam', shortcut: COMMAND_SPECS['view.spam'].shortcut },
-  { view: 'trash', shortcut: COMMAND_SPECS['view.trash'].shortcut }
+const MAILBOX_ITEMS: readonly MailboxView[] = [
+  'inbox',
+  'starred',
+  'snoozed',
+  'drafts',
+  'sent',
+  'allMail',
+  'spam',
+  'trash'
 ]
 
 function compactCount(count: number): string {
@@ -31,14 +30,14 @@ function compactCount(count: number): string {
 function NavButton({
   active,
   title,
-  shortcut,
+  icon,
   count,
   testId,
   onClick
 }: {
   active: boolean
   title: string
-  shortcut?: string
+  icon: React.ReactNode
   count?: number | null
   testId: string
   onClick: () => void
@@ -50,28 +49,24 @@ function NavButton({
       data-active={active || undefined}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
-      className={`group flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-md border-l-2 px-2.5 text-left text-[13px] ${
-        active
-          ? 'border-l-accent bg-active font-semibold text-ink'
-          : 'border-l-transparent font-medium text-ink-dim hover:bg-active/70 hover:text-ink'
-      }`}
+      className={`group flex min-h-8 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-[12px] ${active ? 'bg-active font-medium text-ink' : 'text-ink-dim hover:bg-active hover:text-ink'}`}
     >
+      {icon}
       <span className="min-w-0 flex-1 truncate">{title}</span>
-      {(shortcut || count != null) && (
+      {count != null && (
         <span className="w-10 flex-none text-right text-[11px] font-semibold tabular-nums">
           {count !== undefined && count !== null && (
             <span
               data-testid="sidebar-count"
               data-count={count}
               title={count.toLocaleString()}
-              className={count > 0 ? 'text-accent' : 'text-ink-faint'}
+              className={'text-ink-dim'}
             >
               {compactCount(count)}
             </span>
           )}
         </span>
       )}
-      {shortcut && <Kbd>{formatShortcut(shortcut)}</Kbd>}
     </button>
   )
 }
@@ -94,42 +89,42 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
     <aside
       id="mail-sidebar"
       data-testid="mail-sidebar"
-      className="flex w-54 flex-none flex-col border-r border-edge bg-raised/45 px-3 py-3"
+      className="flex w-54 flex-none flex-col px-3 py-5"
       aria-label="Mail navigation"
     >
       <div
         data-testid="sidebar-brand"
-        className="flex h-14 flex-none items-center px-2.5 pb-2 text-[40px] leading-none font-bold tracking-[-0.04em]"
+        className="flex h-14 flex-none items-center px-2.5 pb-2 text-[26px] leading-none font-bold tracking-[-0.04em]"
       >
-        attn<span className="text-accent">:</span>
+        attn:
       </div>
       <nav className="flex flex-none flex-col gap-0.5" aria-label="Mailboxes">
         <div className="flex min-h-8 items-center px-2.5 pb-1.5">
-          <h2 className="text-[10px] font-bold tracking-[0.14em] text-ink-faint uppercase">Mailboxes</h2>
+          <h2 className="text-[10px] font-normal text-ink-dim">Mailboxes</h2>
         </div>
         {MAILBOX_ITEMS.map((item) => (
           <NavButton
-            key={item.view}
-            active={view === item.view}
-            title={VIEW_TITLES[item.view]}
-            shortcut={item.shortcut}
-            count={item.view === 'drafts' ? draftCount : mailboxCounts?.[item.view]}
+            key={item}
+            active={view === item}
+            title={VIEW_TITLES[item]}
+            icon={<MailIcon name={item} />}
+            count={item === 'drafts' ? draftCount : mailboxCounts?.[item]}
             testId="sidebar-mailbox"
-            onClick={() => onSwitchView(item.view)}
+            onClick={() => onSwitchView(item)}
           />
         ))}
         <NavButton
           active={view === 'outbox'}
           title="Outbox"
-          shortcut={COMMAND_SPECS['view.outbox'].shortcut}
+          icon={<MailIcon name="outbox" />}
           count={outboxCount}
           testId="sidebar-outbox"
           onClick={onOpenOutbox}
         />
       </nav>
 
-      <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-edge pt-3">
-        <h2 className="flex items-center justify-between px-2.5 pb-1.5 text-[10px] font-bold tracking-[0.14em] text-ink-faint uppercase">
+      <div className="mt-6 flex min-h-0 flex-1 flex-col">
+        <h2 className="flex items-center justify-between px-2.5 pb-1.5 text-[10px] font-normal text-ink-dim">
           <span>Labels</span>
           <span className="font-medium tracking-normal tabular-nums">{labels.length}</span>
         </h2>
@@ -143,6 +138,12 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
                   key={label.id}
                   active={activeLabelId === label.id}
                   title={label.name}
+                  icon={
+                    <span
+                      className="app-label-dot"
+                      style={{ backgroundColor: labelColor(label.id).borderColor }}
+                    />
+                  }
                   testId="sidebar-label"
                   onClick={() => onSwitchView(userLabelView(label.id))}
                 />

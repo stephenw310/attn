@@ -1,46 +1,9 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MailLabel, ThreadListView } from '../../../shared/mail'
 import { dateGroup } from '../dateGroup'
+import { labelColor } from '../list/labelColor'
 import type { DisplayThread } from '../list/mailDisplay'
-
-const LABEL_PALETTE = [
-  {
-    backgroundColor: 'var(--attn-label-1-bg)',
-    borderColor: 'var(--attn-label-1-edge)',
-    color: 'var(--attn-label-1-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-2-bg)',
-    borderColor: 'var(--attn-label-2-edge)',
-    color: 'var(--attn-label-2-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-3-bg)',
-    borderColor: 'var(--attn-label-3-edge)',
-    color: 'var(--attn-label-3-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-4-bg)',
-    borderColor: 'var(--attn-label-4-edge)',
-    color: 'var(--attn-label-4-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-5-bg)',
-    borderColor: 'var(--attn-label-5-edge)',
-    color: 'var(--attn-label-5-ink)'
-  },
-  {
-    backgroundColor: 'var(--attn-label-6-bg)',
-    borderColor: 'var(--attn-label-6-edge)',
-    color: 'var(--attn-label-6-ink)'
-  }
-] as const
-
-function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {
-  let hash = 0
-  for (const character of labelId) hash = (hash * 31 + character.charCodeAt(0)) | 0
-  return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length]
-}
+import { MailIcon } from './MailIcon'
 
 function ThreadLabels({
   labelIds,
@@ -80,27 +43,17 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
   return (
     <>
       {thread.returned && (
-        <span
-          data-testid="chip-returned"
-          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
-        >
-          Returned
+        <span data-testid="chip-returned" className="app-thread-status">
+          ↩ Returned
         </span>
       )}
       {thread.followUpReturned && (
-        <span
-          data-testid="chip-follow-up"
-          className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 font-medium text-accent"
-        >
-          Follow up
+        <span data-testid="chip-follow-up" className="app-thread-status">
+          ↩ Follow up
         </span>
       )}
       {thread.dueAt !== undefined && (
-        <span
-          data-testid="chip-snooze-due"
-          title={thread.dueLabel}
-          className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
-        >
+        <span data-testid="chip-snooze-due" title={thread.dueLabel} className="app-thread-status">
           {thread.dueLabel}
         </span>
       )}
@@ -109,7 +62,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           data-testid="chip-follow-up-due"
           data-follow-up-awaiting={thread.followUpAwaiting ?? undefined}
           title={`Follow up if no reply — ${thread.followUpDueLabel}`}
-          className="rounded-full border border-edge px-2 py-0.5 text-ink-dim"
+          className="app-thread-status"
         >
           {`Follow up ${thread.followUpDueLabel}`}
           {thread.followUpAwaiting === 'origin'
@@ -160,7 +113,7 @@ interface ThreadListProps {
   sectionDivider?: { beforeIndex: number; label: string }
 }
 
-const VIRTUAL_ROW_HEIGHT = 46
+const VIRTUAL_ROW_HEIGHT = 66
 const VIRTUAL_GROUP_HEIGHT = 44
 const VIRTUAL_SECTION_DIVIDER_HEIGHT = 34
 const VIRTUAL_OVERSCAN_PX = VIRTUAL_ROW_HEIGHT * 12
@@ -412,16 +365,12 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         data-starred={thread.starred || undefined}
         data-done={done || undefined}
         data-exiting={exiting || undefined}
-        className={`flex h-[46px] cursor-default select-none items-center gap-3.5 border-l-[3px] pr-7 pl-5 ${
-          selectionShown ? 'border-l-accent' : 'border-l-transparent'
-        } ${checked ? 'bg-accent/[0.12]' : selectionShown ? 'bg-accent/[0.07]' : ''} ${
-          exiting ? 'app-thread-exit' : ''
-        }`}
+        className={`app-thread-row flex cursor-default select-none items-center gap-3 ${exiting ? 'app-thread-exit' : ''}`}
         onClick={(event) => (event.shiftKey ? onExtendSelection(index) : onOpen(index))}
       >
         <span className="flex size-4 flex-none items-center justify-center self-center" aria-hidden>
           {checked ? (
-            <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-ground">
+            <span className="flex size-4 items-center justify-center rounded-[4px] bg-accent text-[11px] font-bold text-on-accent">
               ✓
             </span>
           ) : (
@@ -429,35 +378,42 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           )}
         </span>
         <span
+          className="app-thread-star flex w-3 flex-none text-star"
+          role="img"
+          aria-label={thread.starred ? 'Starred' : undefined}
+          aria-hidden={!thread.starred}
+          title="Starred"
+        >
+          ★
+        </span>
+        <span
           data-testid="thread-sender"
-          className="app-thread-sender w-52 flex-none overflow-hidden text-ellipsis whitespace-nowrap"
+          className="app-thread-sender flex-none overflow-hidden text-ellipsis whitespace-nowrap"
         >
           {thread.from}
         </span>
-        <span className="flex min-w-0 flex-1 items-center gap-2 text-ink-faint">
-          {thread.hasDraft && (
-            <span
-              data-testid="chip-draft"
-              className="flex-none rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent"
-            >
-              Draft
-            </span>
-          )}
-          <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} onOpenLabel={onOpenLabel} />
-          <span className="app-thread-star flex-none text-star" title="Starred">
-            ★
-          </span>
-          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+        <span className="app-thread-copy">
+          <span className="app-thread-subject-line">
             <span data-testid="thread-subject" className="app-thread-subject">
               {thread.subject}
             </span>
-            <span data-testid="thread-snippet"> — {thread.snippet}</span>
+            <ThreadStatusChips thread={thread} />
+          </span>
+          <span className="app-thread-preview">
+            {thread.hasDraft && (
+              <span data-testid="chip-draft" className="flex-none text-accent">
+                Draft
+              </span>
+            )}
+            <ThreadLabels labelIds={thread.labelIds} labelsById={labelsById} onOpenLabel={onOpenLabel} />
+            <span data-testid="thread-snippet" className="truncate">
+              {thread.snippet}
+            </span>
           </span>
         </span>
-        <span className="flex flex-none items-center gap-2.5 text-xs">
-          <ThreadStatusChips thread={thread} />
-          {thread.hasAttachment && <span title="Has attachment">📎</span>}
-          <span data-testid="thread-time" className="app-thread-time min-w-[70px] text-right tabular-nums">
+        <span className="flex flex-none items-center gap-2 text-[11px] text-ink-dim">
+          {thread.hasAttachment && <MailIcon name="attachment" />}
+          <span data-testid="thread-time" className="app-thread-time min-w-[62px] text-right tabular-nums">
             {thread.at}
           </span>
           {view === 'allMail' && (
@@ -486,7 +442,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <div
           key={`group:${groupKey}`}
           data-testid="thread-date-group"
-          className={`absolute right-0 left-0 h-[44px] px-8 pt-5 pb-2 text-xs font-semibold text-ink-faint ${
+          className={`absolute right-0 left-0 h-[44px] px-3 pt-5 pb-2 text-[11px] font-normal text-ink-faint ${
             projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
           } ${groupRemoved ? 'app-thread-exit' : ''}`}
           style={{ top: projectedGroupTop ?? entry.top + entry.dividerHeight }}
@@ -545,10 +501,27 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
       {threads.length === 0 && (
         <div
           data-testid={loadingInitial ? 'thread-list-loading-initial' : undefined}
-          className="flex h-full items-center justify-center text-ink-faint"
+          className={
+            loadingInitial
+              ? 'px-3 pt-6 text-xs text-ink-dim'
+              : 'flex h-full items-center justify-center text-ink-faint'
+          }
           role={loadingInitial ? 'status' : undefined}
         >
-          {loadingInitial ? 'Loading conversations…' : syncing ? 'Syncing your inbox…' : EMPTY_TEXT[view]}
+          {loadingInitial ? (
+            <>
+              <p>Loading conversations…</p>
+              <div aria-hidden="true" className="mt-7 space-y-8">
+                {[85, 72, 78, 66].map((width) => (
+                  <div key={width} className="h-2 rounded bg-active" style={{ width: `${width}%` }} />
+                ))}
+              </div>
+            </>
+          ) : syncing ? (
+            'Syncing your inbox…'
+          ) : (
+            EMPTY_TEXT[view]
+          )}
         </div>
       )}
       <div
@@ -560,7 +533,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           <div
             data-testid="thread-section-divider"
             data-section="gmail"
-            className={`absolute right-0 left-0 flex h-[34px] items-center gap-3 px-7 text-[11px] font-semibold tracking-wide text-ink-faint uppercase ${
+            className={`absolute right-0 left-0 flex h-[34px] items-center gap-3 px-7 text-[11px] font-medium text-ink-faint ${
               projected?.dividerBeforeIndex !== undefined ? 'app-thread-position-shift' : ''
             }`}
             style={{

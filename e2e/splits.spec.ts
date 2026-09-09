@@ -465,13 +465,14 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
-test('shares one header row and remembers the hidden status and hint bar', async ({ boot, page }) => {
+test('places splits below the title and remembers the hidden hint bar', async ({ boot, page }) => {
   const header = page.getByTestId('mail-view-header')
   const strip = page.getByTestId('split-strip')
   await expect(strip).toBeVisible()
   const headerBox = await header.boundingBox()
   const stripBox = await strip.boundingBox()
-  expect(stripBox?.y).toBe(headerBox?.y)
+  expect(stripBox?.y).toBeGreaterThan(headerBox?.y ?? 0)
+  await expect(header).toHaveCSS('border-bottom-width', '0px')
   expect(stripBox?.height).toBeLessThanOrEqual(headerBox?.height ?? 0)
   const before = await page.getByTestId('thread-list').boundingBox()
   await page.getByTestId('footer-toggle').click()

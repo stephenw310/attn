@@ -320,7 +320,7 @@ it('projects virtual rows into the space left by an exiting row without moving t
     )
     const firstRow = container.querySelector<HTMLElement>('[data-testid="thread-row"][data-thread-index="0"]')
     const groupHeader = container.querySelector<HTMLElement>('[data-testid="thread-date-group"]')
-    expect(secondRow?.closest<HTMLElement>('.absolute')?.style.top).toBe('90px')
+    expect(secondRow?.closest<HTMLElement>('.absolute')?.style.top).toBe('110px')
 
     await act(async () =>
       root.render(
@@ -521,11 +521,11 @@ it('measures the sizer against the list when scrolling a selection into view', a
     await act(async () => root.render(createElement(ThreadList, { ...baseProps, selectedIndex: 0 })))
     await act(async () => root.render(createElement(ThreadList, { ...baseProps, selectedIndex: 3 })))
 
-    // Row 3 sits at 182 in layout coordinates and is 46 tall, so pulling its
-    // bottom to the viewport floor lands at 8 + 182 + 46 - 100. Reading the
+    // Row 3 sits at 242 in layout coordinates and is 66 tall, so pulling its
+    // bottom to the viewport floor lands at 8 + 242 + 66 - 100. Reading the
     // sizer's document offset instead would scroll a header-height too far.
     const list = container.querySelector<HTMLElement>('[data-testid="thread-list"]')
-    expect(list?.scrollTop).toBe(LIST_PADDING_TOP + 182 + 46 - LIST_CLIENT_HEIGHT)
+    expect(list?.scrollTop).toBe(LIST_PADDING_TOP + 242 + 66 - LIST_CLIENT_HEIGHT)
   } finally {
     await act(async () => root.unmount())
     if (clientHeightDescriptor) {

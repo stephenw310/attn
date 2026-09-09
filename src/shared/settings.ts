@@ -6,6 +6,7 @@
 // main applies OS effects (login item, macOS menu-bar icon) after a write.
 
 import { ALLOWED_UNDO_SEND_SECONDS, DEFAULT_UNDO_SEND_SECONDS } from './outboxTuning'
+import { isPaletteId, type PaletteId } from './theme'
 
 export const AUTO_ADVANCE_DIRECTIONS = ['next', 'previous', 'list'] as const
 
@@ -29,6 +30,7 @@ export const AUTO_ADVANCE_LABELS: Record<AutoAdvanceDirection, string> = {
  * owning account rather than this snapshot.
  */
 export interface AppSettings {
+  palette: PaletteId
   undoSendDelaySeconds: number
   autoAdvanceDirection: AutoAdvanceDirection
   /** F16: default on; ordinary launches still respect an OS-side disable. */
@@ -53,6 +55,7 @@ export type AppSettingUpdate = {
 }[AppSettingKey]
 
 export const APP_SETTINGS_DEFAULTS: AppSettings = {
+  palette: 'matcha',
   undoSendDelaySeconds: DEFAULT_UNDO_SEND_SECONDS,
   autoAdvanceDirection: 'next',
   launchAtLogin: true,
@@ -130,6 +133,10 @@ export function validateAccountSettingUpdate(key: unknown, value: unknown): Acco
  */
 export function validateAppSettingUpdate(key: unknown, value: unknown): AppSettingUpdate {
   switch (key) {
+    case 'palette': {
+      if (!isPaletteId(value)) throw new Error('invalid palette')
+      return { key, value }
+    }
     case 'undoSendDelaySeconds': {
       if (typeof value !== 'number' || !ALLOWED_UNDO_SEND_SECONDS.has(value)) {
         throw new Error('invalid undo-send delay')

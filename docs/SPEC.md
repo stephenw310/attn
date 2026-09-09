@@ -67,13 +67,13 @@ Initial sync fetches recent Inbox bodies. Older bodies and attachment bytes down
 
 ### D6. Layout and themes
 
-The default visual direction uses graphite backgrounds, an amber accent, and the `attn:` wordmark. Built-in themes share semantic color tokens.
+The Tide visual direction uses quiet, palette-tinted backgrounds, readable secondary text, and the `attn:` wordmark. Built-in palettes share semantic color tokens. Secondary actions use a subtle hover fill without a resting border. Fields and shortcut keycaps retain visible boundaries.
 
-A 216-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader.
+A 216-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader. The logo hides with the sidebar; there is no compact icon rail. Mailboxes use icons and names. The flat label list uses the same colors as message label chips. Sidebar entries do not display chord hints. Settings and split editing hide the mail sidebar without changing the saved preference.
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
-The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title and Inbox splits share one header row above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
+The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title sits above the Inbox splits without enclosing header borders. Write stays in the top bar outside the sidebar. The sidebar and keyboard-hint toggles sit together. The hint footer uses the page background and boxed keycaps without a contrasting panel. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
 Reader, Settings, and new-message headers use one clickable `Esc` close control without a separate Back button.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
@@ -565,11 +565,17 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 ### F14 — Themes
 
-Attn ships two palettes: Dark and Light. The default System preference follows the
-OS and resolves to the dark/light pair; selecting a named palette pins it
-regardless of OS changes. Theme choices are available from the account menu and as palette commands. User-
-customizable palettes and accent colors remain post-v1. Every built-in uses D6's semantic token names rather
-than component-level color branches. Saved Midnight preferences resolve to Dark; saved Sand preferences resolve to Light.
+Attn ships Matcha, Mist, Linen, and Dusk color palettes. Matcha is the default for existing and new profiles.
+The app-wide palette preference is independent of System, Light, and Dark appearance. System follows the OS.
+Both preferences persist across restart and account switches. Palette choices appear in Settings, the account menu,
+and command-palette commands. Existing saved appearance preferences remain valid. Saved Midnight resolves to Dark;
+saved Sand resolves to Light. Invalid or absent color palette values resolve to Matcha.
+
+All app text tokens meet normal-text AA contrast on the page, elevated panel, and selection backgrounds.
+Primary actions use the palette accent with a contrasting foreground. Secondary text remains readable in dark mode.
+Message rows show labels as tinted chips, a separate star slot, and a checkmark for Done in All Mail.
+Rows retain state markers for snooze, returned mail, and follow-up alongside labels. Initial loading uses a static
+skeleton with a loading announcement. Cached mail remains usable during sync errors and offline operation.
 
 Scrollbars use narrow, rounded thumbs, transparent tracks, and theme-specific normal and hover colors.
 The same styling covers app panes, controls, and mail frames. Light sender canvases retain light scrollbars.

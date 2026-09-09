@@ -48,6 +48,8 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         onReconnectActions={c.accounts.reconnectActions}
         onOpenOutbox={c.openOutbox}
         onToggleSidebar={c.toggleSidebar}
+        onWrite={c.drafting.openComposer}
+        writeDisabled={c.accountActionsBlocked}
         onSwitchAccount={c.accounts.switchAccount}
         onAddAccount={c.accounts.addAccount}
         onRemoveAccount={c.accounts.requestRemoveAccount}
@@ -62,7 +64,7 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         className={`min-h-0 flex-1 ${c.fullWindowComposerDraft ? 'hidden' : 'flex'}`}
         aria-hidden={!!c.fullWindowComposerDraft}
       >
-        {!c.sidebarCollapsed && (
+        {!c.sidebarCollapsed && !c.settingsOpen && !c.splitRulesOpen && (
           <MailSidebar
             view={c.view}
             labels={c.labels}
@@ -91,15 +93,16 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             />
           )}
           <div
-            className={`min-h-0 min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
+            className={`app-mail-content min-h-0 min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
             aria-hidden={c.settingsOpen || undefined}
           >
             <MailboxTop controller={c} />
             <SearchStatus controller={c} />
             <MailboxBody controller={c} />
           </div>
-          {!c.fullWindowComposerDraft && !c.footerCollapsed && (
+          {!c.fullWindowComposerDraft && !c.footerCollapsed && !c.settingsOpen && !c.splitRulesOpen && (
             <MailFooter
+              onOpenShortcuts={c.openCheatSheet}
               context={
                 c.inlineComposerDraft
                   ? 'composer'
@@ -138,11 +141,8 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
           onSubmit={c.search.submit}
         />
       ) : (
-        <div
-          data-testid="mail-view-header"
-          className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
-        >
-          <h1 data-testid="mailbox-title" className="mr-5 flex-none text-base font-semibold text-ink">
+        <div data-testid="mail-view-header" className="app-inbox-header flex-none">
+          <h1 data-testid="mailbox-title" className="text-ink">
             <span data-testid="view-title">{c.activeViewTitle}</span>
           </h1>
           {c.view === 'inbox' && c.splits.state && (
@@ -159,13 +159,13 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
             aria-label="Search mail"
             data-tooltip="Search mail (/)"
             onClick={c.openSearch}
-            className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+            className="app-no-drag col-start-2 row-start-1 ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
               <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
               <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
-            <span>/</span>
+            <span>Search</span>
           </button>
         </div>
       )}

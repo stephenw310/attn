@@ -48,8 +48,12 @@ export function SplitStrip({
 
   if (splits.length <= 1) return null
   return (
-    <div data-testid="split-strip" className="flex h-full min-w-0 items-stretch">
-      <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 overflow-x-auto">
+    <div data-testid="split-strip" className="flex min-w-0 items-center gap-1">
+      <div
+        role="tablist"
+        aria-label="Inbox splits"
+        className="flex min-w-0 items-center gap-1 overflow-x-auto"
+      >
         {visibleSplits.map((split) => {
           const active = split.id === activeSplitId
           return (
@@ -62,10 +66,8 @@ export function SplitStrip({
               data-active={active || undefined}
               aria-selected={active}
               data-tooltip={`${split.total.toLocaleString()} conversations`}
-              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-3 text-xs font-semibold transition-colors ${
-                active
-                  ? 'border-accent text-ink'
-                  : 'border-transparent text-ink-dim hover:bg-active/60 hover:text-ink'
+              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-normal transition-colors ${
+                active ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active hover:text-ink'
               }`}
               onClick={(event) => {
                 onSelect(split.id)
@@ -73,12 +75,12 @@ export function SplitStrip({
               }}
             >
               <span>{split.name}</span>
-              <span className="w-10 flex-none text-center">
+              <span className="w-6 flex-none text-center">
                 {split.unread > 0 && (
                   <span
                     data-testid="split-unread-count"
                     data-count={split.unread}
-                    className="inline-block min-w-5 rounded-full bg-active px-1.5 py-0.5 text-[10px] leading-none font-semibold tabular-nums text-accent"
+                    className="inline-block text-[10px] leading-none tabular-nums text-ink-dim"
                   >
                     {split.unread > 999 ? '999+' : split.unread}
                   </span>

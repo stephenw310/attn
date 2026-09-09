@@ -346,10 +346,10 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
   )
   await expect(composer.signature.getByText('Alex Rivera', { exact: true })).toHaveCSS(
     'color',
-    'rgb(157, 162, 172)'
+    'rgb(179, 197, 185)'
   )
   const signatureLink = composer.signature.getByRole('link', { name: 'northstar.test', exact: true })
-  await expect(signatureLink).toHaveCSS('color', 'rgb(255, 178, 36)')
+  await expect(signatureLink).toHaveCSS('color', 'rgb(190, 209, 189)')
   await page.evaluate(() => {
     window.open = (url, target) => {
       document.body.dataset.openedSignatureLink = String(url)

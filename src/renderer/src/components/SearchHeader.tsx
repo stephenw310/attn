@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { SearchCoverage } from '../../../shared/searchQuery'
+import { Kbd } from './Kbd'
 
 interface SearchHeaderProps {
   inputRef: React.RefObject<HTMLInputElement | null>
@@ -23,10 +24,7 @@ export function SearchHeader({
   const [queryFocused, setQueryFocused] = useState(false)
 
   return (
-    <div
-      data-testid="mail-view-header"
-      className="flex h-[44px] flex-none items-center gap-3 border-b border-edge pr-7 pl-[53px]"
-    >
+    <div data-testid="mail-view-header" className="flex min-h-[76px] flex-none items-center gap-3">
       <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 flex-none fill-none stroke-ink-faint">
         <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
         <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
@@ -62,11 +60,13 @@ export function SearchHeader({
           Searching…
         </span>
       )}
-      <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
-        {queryFocused ? 'Enter Search' : 'Esc Edit'}
+      <span className="flex items-center gap-1.5 text-[10px] text-ink-dim">
+        <Kbd>{queryFocused ? 'Enter' : 'Esc'}</Kbd>
+        {queryFocused ? 'Search' : 'Edit'}
       </span>
-      <span className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-medium text-ink-faint">
-        {queryFocused ? 'Esc Close' : 'Enter Open'}
+      <span className="flex items-center gap-1.5 text-[10px] text-ink-dim">
+        <Kbd>{queryFocused ? 'Esc' : 'Enter'}</Kbd>
+        {queryFocused ? 'Close' : 'Open'}
       </span>
     </div>
   )

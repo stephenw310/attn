@@ -8,6 +8,7 @@ describe('app settings storage', () => {
   it('returns the documented defaults on a fresh store', () => {
     const db = openDatabase(':memory:')
     expect(readAppSettings(db)).toEqual({
+      palette: 'matcha',
       undoSendDelaySeconds: 5,
       autoAdvanceDirection: 'next',
       launchAtLogin: true,
@@ -61,4 +62,24 @@ describe('app settings storage', () => {
     )
     expect(readAppSettings(db).autoAdvanceDirection).toBe('next')
   })
+})
+
+it('preserves appearance while persisting palettes and rejects invalid values', () => {
+  const db = openDatabase(':memory:')
+  try {
+    db.prepare(
+      "INSERT INTO settings (account_id, key, value) VALUES ('__app__', 'theme', 'dispatch-light')"
+    ).run()
+    for (const palette of ['mist', 'linen', 'dusk', 'matcha']) {
+      expect(writeAppSetting(db, 'palette', palette).palette).toBe(palette)
+      expect(readAppSettings(db).palette).toBe(palette)
+      expect(readSetting(db, 'theme')).toBe('dispatch-light')
+    }
+    expect(() => writeAppSetting(db, 'palette', 'neon')).toThrow('invalid palette')
+    expect(readAppSettings(db).palette).toBe('matcha')
+    db.prepare("INSERT INTO settings (account_id, key, value) VALUES ('__app__', 'palette', 'unknown')").run()
+    expect(readAppSettings(db).palette).toBe('matcha')
+  } finally {
+    db.close()
+  }
 })

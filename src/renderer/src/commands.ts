@@ -170,6 +170,10 @@ export const COMMAND_SPECS = {
     context: 'global',
     allowInComposer: true
   },
+  'palette.matcha': { title: 'Use Matcha color palette', context: 'global', allowInComposer: true },
+  'palette.mist': { title: 'Use Mist color palette', context: 'global', allowInComposer: true },
+  'palette.linen': { title: 'Use Linen color palette', context: 'global', allowInComposer: true },
+  'palette.dusk': { title: 'Use Dusk color palette', context: 'global', allowInComposer: true },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',

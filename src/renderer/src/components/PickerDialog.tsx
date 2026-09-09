@@ -40,7 +40,11 @@ export function PickerDialog({
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
+    const previous = document.activeElement
     inputRef.current?.focus()
+    return () => {
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
   }, [])
 
   return (

@@ -160,11 +160,11 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
   await expect
     .poll(() =>
       rows.evaluateAll((items) => {
-        const borders = items.slice(0, 3).map((item) => getComputedStyle(item).borderLeftColor)
-        return [borders[0] === 'rgba(0, 0, 0, 0)', borders[1] === 'rgba(0, 0, 0, 0)', borders[2]]
+        const markers = items.slice(0, 3).map((item) => getComputedStyle(item).boxShadow)
+        return [markers[0] === 'none', markers[1] === 'none', markers[2].includes('inset')]
       })
     )
-    .toEqual([true, true, 'rgb(255, 178, 36)'])
+    .toEqual([true, true, true])
 
   // Reader Escape always returns to the list; a second list Escape clears selection.
   await page.keyboard.press('k')
