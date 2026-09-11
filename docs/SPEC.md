@@ -67,13 +67,13 @@ Initial sync fetches recent Inbox bodies. Older bodies and attachment bytes down
 
 ### D6. Layout and themes
 
-The default visual direction uses graphite backgrounds, an amber accent, and the `attn:` wordmark. Built-in themes share semantic color tokens.
+The Tide visual direction uses quiet, palette-tinted backgrounds, readable secondary text, and the `attn:` wordmark. Built-in palettes share semantic color tokens. Secondary actions use a subtle hover fill without a resting border. Fields and shortcut keycaps retain visible boundaries.
 
-A 216-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader.
+A 216-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader. The logo hides with the sidebar; there is no compact icon rail. Mailboxes use icons and names. The flat label list uses the same colors as message label chips. Sidebar entries do not display chord hints. Settings and split editing hide the mail sidebar without changing the saved preference.
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
-The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title and Inbox splits share one header row above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
+The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title sits above the Inbox splits without enclosing header borders. The top-bar controls start at the expanded sidebar boundary and stay there when the sidebar closes. Write stays in the top bar outside the sidebar. The sidebar and keyboard-hint toggles sit together. The hint footer uses the page background and boxed keycaps without a contrasting panel. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight and do not show hover tooltips. Each tab fits its label and visible unread count. Zero unread counts reserve no space; tabs resize when counts change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
 Reader, Settings, and new-message headers use one clickable `Esc` close control without a separate Back button.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
@@ -161,7 +161,7 @@ progress; page-level `resultSizeEstimate` is not a mailbox total and must never 
 Contact statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
 never contribute to contacts. While the pass runs, sync status reads **Indexing**.
-Hover or click the status for progress and quota-wait details. Importing a user's saved Google Contacts through the People API remains a
+Click the status for progress and quota-wait details. Importing a user's saved Google Contacts through the People API remains a
 separate opt-in product decision because it adds OAuth scope and consent requirements; autocomplete must not
 imply that the mail-derived index contains an address book the user has never emailed.
 
@@ -205,7 +205,7 @@ their unread counts; the top bar has no unread-progress meter.
 
 Conflict rule: server state wins, except locally-pending actions replay on top of it.
 
-**Sync visibility:** The top bar shows a dot and one label: Live, Checking, Syncing, Indexing, Offline, or Error. Hover or click for progress details. Click Error to read the full message, retry, or copy details. Status remains visible when keyboard hints are hidden.
+**Sync visibility:** The top bar shows a dot and one label: Live, Checking, Syncing, Indexing, Offline, or Error. Click for progress details; the status does not show a hover tooltip. Click Error to read the full message, retry, or copy details. Status remains visible when keyboard hints are hidden.
 
 **Acceptance criteria**
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.
@@ -220,7 +220,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 
 **List ⇄ focused conversation**: the list owns the content region while deciding. Opening a conversation replaces the list with one dedicated reading surface while the navigation sidebar stays put. Closing restores the list at the same selection and scroll position.
 
-**Mailbox and label navigation:** everything this section describes — mailboxes, counts, user labels, splits, the list, and the reader — belongs to the active account (F18); switching accounts swaps it all at once. A left sidebar, expanded by default and completely removable with the persistent top-bar toggle, groups Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash, Outbox, and the account's user labels. Every system row keeps its `G` chord visible beside an exact local conversation total, including zero; large totals use a compact visual label while exposing the exact value. Sidebar count slots keep a fixed width across total changes. The active destination has one stable highlight. System mailboxes remain reachable from the command palette (`Go to …`) and their `G` chords. Label chips and label rows open the same local list view. Important/Other and user-defined splits are queues inside Inbox, not mailbox destinations, so a compact split strip appears above the Inbox list only when splits exist. The ordinary list begins directly below the top bar.
+**Mailbox and label navigation:** everything this section describes — mailboxes, counts, user labels, splits, the list, and the reader — belongs to the active account (F18); switching accounts swaps it all at once. A left sidebar, expanded by default and completely removable with the persistent top-bar toggle, groups Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash, Outbox, and the account's user labels. Every system row keeps its `G` chord visible beside an exact local conversation total, including zero; large totals use a compact visual label while exposing the exact value. The sidebar is 190px wide. Mailbox counts use a right-aligned column with 10px text. The selected destination name and count use semibold text; other counts use regular weight. The Labels heading does not show a catalog total. Each label shows its cached conversation count using the same membership rules as its local view. Counts refresh after local actions and Gmail sync. The active destination has one stable highlight. System mailboxes remain reachable from the command palette (`Go to …`) and their `G` chords. Label chips and label rows open the same local list view. Important/Other and user-defined splits are queues inside Inbox, not mailbox destinations, so a compact split strip appears above the Inbox list only when splits exist. The ordinary list begins directly below the top bar.
 
 - Inbox = `INBOX`; Sent = `SENT`; Drafts = `DRAFT`; Starred = `STARRED`; Spam = `SPAM`; Trash = `TRASH`; Snoozed is the local reminders view from F4. Spam and Trash include a thread when any message carries the matching label. All Mail includes a thread when any message is outside `SPAM` and `TRASH`, including archived mail. A partially trashed thread therefore appears in both All Mail and Trash. Normal and All Mail readers hide spammed messages. They keep each trashed message's chronological position as a compact `This message was moved to Trash. Show message.` marker. `Show message` reveals that message only in the current reader and does not restore it or change its Gmail labels. Spam and Trash readers show only messages from the active mailbox. Draft and legacy `CHAT` messages never render as sent mail.
 - Mailbox and user-label queries run entirely against the local store. Metadata sync extends beyond the current Inbox window so lifetime system and user-label membership is cached; switching a cached destination never waits on Gmail. Bodies still follow F2's on-demand policy.
@@ -565,11 +565,17 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 ### F14 — Themes
 
-Attn ships two palettes: Dark and Light. The default System preference follows the
-OS and resolves to the dark/light pair; selecting a named palette pins it
-regardless of OS changes. Theme choices are available from the account menu and as palette commands. User-
-customizable palettes and accent colors remain post-v1. Every built-in uses D6's semantic token names rather
-than component-level color branches. Saved Midnight preferences resolve to Dark; saved Sand preferences resolve to Light.
+Attn ships Matcha, Mist, Linen, and Dusk color palettes. Matcha is the default for existing and new profiles.
+The app-wide palette preference is independent of System, Light, and Dark appearance. System follows the OS.
+Both preferences persist across restart and account switches. Palette choices appear in Settings, the account menu,
+and command-palette commands. Existing saved appearance preferences remain valid. Saved Midnight resolves to Dark;
+saved Sand resolves to Light. Invalid or absent color palette values resolve to Matcha.
+
+All app text tokens meet normal-text AA contrast on the page, elevated panel, and selection backgrounds.
+Primary actions use the palette accent with a contrasting foreground. Secondary text remains readable in dark mode.
+Message rows show labels as tinted chips, a separate star slot, and a checkmark for Done in All Mail.
+Rows retain state markers for snooze, returned mail, and follow-up alongside labels. Initial loading uses a static
+skeleton with a loading announcement. Cached mail remains usable during sync errors and offline operation.
 
 Scrollbars use narrow, rounded thumbs, transparent tracks, and theme-specific normal and hover colors.
 The same styling covers app panes, controls, and mail frames. Light sender canvases retain light scrollbars.

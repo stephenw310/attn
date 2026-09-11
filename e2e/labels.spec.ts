@@ -9,6 +9,11 @@ test('searches, applies, and undoes a user label', async ({ page }) => {
   const first = page.getByTestId('thread-row').first()
   await expect(first).toContainText('Maya Lin')
   await expect(first.getByTestId('label-chip')).toHaveCount(0)
+  const labelCount = page
+    .getByTestId('sidebar-label')
+    .filter({ hasText: 'projects' })
+    .getByTestId('sidebar-count')
+  const beforeCount = Number(await labelCount.getAttribute('data-count'))
 
   await page.getByTestId('thread-list').click({ position: { x: 1, y: 1 } })
   await page.keyboard.press('l')
@@ -28,11 +33,13 @@ test('searches, applies, and undoes a user label', async ({ page }) => {
   await expect(project).toHaveAttribute('data-state', 'all')
   const projectChip = first.getByTestId('label-chip')
   await expect(projectChip).toHaveText('projects')
+  await expect(labelCount).toHaveAttribute('data-count', String(beforeCount + 1))
   const [chipBox, subjectBox] = await Promise.all([
     projectChip.boundingBox(),
     first.getByTestId('thread-subject').boundingBox()
   ])
-  expect(chipBox?.x).toBeLessThan(subjectBox?.x ?? 0)
+  expect(chipBox?.x).toBeCloseTo(subjectBox?.x ?? 0, 0)
+  expect(chipBox?.y).toBeGreaterThan(subjectBox?.y ?? 0)
   const projectColor = await projectChip.evaluate((element) => getComputedStyle(element).backgroundColor)
   const receiptColor = await page
     .getByTestId('thread-row')
@@ -48,6 +55,7 @@ test('searches, applies, and undoes a user label', async ({ page }) => {
   await page.keyboard.press('z')
   await expect(first.getByTestId('label-chip')).toHaveCount(0)
   await expect(page.getByTestId('pending-count')).toContainText('2 pending')
+  await expect(labelCount).toHaveAttribute('data-count', String(beforeCount))
 })
 
 test('keeps picker typing isolated and opens it over a conversation', async ({ page }, testInfo) => {

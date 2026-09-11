@@ -159,9 +159,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
 
   const body = (
     <>
-      <span className="app-status-dot size-[7px] rounded-full" aria-hidden />
+      <span className="app-status-dot size-[5px] rounded-full" aria-hidden />
       <span
-        className={`whitespace-nowrap text-[11.5px] font-semibold ${
+        className={`whitespace-nowrap text-[11px] font-normal ${
           displayState === 'error' ? 'text-danger' : 'text-ink-dim'
         }`}
       >
@@ -176,7 +176,6 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       data-testid="status-note"
       data-status={displayState}
       className="relative flex min-w-0 flex-none justify-end"
-      data-tooltip={title}
     >
       <span className="sr-only" aria-live="polite">
         {liveAnnouncement}
@@ -197,7 +196,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           type="button"
           aria-expanded={detailsOpen}
           aria-label={`${label}: show sync details`}
-          data-tooltip={title}
+          data-tooltip=""
           onClick={() => setDetailsOpen((open) => !open)}
           data-testid="status-content"
           className="flex h-7 cursor-pointer items-center gap-2"

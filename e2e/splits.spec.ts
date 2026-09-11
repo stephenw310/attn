@@ -415,7 +415,7 @@ test('notification focus owns selection over a queued split restore', async ({ a
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`split header stays fixed across selection and unread changes in ${theme}`, async ({ page }) => {
+  test(`split tabs fit their content and stay fixed across selection in ${theme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme })
     await expect(page.locator('html')).toHaveAttribute('data-theme-appearance', theme)
     await expect(page.getByTestId('split-tab')).toHaveCount(5)
@@ -446,7 +446,10 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByTestId('conversation-view')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(tabs.first().getByTestId('split-unread-count')).toHaveCount(0)
-    expect(await geometry()).toEqual(baseline)
+    const afterRead = await geometry()
+    expect(afterRead[0].width).toBeLessThan(baseline[0].width)
+    expect(afterRead[1].x).toBeLessThan(baseline[1].x)
+    expect(afterRead.map((tab) => tab.height)).toEqual(baseline.map((tab) => tab.height))
     await expect(page.getByTestId('queue-readout')).toHaveCount(0)
     const headerBox = await page.getByTestId('mail-header').boundingBox()
     const accountBox = await page.getByTestId('account-menu').boundingBox()
@@ -465,13 +468,14 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
-test('shares one header row and remembers the hidden status and hint bar', async ({ boot, page }) => {
+test('places splits below the title and remembers the hidden hint bar', async ({ boot, page }) => {
   const header = page.getByTestId('mail-view-header')
   const strip = page.getByTestId('split-strip')
   await expect(strip).toBeVisible()
   const headerBox = await header.boundingBox()
   const stripBox = await strip.boundingBox()
-  expect(stripBox?.y).toBe(headerBox?.y)
+  expect(stripBox?.y).toBeGreaterThan(headerBox?.y ?? 0)
+  await expect(header).toHaveCSS('border-bottom-width', '0px')
   expect(stripBox?.height).toBeLessThanOrEqual(headerBox?.height ?? 0)
   const before = await page.getByTestId('thread-list').boundingBox()
   await page.getByTestId('footer-toggle').click()

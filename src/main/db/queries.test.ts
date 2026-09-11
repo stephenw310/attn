@@ -17,7 +17,8 @@ import {
   listInboxThreads,
   listLabelThreads,
   listMailboxThreads,
-  listSnoozedThreads
+  listSnoozedThreads,
+  listUserLabels
 } from './queries'
 
 /**
@@ -469,6 +470,7 @@ describe('thread list queries', () => {
 
     expect(listLabelThreads(db, 'account', 'Label_2').map((row) => row.id)).toEqual(['newest'])
     expect(listLabelThreads(db, 'account', 'Label_missing')).toEqual([])
+    expect(listUserLabels(db, 'account').find((label) => label.id === 'Label_2')?.threadCount).toBe(1)
   })
 
   it('keeps All Mail scoped to its account when another account needs the slow path', () => {

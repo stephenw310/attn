@@ -50,7 +50,7 @@ import type {
   SplitState,
   SplitThreadLocation
 } from '../shared/splits'
-import { isThemePreference, type ThemePreference } from '../shared/theme'
+import { isThemePreference, normalizePalette, type ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
 
 /** Open composers awaiting a pre-quit checkpoint request (B28). */
@@ -109,6 +109,9 @@ const api = {
   },
   settings: {
     initialTheme,
+    initialPalette: normalizePalette(
+      process.argv.find((argument) => argument.startsWith('--attn-palette='))?.slice('--attn-palette='.length)
+    ),
     setTheme: (preference: ThemePreference): Promise<ThemePreference> =>
       invoke(IPC_CHANNELS.settingsSetTheme, preference),
     getCommandUsage: (accountId: string): Promise<CommandUsage> =>

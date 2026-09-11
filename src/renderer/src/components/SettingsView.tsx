@@ -24,6 +24,7 @@ import { AboutSection } from './AboutSection'
 import { AccountHealthLine } from './AccountHealthLine'
 import { AiSettingsSection } from './AiSettingsSection'
 import { Kbd } from './Kbd'
+import { PalettePicker } from './PalettePicker'
 import { SnippetManager } from './SnippetManager'
 import { ACTION_BUTTON, NOTE, ROW, SECTION_TITLE, SELECT } from './settingsStyles'
 
@@ -657,10 +658,13 @@ export function SettingsView({
 
               <section data-testid="settings-appearance" aria-label="Appearance">
                 <SectionTitle>Appearance</SectionTitle>
+                <PalettePicker />
                 <label className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">Theme</span>
-                    <span className={NOTE}>System follows the OS; a named palette pins it.</span>
+                    <span className={NOTE}>
+                      Applies to all accounts. System follows your device appearance.
+                    </span>
                   </span>
                   <select
                     data-testid="settings-theme"

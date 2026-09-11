@@ -13,6 +13,7 @@
   --color-ink-dim: var(--attn-ink-dim);
   --color-ink-faint: var(--attn-ink-faint);
   --color-accent: var(--attn-accent);
+  --color-on-accent: var(--attn-on-accent);
   --color-star: var(--attn-star);
   --color-danger: var(--attn-danger);
   --color-on-danger: var(--attn-on-danger);
@@ -32,24 +33,24 @@
   --shadow-toast: var(--attn-shadow-toast);
   --shadow-footer: var(--attn-shadow-footer);
   --shadow-composer: var(--attn-shadow-composer);
-  --font-sans:
-    "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter Variable", sans-serif;
 }
 
 @layer base {
   :root {
-    --attn-ground: #101114;
-    --attn-raised: #17181c;
-    --attn-active: #1f2127;
-    --attn-edge: #262931;
-    --attn-ink: #e9eaee;
-    --attn-ink-dim: #9da2ac;
-    --attn-ink-faint: #737985;
-    --attn-accent: #ffb224;
-    --attn-star: #ffb224;
+    --attn-on-accent: #233129;
+    --attn-ground: #222c28;
+    --attn-raised: #303c35;
+    --attn-active: #35483c;
+    --attn-edge: #4d6255;
+    --attn-ink: #e4ece5;
+    --attn-ink-dim: #b3c5b9;
+    --attn-ink-faint: #b3c5b9;
+    --attn-accent: #bed1bd;
+    --attn-star: var(--attn-accent);
     --attn-danger: #e06c75;
     --attn-on-danger: #ffffff;
-    --attn-status-live: #4ade80;
+    --attn-status-live: var(--attn-accent);
     --attn-status-offline: #737985;
     --attn-overlay: rgb(8 9 11 / 72%);
     --attn-mail-link: #60a5fa;
@@ -83,18 +84,19 @@
   }
 
   :root[data-theme="dispatch-light"] {
-    --attn-ground: #f6f4ef;
-    --attn-raised: #ffffff;
-    --attn-active: #ebe7de;
-    --attn-edge: #d8d3c9;
-    --attn-ink: #1c1d21;
-    --attn-ink-dim: #555b66;
-    --attn-ink-faint: #737985;
-    --attn-accent: #925700;
-    --attn-star: #a86100;
+    --attn-on-accent: #f5f8f1;
+    --attn-ground: #f4f7f3;
+    --attn-raised: #edf2eb;
+    --attn-active: #e5ede3;
+    --attn-edge: #b9c9ba;
+    --attn-ink: #2d3b34;
+    --attn-ink-dim: #53695c;
+    --attn-ink-faint: #53695c;
+    --attn-accent: #4f6b58;
+    --attn-star: var(--attn-accent);
     --attn-danger: #b42318;
     --attn-on-danger: #ffffff;
-    --attn-status-live: #167647;
+    --attn-status-live: var(--attn-accent);
     --attn-status-offline: #68707d;
     --attn-overlay: rgb(45 40 32 / 38%);
     --attn-mail-link: #1a5fb4;
@@ -127,6 +129,78 @@
     color-scheme: light;
   }
 
+  :root[data-palette="mist"][data-theme-appearance="dark"] {
+    --attn-ground: #242d33;
+    --attn-raised: #313e47;
+    --attn-active: #384b57;
+    --attn-edge: #566c7b;
+    --attn-ink: #e6edf2;
+    --attn-ink-dim: #b7c8d4;
+    --attn-ink-faint: #b7c8d4;
+    --attn-accent: #b8d0df;
+    --attn-on-accent: #23323e;
+  }
+
+  :root[data-palette="mist"][data-theme-appearance="light"] {
+    --attn-ground: #f3f6f8;
+    --attn-raised: #eaf0f4;
+    --attn-active: #e1eaf0;
+    --attn-edge: #b4c5d0;
+    --attn-ink: #2c3a44;
+    --attn-ink-dim: #526b7b;
+    --attn-ink-faint: #526b7b;
+    --attn-accent: #4b697d;
+    --attn-on-accent: #f6f9fc;
+  }
+
+  :root[data-palette="linen"][data-theme-appearance="dark"] {
+    --attn-ground: #302c26;
+    --attn-raised: #403a30;
+    --attn-active: #4a4135;
+    --attn-edge: #726450;
+    --attn-ink: #f1eadf;
+    --attn-ink-dim: #d0c3af;
+    --attn-ink-faint: #d0c3af;
+    --attn-accent: #d7c7ab;
+    --attn-on-accent: #332c22;
+  }
+
+  :root[data-palette="linen"][data-theme-appearance="light"] {
+    --attn-ground: #f8f6f1;
+    --attn-raised: #f1ece2;
+    --attn-active: #ece5d9;
+    --attn-edge: #cfc1a9;
+    --attn-ink: #403a30;
+    --attn-ink-dim: #71624e;
+    --attn-ink-faint: #71624e;
+    --attn-accent: #756347;
+    --attn-on-accent: #fffaf0;
+  }
+
+  :root[data-palette="dusk"][data-theme-appearance="dark"] {
+    --attn-ground: #302931;
+    --attn-raised: #403542;
+    --attn-active: #4a3e4c;
+    --attn-edge: #725d76;
+    --attn-ink: #efe6f0;
+    --attn-ink-dim: #cebdcf;
+    --attn-ink-faint: #cebdcf;
+    --attn-accent: #d5bfd6;
+    --attn-on-accent: #342a36;
+  }
+
+  :root[data-palette="dusk"][data-theme-appearance="light"] {
+    --attn-ground: #f7f4f7;
+    --attn-raised: #f0eaf1;
+    --attn-active: #ebe3ed;
+    --attn-edge: #ccbbce;
+    --attn-ink: #403543;
+    --attn-ink-dim: #746078;
+    --attn-ink-faint: #746078;
+    --attn-accent: #785c7b;
+    --attn-on-accent: #fcf6fc;
+  }
+
   html,
   body,
   #root {
@@ -143,7 +217,7 @@
   }
 
   :focus-visible {
-    outline: 1px solid var(--color-accent);
+    outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
 }
@@ -279,7 +353,8 @@
 
 .app-thread-sender,
 .app-thread-subject {
-  color: var(--color-ink-dim);
+  color: var(--color-ink);
+  font-weight: 400;
 }
 
 .app-thread-time {
@@ -287,12 +362,11 @@
 }
 
 .app-thread-star {
-  display: none;
+  visibility: hidden;
 }
 
 [data-unread="true"] .app-thread-unread-dot {
   background: var(--color-accent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
 [data-unread="true"] .app-thread-sender,
@@ -302,12 +376,12 @@
 }
 
 [data-unread="true"] .app-thread-time {
-  color: var(--color-accent);
+  color: var(--color-ink-dim);
   font-weight: 500;
 }
 
 [data-starred="true"] .app-thread-star {
-  display: inline;
+  visibility: visible;
 }
 
 .app-composer-paragraph {
@@ -420,7 +494,7 @@
 }
 
 .gmail_signature[data-attn-signature-collapsed="true"]:focus-visible::before {
-  outline: 1px solid var(--color-accent);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -536,4 +610,181 @@
     width: 55%;
     background: var(--color-accent);
   }
+}
+
+/* Shared Tide controls. Resting secondary actions stay quiet; focus is explicit. */
+.app-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--attn-ink-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.app-button:hover:not(:disabled) {
+  background: var(--attn-active);
+  color: var(--attn-ink);
+}
+.app-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.app-button-primary {
+  background: var(--attn-accent);
+  color: var(--attn-on-accent);
+}
+.app-button-primary:hover:not(:disabled) {
+  background: var(--attn-accent);
+  color: var(--attn-on-accent);
+  filter: brightness(0.95);
+}
+.app-field {
+  border: 1px solid var(--attn-edge);
+  border-radius: 5px;
+  padding: 6px 9px;
+  background: var(--attn-ground);
+  color: var(--attn-ink);
+  font-size: 12px;
+}
+.app-keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 3px 5px;
+  border: 1px solid color-mix(in srgb, var(--attn-edge) 50%, var(--attn-ground));
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--attn-active) 60%, var(--attn-ground));
+  color: var(--attn-ink);
+  font: 400 10px / 1 var(--font-sans);
+  letter-spacing: 0;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.app-keycap-compact {
+  padding-inline: 4px;
+}
+.app-preference-error {
+  position: fixed;
+  bottom: 55px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--attn-raised);
+  border: 1px solid var(--attn-edge);
+  border-radius: 9px;
+  padding: 12px 18px;
+  box-shadow: var(--attn-shadow-toast);
+}
+.app-mail-content {
+  padding-inline: clamp(18px, 3vw, 44px);
+}
+.app-inbox-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  padding-top: 28px;
+  padding-bottom: 12px;
+}
+.app-inbox-header h1 {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.6px;
+}
+.app-inbox-header [data-testid="split-strip"] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.app-thread-row {
+  height: 54px;
+  border-radius: 5px;
+  padding-inline: 12px;
+}
+.app-thread-row:hover {
+  background: color-mix(in srgb, var(--attn-active) 55%, transparent);
+}
+.app-thread-row[data-selected="true"],
+.app-thread-row[data-checked="true"] {
+  background: var(--attn-active);
+}
+.app-thread-sender {
+  width: clamp(125px, 16vw, 200px);
+  font-size: 13px;
+}
+.app-thread-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  font-size: 13px;
+}
+.app-thread-preview {
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--attn-ink-dim);
+}
+.app-thread-subject-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+.app-thread-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-thread-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--attn-ink-dim);
+}
+.app-label-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.app-mail-header {
+  padding-left: max(190px, calc(env(titlebar-area-x, 0px) + 0.75rem));
+  height: 56px;
+  gap: 8px;
+}
+.app-mail-header .app-write {
+  margin-left: 12px;
+}
+@media (max-width: 1000px) {
+  .app-thread-row {
+    gap: 8px;
+  }
+  .app-thread-sender {
+    width: 120px;
+  }
+  .app-thread-status {
+    max-width: 145px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.app-thread-row[data-selected="true"][data-checked="true"] {
+  background: color-mix(in srgb, var(--attn-active) 85%, var(--attn-accent));
 }

@@ -10,17 +10,7 @@ import { formatShortcutKey } from '../platform'
 import { Kbd } from './Kbd'
 
 function Shortcut({ shortcut }: { shortcut: string }): React.JSX.Element {
-  const parts = shortcut.split('+')
-  return (
-    <span className="flex items-center gap-0.5">
-      {parts.map((part, index) => (
-        <span key={part} className="contents">
-          {index > 0 && <span aria-hidden>+</span>}
-          <Kbd>{formatShortcutKey(part)}</Kbd>
-        </span>
-      ))}
-    </span>
-  )
+  return <Kbd>{shortcut.split('+').map(formatShortcutKey).join(' ')}</Kbd>
 }
 
 function FooterShortcut({
@@ -37,10 +27,9 @@ function FooterShortcut({
       data-testid={`footer-shortcut-${id}`}
       className="flex flex-none items-center gap-1.5 whitespace-nowrap text-ink-dim"
     >
-      <span className="flex items-center gap-0.5">
-        {shortcuts.map((shortcut, index) => (
+      <span className="flex items-center gap-1.5">
+        {shortcuts.map((shortcut) => (
           <span key={shortcut} className="contents">
-            {index > 0 && <span aria-hidden>/</span>}
             <Shortcut shortcut={shortcut} />
           </span>
         ))}
@@ -76,6 +65,7 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
 }
 
 interface MailFooterProps {
+  onOpenShortcuts?: () => void
   context: FooterContext
   pendingChord: string | null
 }
@@ -88,7 +78,7 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
     <footer
       id="mail-footer"
       data-testid="mail-footer"
-      className="relative z-40 flex min-h-11 flex-none items-center gap-4 border-t border-edge bg-raised px-6 py-1.5 text-xs text-ink-faint shadow-footer"
+      className="relative z-40 flex min-h-11 flex-none items-center gap-4 bg-ground px-6 py-1.5 text-[11px] text-ink-dim"
     >
       <div
         key={`${context}:${pendingChord ?? 'default'}`}
@@ -101,6 +91,16 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
           hints.map((hint) => <FooterShortcut key={hint.id} {...hint} />)
         )}
       </div>
+      {!pendingChord && (
+        <button
+          type="button"
+          onClick={props.onOpenShortcuts}
+          className="flex flex-none cursor-pointer items-center gap-1.5 text-[11px] text-ink-dim hover:text-ink"
+          data-testid="footer-all-shortcuts"
+        >
+          All shortcuts <Shortcut shortcut="Mod+/" />
+        </button>
+      )}
     </footer>
   )
 }

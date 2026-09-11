@@ -252,7 +252,7 @@ test('keeps HTML fallbacks readable and never collapses an all-quote message', a
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   const fallback = page.getByTestId('plain-text-body')
   await expect(fallback).toHaveText('I found three routes for the conference.')
-  await expect(fallback).toHaveCSS('color', 'rgb(233, 234, 238)')
+  await expect(fallback).toHaveCSS('color', 'rgb(228, 236, 229)')
   await expect(fallback).toHaveCSS('padding-left', '0px')
 })
 

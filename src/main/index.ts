@@ -13,7 +13,7 @@ import {
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { AppSettingUpdate } from '../shared/settings'
-import type { ThemePreference } from '../shared/theme'
+import type { PaletteId, ThemePreference } from '../shared/theme'
 import { AccountRoster } from './accountRoster'
 import { AiKeyStore } from './ai/keyStore'
 import { AiManager } from './ai/manager'
@@ -69,6 +69,7 @@ let pendingFocus: PendingFocus | null = null
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
+let palettePreference: PaletteId = 'matcha'
 // The OAuth client from oauth.config.json, loaded at boot and on sign-in.
 let oauthConfig: OAuthConfig | null = null
 // T33: the live remote-image policy (pushed by the utility) and the reader's
@@ -207,7 +208,11 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      additionalArguments: [`--attn-theme=${themePreference}`, ...(testUserData ? ['--attn-test-mode'] : [])]
+      additionalArguments: [
+        `--attn-theme=${themePreference}`,
+        `--attn-palette=${palettePreference}`,
+        ...(testUserData ? ['--attn-test-mode'] : [])
+      ]
     }
   })
   // T33 enforcement point: the same request layer that strips CORP below.
@@ -376,6 +381,7 @@ async function initialize(): Promise<void> {
   console.log(`[db] open at ${join(userDataPath, 'attn.db')} (schema v${ready.schemaVersion})`)
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
+  palettePreference = (await ownedService.invoke(IPC_CHANNELS.settingsGetAll)).palette
   nativeTheme.on('updated', handleNativeThemeUpdated)
   const backgroundEffects: BackgroundEffects = {
     markLoginItemRegistered: () =>
@@ -388,6 +394,7 @@ async function initialize(): Promise<void> {
       })
   }
   const applySettingEffects = (update: AppSettingUpdate): void => {
+    if (update.key === 'palette') palettePreference = update.value
     // Storage already happened in the utility; these are the OS-side effects
     // main owns (F15). The login item updates on every change, deliberately
     // bypassing the one-time boot registration guard.

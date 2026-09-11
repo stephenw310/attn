@@ -24,13 +24,13 @@ export function Toast({
         className="pointer-events-none fixed bottom-14 left-1/2 z-50 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2"
       >
         <div
-          className="app-confirmation-toast min-w-56 max-w-full overflow-hidden rounded-xl border border-ground/70 bg-ink text-base font-semibold text-ground shadow-toast"
+          className="app-confirmation-toast min-w-56 max-w-full overflow-hidden rounded-[9px] border border-edge bg-raised text-xs text-ink shadow-toast"
           style={timingStyle}
         >
           <div className="break-words px-5 py-3 text-center">{toast.message}</div>
           {toast.countdown ? (
             <div data-testid="toast-countdown" className="h-1 bg-ground/25" aria-hidden="true">
-              <div className="app-toast-countdown h-full bg-ground" style={timingStyle} />
+              <div className="app-toast-countdown h-full bg-accent" style={timingStyle} />
             </div>
           ) : null}
         </div>
@@ -49,7 +49,7 @@ export function Toast({
       data-testid="toast"
       className="pointer-events-none fixed bottom-14 left-1/2 z-50 -translate-x-1/2"
     >
-      <div className="min-w-64 overflow-hidden rounded-xl border border-ground/70 bg-ink text-ground shadow-toast">
+      <div className="min-w-64 overflow-hidden rounded-[9px] border border-edge bg-raised text-ink shadow-toast">
         <div className="px-5 py-3 text-sm font-semibold">
           {`Sending attachments… ${progress.completedAttachments} of ${progress.totalAttachments}`}
         </div>

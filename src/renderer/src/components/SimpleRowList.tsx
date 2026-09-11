@@ -82,8 +82,8 @@ export function SimpleRowList<T>({
         data-testid={rowTestId}
         {...rowData(row)}
         data-selected={selectionShown || undefined}
-        className={`flex cursor-default select-none items-center gap-4 border-l-[3px] py-3 pr-7 pl-5 ${
-          selectionShown ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
+        className={`flex min-h-[66px] cursor-default select-none items-center gap-4 rounded-md py-3 px-3 ${
+          selectionShown ? 'bg-active' : 'hover:bg-active/50'
         }`}
         onClick={() => onOpen(index)}
       >
