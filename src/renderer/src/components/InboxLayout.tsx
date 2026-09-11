@@ -262,6 +262,8 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
           threadCountExact={c.conversationThreadCountExact}
           mailboxTitle={c.searchOpen ? 'Search' : c.activeViewTitle}
           conversation={c.conversation}
+          labels={c.labels}
+          onOpenLabel={c.openLabelView}
           account={c.activeAccount}
           online={c.online}
           scrollRef={c.conversationScrollRef}

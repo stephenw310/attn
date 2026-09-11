@@ -45,7 +45,6 @@ function hasGmailSignature(html: string): boolean {
 
 export function useComposerController({
   draft,
-  mode,
   initialError,
   onClose,
   onExit,
@@ -187,13 +186,12 @@ export function useComposerController({
         return true
       }
       if (event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-        const close = mode === 'inline' ? closeAndExit : closeAndSave
-        close()
+        closeAndSave()
         return true
       }
       return false
     },
-    [closeAndExit, closeAndSave, mode]
+    [closeAndSave]
   )
   useImperativeHandle(ref, () => ({ exitConversation: closeAndExit }), [closeAndExit])
 

@@ -111,7 +111,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     removeLastAttachment,
     visibleAttachments,
     closeAndSave,
-    closeAndExit,
     runComposerKey,
     send,
     discard
@@ -130,7 +129,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? 'flex w-full flex-none flex-col rounded-[10px] border border-edge bg-raised'
+          ? 'app-inline-composer flex w-full flex-none flex-col border-y border-edge bg-raised/20'
           : 'flex min-h-0 flex-1 flex-col bg-raised/35 px-6 pb-6'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}
@@ -181,7 +180,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <div
         className={
           mode === 'inline'
-            ? 'flex w-full flex-col rounded-b-[10px]'
+            ? 'flex w-full flex-col'
             : 'mx-auto mt-3 flex min-h-0 w-full max-w-[900px] flex-1 flex-col rounded-xl border border-edge bg-raised shadow-composer'
         }
       >
@@ -255,7 +254,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <ComposerCommandPlugin
                   onAttach={pickAttachments}
                   onRemoveAttachment={removeLastAttachment}
-                  onClose={mode === 'inline' ? closeAndExit : closeAndSave}
+                  onClose={closeAndSave}
                   onDiscard={discard}
                   onSend={send}
                   onFollowUp={openFollowUp}

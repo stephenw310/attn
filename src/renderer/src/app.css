@@ -788,3 +788,36 @@
 .app-thread-row[data-selected="true"][data-checked="true"] {
   background: color-mix(in srgb, var(--attn-active) 85%, var(--attn-accent));
 }
+
+/* Inline replies share the received message's text edge. */
+.app-inline-composer [data-testid="composer-inline-header"] {
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-save-status"] {
+  margin-left: auto;
+}
+.app-inline-composer [data-testid="composer-editor"] {
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-from"] {
+  min-height: 28px;
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-from"] span {
+  font-size: 11px;
+}
+.app-inline-composer [data-testid="composer-to"],
+.app-inline-composer [data-testid="composer-cc"],
+.app-inline-composer [data-testid="composer-bcc"],
+.app-inline-composer [data-testid="composer-footer"] {
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-to"]::after,
+.app-inline-composer [data-testid="composer-cc"]::after,
+.app-inline-composer [data-testid="composer-bcc"]::after {
+  border: 0;
+}
+[data-testid="conversation-message"]:has(+ [data-testid="conversation-latest-item"])
+  [data-testid="message-card"] {
+  border-bottom: 0;
+}
