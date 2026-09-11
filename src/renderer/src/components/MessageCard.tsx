@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { normalizeEmailKey } from '../../../shared/address'
+import type { DraftKind } from '../../../shared/drafts'
 import type { MailAddress, MessageAttachment, MessageRecipients } from '../../../shared/mail'
 import { formatBytes } from '../formatBytes'
 import type { DisplayMessage } from '../list/mailDisplay'
@@ -7,6 +8,27 @@ import { MessageBody } from '../MessageBody'
 import { mailReadingForHtml } from '../mailReading'
 import { useTheme } from '../theme'
 import { useShowToast } from '../toastContext'
+import { Button } from './Button'
+import { MailIcon } from './MailIcon'
+
+function MessageAvatar({ name, active }: { name: string; active: boolean }): React.JSX.Element {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+  return (
+    <span
+      data-testid="message-avatar"
+      aria-hidden
+      className={`flex size-7 items-center justify-center rounded-full border text-[10px] font-normal text-ink-dim ${active ? 'border-accent bg-ground' : 'border-transparent bg-active'}`}
+    >
+      {initials}
+    </span>
+  )
+}
 
 function firstName(address: MailAddress, account: string | null): string {
   if (account && normalizeEmailKey(address.email) === normalizeEmailKey(account)) return 'me'
@@ -53,14 +75,14 @@ function RecipientLine({
           setOpen((value) => !value)
           event.currentTarget.blur()
         }}
-        className="block max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-xs text-ink-faint hover:text-ink-dim"
+        className="block max-w-full cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-left text-[10px] text-ink-dim hover:text-ink"
       >
         {recipientSummary(message.recipients, account)} <span aria-hidden>▾</span>
       </button>
       {open && (
         <div
           data-testid="recipient-details"
-          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-edge bg-active/60 p-3 text-xs text-ink-faint"
+          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-l border-edge py-2 pl-3 text-xs text-ink-dim"
         >
           {groups
             .filter((group) => group.addresses.length > 0)
@@ -88,6 +110,7 @@ interface MessageCardProps {
   trimExpanded?: boolean
   onToggleTrim: () => void
   bodyHydrationMessage?: string
+  onReply?: (kind: Exclude<DraftKind, 'new'>) => void
 }
 
 export function MessageCard(props: MessageCardProps): React.JSX.Element {
@@ -100,7 +123,8 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     onToggleCollapsed,
     trimExpanded = false,
     onToggleTrim,
-    bodyHydrationMessage
+    bodyHydrationMessage,
+    onReply
   } = props
   const onToast = useShowToast()
   const { appearance } = useTheme()
@@ -144,25 +168,26 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className={`border border-edge ${active ? 'rounded-sm bg-active' : 'rounded-sm bg-ground'}`}
       >
         <button
           type="button"
           data-testid="older-message-toggle"
+          data-tooltip=""
           aria-expanded="false"
           aria-label={`Expand older message from ${message.fromName}`}
           onClick={(event) => {
             onToggleCollapsed?.()
             event.currentTarget.blur()
           }}
-          className="grid w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-5 py-3 text-left hover:bg-active/50"
+          className="grid w-full cursor-pointer grid-cols-[28px_minmax(70px,100px)_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-4 text-left hover:bg-active/50"
         >
-          <span className="min-w-0 font-semibold">{message.fromName}</span>
+          <MessageAvatar name={message.fromName} active={active} />
+          <span className="min-w-0 truncate text-xs font-medium">{message.fromName}</span>
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
             {message.text || 'HTML message'}
           </span>
           <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
-            {visibleAttachments.length > 0 && <span title="Has attachment">📎</span>}
+            {visibleAttachments.length > 0 && <MailIcon name="attachment" />}
             {message.at}
             <span aria-hidden>▾</span>
           </span>
@@ -176,25 +201,23 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className={`border border-edge px-5 py-4 ${active ? 'rounded-[10px] bg-active/50' : 'rounded-[10px] bg-ground'}`}
+      className="px-3 py-4"
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
       <div
         data-testid="message-header"
-        className="mb-3 grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2.5"
+        className="mb-4 grid cursor-pointer grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3"
         onClick={(event) => {
           const target = event.target
           if (target instanceof Element && target.closest('button, a')) return
           onToggleCollapsed?.()
         }}
       >
+        <MessageAvatar name={message.fromName} active={active} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2.5">
-            <span className="font-semibold">{message.fromName}</span>
-            <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
-              &lt;{message.fromEmail}&gt;
-            </span>
+            <span className="truncate text-xs font-medium">{message.fromName}</span>
           </div>
         </div>
         <span className="flex flex-none items-center gap-2 text-xs text-ink-faint tabular-nums">
@@ -203,6 +226,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             <button
               type="button"
               data-testid="older-message-toggle"
+              data-tooltip=""
               aria-expanded="true"
               aria-label={`Collapse older message from ${message.fromName}`}
               onClick={(event) => {
@@ -215,7 +239,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             </button>
           )}
         </span>
-        <div className="col-span-2 min-w-0">
+        <div className="col-start-2 col-span-2 min-w-0">
           <RecipientLine message={message} account={account} />
         </div>
         {message.html && detectedPresentation.surface === 'native' && appearance === 'dark' && (
@@ -226,7 +250,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
               setViewOriginal((current) => !current)
               event.currentTarget.blur()
             }}
-            className="col-span-2 mt-1 w-fit cursor-pointer text-[11px] text-ink-faint hover:text-ink-dim hover:underline"
+            className="col-start-2 col-span-2 mt-1 w-fit cursor-pointer text-[11px] text-ink-faint hover:text-ink-dim hover:underline"
           >
             {viewOriginal ? 'Use dark view' : 'View original'}
           </button>
@@ -234,7 +258,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       </div>
       <div
         data-testid="message-content"
-        className={`min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
+        className={`ml-10 min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
       >
         <MessageBody
           bodyText={message.text}
@@ -273,15 +297,15 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
                     download(attachment)
                     event.currentTarget.blur()
                   }}
-                  className={`cursor-pointer rounded-lg border px-3 py-2 text-left text-xs ${
+                  className={`inline-flex items-center cursor-pointer rounded border px-3 py-2 text-left text-xs ${
                     htmlSurface
                       ? 'border-mail-light-edge bg-mail-light-raised text-mail-light-ink-dim hover:border-mail-light-edge-hover hover:text-mail-light-ink'
-                      : 'border-edge bg-active text-ink-dim hover:border-accent hover:text-ink'
+                      : 'border-edge bg-transparent text-ink-dim hover:border-accent hover:text-ink'
                   }`}
                   title={`Download ${attachment.filename}`}
                 >
                   <span className="mr-2" aria-hidden>
-                    📎
+                    <MailIcon name="attachment" />
                   </span>
                   <span className="font-medium">{attachment.filename}</span>
                   <span
@@ -295,6 +319,19 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
           </div>
         )}
       </div>
+      {onReply && !message.pending && (
+        <div data-testid="message-actions" className="ml-10 mt-3 flex items-center gap-3">
+          <Button data-tooltip="Reply (R)" onClick={() => onReply('reply')}>
+            Reply
+          </Button>
+          <Button data-tooltip="Reply all (A)" onClick={() => onReply('replyAll')}>
+            Reply all
+          </Button>
+          <Button data-tooltip="Forward (F)" onClick={() => onReply('forward')}>
+            Forward
+          </Button>
+        </div>
+      )}
     </article>
   )
 }

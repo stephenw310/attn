@@ -330,6 +330,20 @@
   }
 }
 
+@keyframes thread-group-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.app-thread-group-exit {
+  animation: thread-group-exit 520ms ease-out forwards;
+  pointer-events: none;
+}
+
 .app-thread-position-shift {
   transition: top 520ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -586,7 +600,8 @@
     animation: none;
   }
 
-  .app-thread-exit {
+  .app-thread-exit,
+  .app-thread-group-exit {
     animation: none;
   }
 
@@ -787,4 +802,33 @@
 
 .app-thread-row[data-selected="true"][data-checked="true"] {
   background: color-mix(in srgb, var(--attn-active) 85%, var(--attn-accent));
+}
+
+/* Inline replies share the received message's text edge. */
+.app-inline-composer [data-testid="composer-inline-header"] {
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-save-status"] {
+  margin-left: auto;
+}
+.app-inline-composer [data-testid="composer-editor"] {
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-from"] {
+  min-height: 28px;
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-from"] span {
+  font-size: 11px;
+}
+.app-inline-composer [data-testid="composer-to"],
+.app-inline-composer [data-testid="composer-cc"],
+.app-inline-composer [data-testid="composer-bcc"],
+.app-inline-composer [data-testid="composer-footer"] {
+  padding-inline: 0;
+}
+.app-inline-composer [data-testid="composer-to"]::after,
+.app-inline-composer [data-testid="composer-cc"]::after,
+.app-inline-composer [data-testid="composer-bcc"]::after {
+  border: 0;
 }

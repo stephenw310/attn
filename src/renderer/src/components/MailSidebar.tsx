@@ -1,4 +1,5 @@
 import type { MailboxView, MailLabel, SystemMailboxCounts } from '../../../shared/mail'
+import { COMMAND_SPECS } from '../commands'
 import { labelColor } from '../list/labelColor'
 import {
   type MailView,
@@ -32,6 +33,7 @@ function NavButton({
   title,
   icon,
   count,
+  shortcut,
   testId,
   onClick
 }: {
@@ -39,6 +41,7 @@ function NavButton({
   title: string
   icon: React.ReactNode
   count?: number | null
+  shortcut?: string
   testId: string
   onClick: () => void
 }): React.JSX.Element {
@@ -47,6 +50,7 @@ function NavButton({
       type="button"
       data-testid={testId}
       data-active={active || undefined}
+      data-tooltip={shortcut ? `${title} (${shortcut.toUpperCase()})` : undefined}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
       className={`group flex min-h-8 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-[12px] ${active ? 'bg-active font-semibold text-ink' : 'text-ink-dim hover:bg-active hover:text-ink'}`}
@@ -104,6 +108,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
             key={item}
             active={view === item}
             title={VIEW_TITLES[item]}
+            shortcut={COMMAND_SPECS[`view.${item}`].shortcut}
             icon={<MailIcon name={item} />}
             count={item === 'drafts' ? draftCount : mailboxCounts?.[item]}
             testId="sidebar-mailbox"
@@ -113,6 +118,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
         <NavButton
           active={view === 'outbox'}
           title="Outbox"
+          shortcut={COMMAND_SPECS['view.outbox'].shortcut}
           icon={<MailIcon name="outbox" />}
           count={outboxCount}
           testId="sidebar-outbox"

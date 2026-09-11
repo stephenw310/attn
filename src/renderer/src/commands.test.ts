@@ -411,9 +411,9 @@ describe('keyboard dispatch', () => {
       createCommand('conversation.close', () => {})
     ])
     expect(listFooterHints('reader')).toEqual([
-      { id: 'reply', label: 'reply', order: 10, shortcuts: ['r'] },
-      { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] },
-      { id: 'forward', label: 'forward', order: 12, shortcuts: ['f'] },
+      { id: 'reply', label: 'Reply', order: 10, shortcuts: ['r'] },
+      { id: 'reply-all', label: 'Reply all', order: 11, shortcuts: ['a'] },
+      { id: 'forward', label: 'Forward', order: 12, shortcuts: ['f'] },
       { id: 'done', label: 'done', order: 20, shortcuts: ['e'] },
       { id: 'snooze', label: 'snooze', order: 30, shortcuts: ['h'] },
       { id: 'move', label: 'move', order: 40, shortcuts: ['v'] },

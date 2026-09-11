@@ -98,6 +98,21 @@ test('animates a marked-done row before removing it', async ({ page }) => {
   await expect(page.getByTestId('toast')).not.toHaveAttribute('data-toast-id', firstToastId ?? '')
 })
 
+test('an empty date group fades without sliding with its mail rows', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  for (let index = 1; index < 8; index++) await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('8 selected')
+  await page.keyboard.press('e')
+  const heading = page.getByTestId('thread-date-group').first()
+  await expect(heading).toHaveCSS('animation-name', 'thread-group-exit')
+  await expect(heading).toHaveCSS('transform', 'none')
+  await expect(rows.first()).toHaveCSS('animation-name', 'thread-exit')
+  await expect(rows).toHaveCount(0)
+  await expect(page.getByTestId('thread-date-group')).toHaveCount(0)
+})
+
 test('does not drop rapid archives or an undo during the exit animation', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)

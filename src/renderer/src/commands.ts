@@ -77,9 +77,25 @@ export const COMMAND_SPECS = {
     context: 'reader',
     footer: { reader: { id: 'back', label: 'back to list', order: 60 } }
   },
-  'message.next': { title: 'Next message in conversation', shortcut: 'n', context: 'reader' },
-  'message.previous': { title: 'Previous message in conversation', shortcut: 'p', context: 'reader' },
-  'message.toggle': { title: 'Expand or collapse message', shortcut: 'o', context: 'reader' },
+  'message.next': {
+    title: 'Next message in conversation',
+    shortcut: 'n',
+    context: 'reader',
+    footer: { reader: { id: 'message-navigation', label: 'Messages', order: 0 } }
+  },
+  'message.previous': {
+    title: 'Previous message in conversation',
+    shortcut: 'p',
+    context: 'reader',
+    footer: { reader: { id: 'message-navigation', label: 'Messages', order: 0 } }
+  },
+  'message.toggleAll': { title: 'Expand or collapse all messages', context: 'reader' },
+  'message.toggle': {
+    title: 'Expand or collapse message',
+    shortcut: 'o',
+    context: 'reader',
+    footer: { reader: { id: 'message-toggle', label: 'Expand / collapse', order: 5 } }
+  },
   'message.openOrReplyAll': { title: 'Open message or reply all', shortcut: 'Enter', context: 'reader' },
   'message.trim.toggle': { title: 'Show or hide trimmed message content', context: 'reader' },
   'sync.retry': { title: 'Retry mail sync', context: 'global', allowInComposer: true },
@@ -283,7 +299,7 @@ export const COMMAND_SPECS = {
     title: 'Reply',
     shortcut: 'r',
     context: 'reader',
-    footer: { reader: { id: 'reply', label: 'reply', order: 10 } }
+    footer: { reader: { id: 'reply', label: 'Reply', order: 10 } }
   },
   'message.reply': {
     title: 'Reply to this message',
@@ -301,13 +317,13 @@ export const COMMAND_SPECS = {
     title: 'Reply all',
     shortcut: 'a',
     context: 'reader',
-    footer: { reader: { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] } }
+    footer: { reader: { id: 'reply-all', label: 'Reply all', order: 11, shortcuts: ['a'] } }
   },
   'composer.forward': {
     title: 'Forward',
     shortcut: 'f',
     context: 'reader',
-    footer: { reader: { id: 'forward', label: 'forward', order: 12 } }
+    footer: { reader: { id: 'forward', label: 'Forward', order: 12 } }
   },
   'composer.close': {
     title: 'Save and close draft',

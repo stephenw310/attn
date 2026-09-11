@@ -107,7 +107,7 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(cards.first()).toHaveAttribute('data-collapsed', 'false')
   const headerWidth = await cards
     .first()
-    .getByTestId('message-header')
+    .getByTestId('message-content')
     .evaluate((element) => {
       return element.getBoundingClientRect().width
     })

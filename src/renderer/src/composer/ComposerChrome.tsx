@@ -1,5 +1,6 @@
 import type { MailAddress } from '../../../shared/address'
 import type { Draft, DraftSaveInput } from '../../../shared/drafts'
+import { Button } from '../components/Button'
 import { Kbd } from '../components/Kbd'
 import { modKeyLabel } from '../platform'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
@@ -55,18 +56,25 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
       }`}
       data-testid={mode === 'inline' ? 'composer-inline-header' : undefined}
     >
-      {mode === 'inline' && (
-        <span className="flex size-7 flex-none items-center justify-center rounded-full bg-accent/10 text-sm text-accent">
-          {draft.kind === 'forward' ? '↪' : '↩'}
-        </span>
-      )}
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {mode === 'full' && <span className="h-2 w-2 rounded-full bg-accent" />}
         <h1 className={`${mode === 'inline' ? 'text-sm' : 'text-base'} font-bold tracking-tight text-ink`}>
-          {composerTitle(draft.kind)}
+          {mode === 'inline'
+            ? draft.kind === 'forward'
+              ? 'Forward draft'
+              : 'Reply draft'
+            : composerTitle(draft.kind)}
         </h1>
+        {mode === 'inline' && (
+          <span
+            data-testid="composer-not-sent"
+            className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-normal text-accent"
+          >
+            Not sent
+          </span>
+        )}
         <span
-          className="text-[11px] text-ink-faint"
+          className="text-[11px] text-ink-dim"
           data-testid="composer-save-status"
           data-local-revision={props.localRevision}
           data-saved-revision={props.savedRevision}
@@ -101,16 +109,15 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
             </button>
           </span>
         ) : (
-          <button
-            type="button"
-            className="flex size-7 items-center justify-center rounded-md text-lg text-ink-faint hover:bg-active hover:text-ink"
+          <Button
             data-testid="composer-close"
             aria-label="Save and close draft"
-            data-tooltip="Save draft and close reply"
+            data-tooltip=""
+            disabled={props.attaching || props.closing}
             onClick={props.closeAndSave}
           >
-            ×
-          </button>
+            Save &amp; close <Kbd>Esc</Kbd>
+          </Button>
         )}
       </div>
     </header>

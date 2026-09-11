@@ -272,8 +272,8 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
   await expect(page.getByTestId('plain-text-body')).toHaveCount(1)
   await expect(page.getByTestId('message-card').first()).toHaveAttribute('data-collapsed', 'true')
-  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-left', '20px')
-  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-right', '20px')
+  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-left', '12px')
+  await expect(page.getByTestId('message-card').last()).toHaveCSS('padding-right', '12px')
   await expect(page.getByTestId('plain-text-body').last().getByTestId('plain-text-visible')).toHaveText(
     'I added the launch milestones and owner notes.'
   )

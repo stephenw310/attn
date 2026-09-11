@@ -10,12 +10,17 @@ test('separates native, centered, and full-bleed sender canvases', async ({ page
 
   await page.getByTestId('thread-row').filter({ hasText: 'Plain layout' }).click()
   await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
-  await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '20px')
-  await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '20px')
+  await expect(page.getByTestId('message-card')).toHaveCSS('padding-left', '12px')
+  await expect(page.getByTestId('message-card')).toHaveCSS('padding-right', '12px')
   await expect
     .poll(() =>
       page.getByTestId('conversation-content').evaluate((content) => {
-        const expectedWidth = Math.min(896, Math.max(576, window.innerWidth * 0.576))
+        const scroll = content.parentElement
+        if (!scroll) throw new Error('Conversation viewport missing')
+        const style = getComputedStyle(scroll)
+        const availableWidth =
+          scroll.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        const expectedWidth = Math.min(896, availableWidth)
         return Math.abs(content.getBoundingClientRect().width - expectedWidth)
       })
     )

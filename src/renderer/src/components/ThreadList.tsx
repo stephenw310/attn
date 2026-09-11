@@ -444,7 +444,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           data-testid="thread-date-group"
           className={`absolute right-0 left-0 h-[44px] px-3 pt-5 pb-2 text-[11px] font-normal text-ink-faint ${
             projectedGroupTop !== undefined ? 'app-thread-position-shift' : ''
-          } ${groupRemoved ? 'app-thread-exit' : ''}`}
+          } ${groupRemoved ? 'app-thread-group-exit' : ''}`}
           style={{ top: projectedGroupTop ?? entry.top + entry.dividerHeight }}
         >
           {group}
