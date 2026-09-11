@@ -73,7 +73,7 @@ A 216-pixel sidebar contains mailboxes and user labels. A persistent control and
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
-The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title sits above the Inbox splits without enclosing header borders. The top-bar controls start at the expanded sidebar boundary and stay there when the sidebar closes. Write stays in the top bar outside the sidebar. The sidebar and keyboard-hint toggles sit together. The hint footer uses the page background and boxed keycaps without a contrasting panel. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight. Each tab fits its label and visible unread count. Zero unread counts reserve no space; tabs resize when counts change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
+The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title sits above the Inbox splits without enclosing header borders. The top-bar controls start at the expanded sidebar boundary and stay there when the sidebar closes. Write stays in the top bar outside the sidebar. The sidebar and keyboard-hint toggles sit together. The hint footer uses the page background and boxed keycaps without a contrasting panel. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight and do not show hover tooltips. Each tab fits its label and visible unread count. Zero unread counts reserve no space; tabs resize when counts change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
 Reader, Settings, and new-message headers use one clickable `Esc` close control without a separate Back button.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
@@ -161,7 +161,7 @@ progress; page-level `resultSizeEstimate` is not a mailbox total and must never 
 Contact statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
 never contribute to contacts. While the pass runs, sync status reads **Indexing**.
-Hover or click the status for progress and quota-wait details. Importing a user's saved Google Contacts through the People API remains a
+Click the status for progress and quota-wait details. Importing a user's saved Google Contacts through the People API remains a
 separate opt-in product decision because it adds OAuth scope and consent requirements; autocomplete must not
 imply that the mail-derived index contains an address book the user has never emailed.
 
@@ -205,7 +205,7 @@ their unread counts; the top bar has no unread-progress meter.
 
 Conflict rule: server state wins, except locally-pending actions replay on top of it.
 
-**Sync visibility:** The top bar shows a dot and one label: Live, Checking, Syncing, Indexing, Offline, or Error. Hover or click for progress details. Click Error to read the full message, retry, or copy details. Status remains visible when keyboard hints are hidden.
+**Sync visibility:** The top bar shows a dot and one label: Live, Checking, Syncing, Indexing, Offline, or Error. Click for progress details; the status does not show a hover tooltip. Click Error to read the full message, retry, or copy details. Status remains visible when keyboard hints are hidden.
 
 **Acceptance criteria**
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.

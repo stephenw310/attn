@@ -66,7 +66,6 @@ export function SplitStrip({
               data-split-id={split.id}
               data-active={active || undefined}
               aria-selected={active}
-              data-tooltip={`${split.total.toLocaleString()} conversations`}
               className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-2 py-1.5 text-[12px] font-normal transition-colors ${
                 active ? 'border-accent text-ink' : 'border-transparent text-ink-dim hover:text-ink'
               }`}
