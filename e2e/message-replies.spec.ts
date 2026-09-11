@@ -339,7 +339,7 @@ test('Tide reader expands messages and gives Escape to the inline draft first', 
   await page.keyboard.press('p')
   await page.keyboard.press('o')
   await expect(cards.first()).toHaveAttribute('data-collapsed', 'false')
-  await expect(page.getByTestId('message-cursor')).toHaveCSS('height', '2px')
+  await expect(page.getByTestId('message-cursor')).toHaveCSS('height', '18px')
   await expect(cards.last()).toHaveCSS('border-bottom-width', '0px')
   await expect(cards.first()).toHaveCSS('padding-left', '12px')
   await expect(cards.first().getByTestId('older-message-toggle')).toHaveAttribute('data-tooltip', '')

@@ -282,7 +282,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         <span
           data-testid="message-cursor"
           aria-hidden
-          className="pointer-events-none absolute -top-px inset-x-0 z-10 h-0.5 bg-accent"
+          className="pointer-events-none absolute top-[21px] left-0.5 z-10 h-[18px] w-0.5 rounded-full bg-accent"
         />
       )}
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
