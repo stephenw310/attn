@@ -196,6 +196,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           type="button"
           aria-expanded={detailsOpen}
           aria-label={`${label}: show sync details`}
+          data-tooltip=""
           onClick={() => setDetailsOpen((open) => !open)}
           data-testid="status-content"
           className="flex h-7 cursor-pointer items-center gap-2"

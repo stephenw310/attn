@@ -116,7 +116,12 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(content).toHaveText('Live')
   await setSyncState(app, { phase: 'syncing', stage: 'bodies', threadsDone: 428 })
   await expect(content).toHaveText('Syncing')
-  await expect(content).not.toHaveAttribute('data-tooltip')
+  await expect(content).toHaveAttribute('data-tooltip', '')
+  await content.hover()
+  await page.waitForTimeout(250)
+  await expect(page.getByTestId('quick-tooltip')).toHaveCount(0)
+  await content.focus()
+  await expect(page.getByTestId('quick-tooltip')).toHaveCount(0)
   await content.click()
   await expect(page.getByRole('dialog', { name: 'Sync details', exact: true })).toHaveText(
     'Recent mail: 428 processed'
