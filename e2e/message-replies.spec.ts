@@ -339,7 +339,20 @@ test('Tide reader expands messages and gives Escape to the inline draft first', 
   await page.keyboard.press('p')
   await page.keyboard.press('o')
   await expect(cards.first()).toHaveAttribute('data-collapsed', 'false')
-  await expect(page.getByTestId('message-cursor')).toHaveCSS('height', '18px')
+  await expect(page.getByTestId('message-cursor')).toHaveCSS('height', '2px')
+  await expect(cards.last()).toHaveCSS('border-bottom-width', '0px')
+  await expect(cards.first()).toHaveCSS('padding-left', '12px')
+  await expect(cards.first().getByTestId('older-message-toggle')).toHaveAttribute('data-tooltip', '')
+  for (const [label, key] of [
+    ['Reply', 'R'],
+    ['Reply all', 'A'],
+    ['Forward', 'F']
+  ]) {
+    await cards.first().getByRole('button', { name: label, exact: true }).hover()
+    await expect(page.getByRole('tooltip')).toHaveText(`${label} (${key})`)
+  }
+  await cards.first().getByTestId('older-message-toggle').hover()
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
   await cards.first().getByRole('button', { name: 'Reply', exact: true }).click()
   const composer = new ComposerPage(page)
   await expectComposerAfter(page, 'm-customer')

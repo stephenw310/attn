@@ -817,7 +817,3 @@
 .app-inline-composer [data-testid="composer-bcc"]::after {
   border: 0;
 }
-[data-testid="conversation-message"]:has(+ [data-testid="conversation-latest-item"])
-  [data-testid="message-card"] {
-  border-bottom: 0;
-}

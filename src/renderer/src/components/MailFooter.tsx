@@ -75,7 +75,7 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
   useSyncExternalStore(subscribeCommandRegistry, getCommandRegistrySnapshot)
   const hints = listFooterHints(context).filter((hint) =>
     context === 'reader'
-      ? ['message-navigation', 'message-toggle', 'reply'].includes(hint.id)
+      ? ['message-navigation', 'message-toggle', 'reply', 'reply-all', 'forward'].includes(hint.id)
       : !(context === 'composer' && hint.id === 'back')
   )
   return (

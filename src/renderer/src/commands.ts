@@ -81,13 +81,13 @@ export const COMMAND_SPECS = {
     title: 'Next message in conversation',
     shortcut: 'n',
     context: 'reader',
-    footer: { reader: { id: 'message-navigation', label: 'Next / previous message', order: 0 } }
+    footer: { reader: { id: 'message-navigation', label: 'Messages', order: 0 } }
   },
   'message.previous': {
     title: 'Previous message in conversation',
     shortcut: 'p',
     context: 'reader',
-    footer: { reader: { id: 'message-navigation', label: 'Next / previous message', order: 0 } }
+    footer: { reader: { id: 'message-navigation', label: 'Messages', order: 0 } }
   },
   'message.toggleAll': { title: 'Expand or collapse all messages', context: 'reader' },
   'message.toggle': {
@@ -317,13 +317,13 @@ export const COMMAND_SPECS = {
     title: 'Reply all',
     shortcut: 'a',
     context: 'reader',
-    footer: { reader: { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] } }
+    footer: { reader: { id: 'reply-all', label: 'Reply all', order: 11, shortcuts: ['a'] } }
   },
   'composer.forward': {
     title: 'Forward',
     shortcut: 'f',
     context: 'reader',
-    footer: { reader: { id: 'forward', label: 'forward', order: 12 } }
+    footer: { reader: { id: 'forward', label: 'Forward', order: 12 } }
   },
   'composer.close': {
     title: 'Save and close draft',

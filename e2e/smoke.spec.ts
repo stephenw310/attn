@@ -187,9 +187,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
     await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
     await expect(page.getByTestId('footer-shortcut-reply')).toContainText('RReply')
-    await expect(page.getByTestId('footer-shortcut-message-navigation')).toContainText(
-      'NPNext / previous message'
-    )
+    await expect(page.getByTestId('footer-shortcut-message-navigation')).toContainText('NPMessages')
     await expect(page.getByTestId('footer-shortcut-back')).toHaveCount(0)
     // Pin the whole reader hint set rather than the absence of named hints: this
     // fails on a stray hint too, and cannot go vacuous when an id is renamed.
@@ -203,7 +201,7 @@ test.describe('seeded inbox smoke coverage', () => {
             )
           )
       )
-      .toEqual(['message-navigation', 'message-toggle', 'reply'])
+      .toEqual(['message-navigation', 'message-toggle', 'reply', 'reply-all', 'forward'])
     await expect(page.getByTestId('message-card')).toHaveCount(2)
     await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
     await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')

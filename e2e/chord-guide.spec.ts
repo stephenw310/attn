@@ -24,7 +24,9 @@ test('shows the minimal registry-derived footer for each keyboard context', asyn
 
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
-  await expect.poll(() => footerHintIds(page)).toEqual(['message-navigation', 'message-toggle', 'reply'])
+  await expect
+    .poll(() => footerHintIds(page))
+    .toEqual(['message-navigation', 'message-toggle', 'reply', 'reply-all', 'forward'])
   await expect(page.getByTestId('footer-shortcut-message-navigation')).toBeInViewport()
   await expect(page.getByTestId('footer-shortcut-message-toggle')).toBeInViewport()
 

@@ -168,18 +168,18 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         data-testid="message-card"
         data-collapsed="true"
         data-pending={message.pending ? 'true' : undefined}
-        className="border-b border-edge"
       >
         <button
           type="button"
           data-testid="older-message-toggle"
+          data-tooltip=""
           aria-expanded="false"
           aria-label={`Expand older message from ${message.fromName}`}
           onClick={(event) => {
             onToggleCollapsed?.()
             event.currentTarget.blur()
           }}
-          className="grid w-full cursor-pointer grid-cols-[28px_minmax(70px,100px)_minmax(0,1fr)_auto] items-center gap-x-3 py-4 text-left hover:bg-active/50"
+          className="grid w-full cursor-pointer grid-cols-[28px_minmax(70px,100px)_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-4 text-left hover:bg-active/50"
         >
           <MessageAvatar name={message.fromName} active={active} />
           <span className="min-w-0 truncate text-xs font-medium">{message.fromName}</span>
@@ -201,7 +201,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       data-testid="message-card"
       data-collapsed="false"
       data-pending={message.pending ? 'true' : undefined}
-      className="border-b border-edge py-4"
+      className="px-3 py-4"
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
@@ -226,6 +226,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
             <button
               type="button"
               data-testid="older-message-toggle"
+              data-tooltip=""
               aria-expanded="true"
               aria-label={`Collapse older message from ${message.fromName}`}
               onClick={(event) => {
@@ -320,9 +321,15 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
       </div>
       {onReply && !message.pending && (
         <div data-testid="message-actions" className="ml-10 mt-3 flex items-center gap-3">
-          <Button onClick={() => onReply('reply')}>Reply</Button>
-          <Button onClick={() => onReply('replyAll')}>Reply all</Button>
-          <Button onClick={() => onReply('forward')}>Forward</Button>
+          <Button data-tooltip="Reply (R)" onClick={() => onReply('reply')}>
+            Reply
+          </Button>
+          <Button data-tooltip="Reply all (A)" onClick={() => onReply('replyAll')}>
+            Reply all
+          </Button>
+          <Button data-tooltip="Forward (F)" onClick={() => onReply('forward')}>
+            Forward
+          </Button>
         </div>
       )}
     </article>

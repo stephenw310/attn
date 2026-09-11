@@ -270,7 +270,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       data-active-message={activeMessageId === message.id ? 'true' : undefined}
       aria-current={activeMessageId === message.id ? 'true' : undefined}
       data-latest-conversation-item={!inlineComposer && activeMessageId === message.id ? '' : undefined}
-      className="relative"
+      className="relative border-t border-edge"
       onPointerDownCapture={() => {
         if (!inlineComposer) setActiveMessageId(message.id)
       }}
@@ -282,7 +282,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         <span
           data-testid="message-cursor"
           aria-hidden
-          className="pointer-events-none absolute top-[21px] -left-2.5 z-10 h-[18px] w-0.5 rounded-full bg-accent"
+          className="pointer-events-none absolute -top-px inset-x-0 z-10 h-0.5 bg-accent"
         />
       )}
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
@@ -335,7 +335,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         data-testid="conversation-latest-item"
         data-composer-source-message-id={inlineComposerSourceMessageId ?? undefined}
         data-latest-conversation-item=""
-        className="relative ml-10 mt-4 mb-6"
+        className="relative ml-[52px] mr-3 mt-4 mb-6"
       >
         {inlineComposer}
       </div>
