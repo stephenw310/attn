@@ -7,6 +7,7 @@ import { labelColor } from '../list/labelColor'
 import type { DisplayConversation, DisplayThread } from '../list/mailDisplay'
 import { Button } from './Button'
 import { Kbd } from './Kbd'
+import { MailIcon } from './MailIcon'
 import { MessageCard } from './MessageCard'
 
 export interface MessageReplyTarget {
@@ -511,6 +512,16 @@ export const ConversationView = memo(function ConversationView(
             className="min-w-0 flex-1 break-words text-xl font-semibold tracking-tight"
           >
             {conversation?.subject ?? selected.subject}
+            <span
+              data-testid="conversation-star"
+              data-starred={selected.starred}
+              role="img"
+              aria-label={selected.starred ? 'Starred' : 'Not starred'}
+              data-tooltip={selected.starred ? 'Starred' : 'Not starred'}
+              className={`ml-2 inline-flex align-middle ${selected.starred ? 'text-star [&_svg]:fill-current' : 'text-ink-faint'}`}
+            >
+              <MailIcon name="starred" />
+            </span>
           </h1>
           <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
             <span data-testid="conversation-position" className="tabular-nums">

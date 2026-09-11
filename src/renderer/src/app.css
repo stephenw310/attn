@@ -330,6 +330,20 @@
   }
 }
 
+@keyframes thread-group-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.app-thread-group-exit {
+  animation: thread-group-exit 520ms ease-out forwards;
+  pointer-events: none;
+}
+
 .app-thread-position-shift {
   transition: top 520ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -586,7 +600,8 @@
     animation: none;
   }
 
-  .app-thread-exit {
+  .app-thread-exit,
+  .app-thread-group-exit {
     animation: none;
   }
 

@@ -38,6 +38,26 @@ async function createClosedDrafts(page: Page, count: number): Promise<void> {
   )
 }
 
+test('mailbox hover hints show the registered navigation chords', async ({ page }) => {
+  for (const [name, chord] of [
+    ['Inbox', 'G I'],
+    ['All Mail', 'G A'],
+    ['Sent', 'G T'],
+    ['Starred', 'G S'],
+    ['Snoozed', 'G H'],
+    ['Drafts', 'G D'],
+    ['Spam', 'G P'],
+    ['Trash', 'G R'],
+    ['Outbox', 'G O']
+  ]) {
+    await page
+      .getByRole('navigation', { name: 'Mailboxes' })
+      .getByRole('button', { name: new RegExp(`^${name}`) })
+      .hover()
+    await expect(page.getByRole('tooltip')).toHaveText(`${name} (${chord})`)
+  }
+})
+
 test('every G chord reaches its mailbox and updates the semantic view name', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   const title = page.getByTestId('mailbox-title')

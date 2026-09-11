@@ -18,6 +18,22 @@ async function expectComposerAfter(page: Page, messageId: string): Promise<void>
   await expect(page.getByTestId('composer')).toHaveCount(1)
 }
 
+test('the reader star follows the thread star command', async ({ page }, testInfo) => {
+  await page.getByTestId('thread-row').first().click()
+  const star = page.getByTestId('conversation-star')
+  await expect(star).toHaveAttribute('aria-label', 'Not starred')
+  await page.keyboard.press('s')
+  await expect(star).toHaveAttribute('aria-label', 'Starred')
+  await expect(star).toHaveAttribute('data-starred', 'true')
+  const dir = join(__dirname, '.artifacts')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'reader-starred.png')
+  await page.screenshot({ path })
+  await testInfo.attach('Starred reader', { path, contentType: 'image/png' })
+  await page.keyboard.press('s')
+  await expect(star).toHaveAttribute('aria-label', 'Not starred')
+})
+
 test('the visible message cursor targets reply, reply all, and forward shortcuts', async ({
   page
 }, testInfo) => {

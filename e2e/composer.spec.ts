@@ -2183,6 +2183,7 @@ test('adopts closed remote edits, preserves Bcc, and defers an edit while open',
   const id = await composer.root.getAttribute('data-draft-id')
   if (!id) throw new Error('missing draft id')
   await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
   const mirrorError = await app.evaluate(
     ({ ipcMain }, args) =>
       new Promise<string | undefined>((resolve) =>
@@ -2232,6 +2233,7 @@ test('adopts closed remote edits, preserves Bcc, and defers an edit while open',
   await reconcile('Deferred remote edit', '<p>Do not rewrite the open editor</p>')
   await expect(composer.subject).toHaveValue('Remote closed edit')
   await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
   await reconcile('Deferred remote edit', '<p>Adopted after close</p>')
   await goToDrafts(page)
   await page.getByTestId('draft-row').filter({ hasText: 'Deferred remote edit' }).click()
