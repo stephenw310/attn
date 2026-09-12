@@ -69,7 +69,7 @@ Initial sync fetches recent Inbox bodies. Older bodies and attachment bytes down
 
 The Tide visual direction uses quiet, palette-tinted backgrounds, readable secondary text, and the `attn:` wordmark. Built-in palettes share semantic color tokens. Secondary actions use a subtle hover fill without a resting border. Fields and shortcut keycaps retain visible boundaries.
 
-A 216-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader. The logo hides with the sidebar; there is no compact icon rail. Mailboxes use icons and names. The flat label list uses the same colors as message label chips. System mailbox entries show their chord shortcuts on hover. Settings and split editing hide the mail sidebar without changing the saved preference.
+A 190-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader. The logo hides with the sidebar; there is no compact icon rail. Mailboxes use icons and names. The flat label list uses the same colors as message label chips. System mailbox entries show their chord shortcuts on hover. Settings and split editing hide the mail sidebar without changing the saved preference.
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 

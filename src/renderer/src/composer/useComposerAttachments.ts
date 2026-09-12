@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
+import { createCommand, registerCommands } from '../commands'
 import type { ShowToast } from '../hooks/useToast'
 
 function attachmentErrorMessage(error: unknown): string {
@@ -120,6 +121,11 @@ export function useComposerAttachments({
     const retry = retryRequestRef.current
     if (retry) mutate(retry.request, retry.failure)
   }, [mutate])
+  useLayoutEffect(() => {
+    if (!attachmentError || closing) return
+    return registerCommands([createCommand('composer.retryAttachment', retryAttachment)])
+  }, [attachmentError, closing, retryAttachment])
+
   const dismissAttachmentError = useCallback(() => {
     setAttachmentError(null)
     retryRequestRef.current = null

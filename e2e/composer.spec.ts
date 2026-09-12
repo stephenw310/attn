@@ -4,7 +4,7 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
-import { selectedIndex } from './nav'
+import { openPalette, runPaletteCommand, selectedIndex } from './nav'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 test.setTimeout(60_000)
@@ -758,9 +758,14 @@ test('rejects an oversized picked attachment without creating a chip', async ({ 
   await expect(error).toContainText('Each attachment must be 25 MB or less')
   truncateSync(source, 100)
   await setAttachmentPickerFiles(app, [source])
-  await error.getByRole('button', { name: 'Retry' }).click()
+  await runPaletteCommand(page, 'Retry attachment change')
   await expect(composer.attachmentChips).toHaveCount(1)
   await expect(error).toHaveCount(0)
+  await openPalette(page, 'Retry attachment change')
+  await expect(
+    page.getByTestId('command-palette').getByText('Retry attachment change', { exact: true })
+  ).toHaveCount(0)
+  await page.keyboard.press('Escape')
 })
 
 test('renders coarse attachment upload progress in the global toast', async ({ app, page }) => {

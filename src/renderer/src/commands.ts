@@ -344,6 +344,7 @@ export const COMMAND_SPECS = {
     context: 'composer',
     footer: { composer: { id: 'send', label: 'send', order: 10 } }
   },
+  'composer.retryAttachment': { title: 'Retry attachment change', context: 'composer' },
   'composer.attach': { title: 'Attach files', shortcut: 'Mod+Shift+A', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
   'composer.bold': {
