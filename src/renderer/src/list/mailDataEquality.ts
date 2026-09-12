@@ -15,6 +15,8 @@ function sameThread(left: ThreadRow, right: ThreadRow): boolean {
     left.starred === right.starred &&
     left.hasAttachment === right.hasAttachment &&
     left.snoozed === right.snoozed &&
+    left.snoozeDueAt === right.snoozeDueAt &&
+    left.followUpDueAt === right.followUpDueAt &&
     left.returned === right.returned &&
     // A follow-up firing can change ONLY these fields; missing them here made
     // the refresh reuse the stale rows, hiding the chip and heading until a
@@ -56,7 +58,10 @@ export function reuseLabels(current: MailLabel[], next: MailLabel[]): MailLabel[
   return current.length === next.length &&
     current.every(
       (label, index) =>
-        label.id === next[index].id && label.name === next[index].name && label.type === next[index].type
+        label.id === next[index].id &&
+        label.name === next[index].name &&
+        label.type === next[index].type &&
+        label.threadCount === next[index].threadCount
     )
     ? current
     : next

@@ -38,6 +38,26 @@ async function createClosedDrafts(page: Page, count: number): Promise<void> {
   )
 }
 
+test('mailbox hover hints show the registered navigation chords', async ({ page }) => {
+  for (const [name, chord] of [
+    ['Inbox', 'G I'],
+    ['All Mail', 'G A'],
+    ['Sent', 'G T'],
+    ['Starred', 'G S'],
+    ['Snoozed', 'G H'],
+    ['Drafts', 'G D'],
+    ['Spam', 'G P'],
+    ['Trash', 'G R'],
+    ['Outbox', 'G O']
+  ]) {
+    await page
+      .getByRole('navigation', { name: 'Mailboxes' })
+      .getByRole('button', { name: new RegExp(`^${name}`) })
+      .hover()
+    await expect(page.getByRole('tooltip')).toHaveText(`${name} (${chord})`)
+  }
+})
+
 test('every G chord reaches its mailbox and updates the semantic view name', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   const title = page.getByTestId('mailbox-title')
@@ -126,7 +146,7 @@ test('the sidebar reaches every mailbox by pointer without moving', async ({ pag
   }
   await expect(page.getByTestId('sidebar-outbox').getByTestId('sidebar-count')).toHaveText('0')
   const inbox = page.getByTestId('sidebar-mailbox').filter({ hasText: 'Inbox' })
-  await expect(inbox.locator('kbd')).toHaveText('G I')
+  await expect(inbox.locator('kbd')).toHaveCount(0)
   await page.getByTestId('sidebar-mailbox').filter({ hasText: 'Trash' }).click()
   await expect(page.getByTestId('mailbox-title')).toHaveText('Trash')
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
@@ -147,8 +167,8 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   if (process.platform === 'win32') expect(titleBarPadding.right).toBeGreaterThan(24)
   const sidebar = page.getByTestId('mail-sidebar')
   await expect(page.getByTestId('sidebar-brand')).toHaveText('attn:')
-  await expect(page.getByTestId('sidebar-brand')).toHaveCSS('font-size', '40px')
-  expect((await sidebar.boundingBox())?.width).toBe(216)
+  await expect(page.getByTestId('sidebar-brand')).toHaveCSS('font-size', '26px')
+  expect((await sidebar.boundingBox())?.width).toBe(190)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute(
     'aria-keyshortcuts',
@@ -167,8 +187,8 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   await expect(page.getByTestId('mailbox-title')).toHaveText('Inbox')
   const titleBox = await page.getByTestId('mailbox-title').boundingBox()
   const senderBox = await page.getByTestId('thread-sender').first().boundingBox()
-  expect(titleBox?.x).toBeCloseTo(senderBox?.x ?? 0, 0)
-  expect((await page.getByTestId('thread-list').boundingBox())?.x).toBe(0)
+  expect(titleBox?.x).toBeLessThan(senderBox?.x ?? 0)
+  expect((await page.getByTestId('thread-list').boundingBox())?.x).toBe(titleBox?.x)
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
 
   await goTo(page, 'a')
@@ -197,7 +217,7 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
 
   await relaunched.page.getByTestId('sidebar-toggle').click()
   await expect(relaunchedSidebar).toBeVisible()
-  expect((await relaunchedSidebar.boundingBox())?.width).toBe(216)
+  expect((await relaunchedSidebar.boundingBox())?.width).toBe(190)
   await expect(relaunched.page.getByTestId('sidebar-mailbox')).toHaveCount(8)
   await expect(relaunched.page.getByTestId('sidebar-label')).toHaveCount(12)
 })

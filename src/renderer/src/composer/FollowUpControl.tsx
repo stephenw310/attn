@@ -93,7 +93,7 @@ export function FollowUpControl({
           aria-hidden="true"
           viewBox="0 0 24 24"
           className="size-4 fill-none stroke-current"
-          strokeWidth="1.75"
+          strokeWidth="1.4"
           strokeLinecap="round"
           strokeLinejoin="round"
         >
@@ -109,7 +109,7 @@ export function FollowUpControl({
             role="dialog"
             aria-label="Remind me if no reply"
             style={{ ...position, maxHeight: `calc(100vh - ${position.bottom + 12}px)` }}
-            className="fixed z-[100] flex w-72 max-w-[calc(100vw-24px)] flex-col gap-1 overflow-y-auto rounded-lg border border-edge bg-raised p-2 shadow-2xl outline-none"
+            className="fixed z-[100] flex w-[300px] max-w-[calc(100vw-24px)] flex-col gap-1 overflow-y-auto rounded-md border border-edge bg-raised p-4 shadow-menu outline-none"
             data-composer-transient
             data-testid="follow-up-popover"
             onKeyDown={(event) => {
@@ -119,6 +119,7 @@ export function FollowUpControl({
               onOpenChange(false)
             }}
           >
+            <h2 className="px-1 pb-2 text-sm font-medium text-ink">Remind me if no reply</h2>
             <p className="px-1 text-[11px] text-ink-faint">
               If nobody replies by the deadline, the thread resurfaces in your inbox.
             </p>
@@ -155,7 +156,7 @@ export function FollowUpControl({
               />
               <button
                 type="button"
-                className="h-8 rounded-md bg-accent/20 px-2.5 text-xs font-semibold text-accent disabled:opacity-45"
+                className="h-8 rounded-md bg-accent px-2.5 text-xs font-medium text-on-accent disabled:opacity-45"
                 data-testid="follow-up-custom-confirm"
                 disabled={!customValid}
                 onClick={() => parsedCustom !== null && choose(parsedCustom)}

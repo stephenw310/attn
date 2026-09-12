@@ -9,7 +9,7 @@ import { ListPlugin } from '@lexical/react/LexicalListPlugin'
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { TablePlugin } from '@lexical/react/LexicalTablePlugin'
-import { forwardRef } from 'react'
+import { forwardRef, useState } from 'react'
 import type { AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { safeUrl } from '../../../shared/html'
@@ -19,7 +19,7 @@ import { AiDraftPlugin } from './AiDraftPlugin'
 import { BodyEditingShortcutsPlugin, ComposerCommandPlugin } from './bodyEditing'
 import { ComposerBodyHintPlugin } from './ComposerBodyHintPlugin'
 import { ComposerEnvelope, ComposerHeader, composerTitle } from './ComposerChrome'
-import { ComposerFooter } from './ComposerFooter'
+import { ComposerAttachments, ComposerFooter } from './ComposerFooter'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { editorConfig } from './editorConfig'
 import { InitialHtmlPlugin } from './InitialHtmlPlugin'
@@ -28,6 +28,7 @@ import { CollapsedSignaturePlugin } from './nodes/CollapsedSignaturePlugin'
 import { PasteContentPlugin } from './PastePlugin'
 import { recipientGreetingName } from './recipientGreeting'
 import { SnippetsPlugin } from './SnippetsPlugin'
+import { SubjectConfirmation } from './SubjectConfirmation'
 import { COMPOSER_LINK_SCHEMES } from './sanitize'
 import { useComposerController } from './useComposerController'
 
@@ -65,6 +66,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   { draft, mode = 'full', initialError = null, onClose, onExit, onToast, aiDraft },
   ref
 ): React.JSX.Element {
+  const [autocompleteVisible, setAutocompleteVisible] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
   const {
     to,
     setTo,
@@ -104,6 +107,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     noteAiContentSettled,
     handleSnippetInserted,
     attaching,
+    attachmentError,
+    retryAttachment,
+    dismissAttachmentError,
     addAttachment,
     pickAttachments,
     addDroppedFiles,
@@ -111,9 +117,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     removeLastAttachment,
     visibleAttachments,
     closeAndSave,
-    closeAndExit,
     runComposerKey,
     send,
+    confirmNoSubject,
+    sendWithoutSubject,
+    cancelNoSubject,
     discard
   } = useComposerController({
     draft,
@@ -130,8 +138,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     <section
       className={`${
         mode === 'inline'
-          ? 'flex w-full flex-none flex-col rounded-[10px] border border-edge bg-raised'
-          : 'flex min-h-0 flex-1 flex-col bg-raised/35 px-6 pb-6'
+          ? 'app-inline-composer flex w-full flex-none flex-col border-y border-edge bg-raised/20'
+          : 'app-full-composer mx-auto flex min-h-0 w-full max-w-[888px] flex-1 flex-col bg-ground px-6 pb-4'
       } ${draggingFiles ? 'ring-1 ring-inset ring-accent/70' : ''}`}
       data-draft-id={draft.id}
       data-draft-kind={draft.kind}
@@ -161,12 +169,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }}
       onKeyDownCapture={(event) => {
         const target = event.target as HTMLElement | null
+        if (target?.closest('dialog[open]')) return
         if (event.key === 'Escape' && target?.closest('[data-composer-transient]')) return
         if (!runComposerKey(event.nativeEvent)) return
         event.preventDefault()
         event.stopPropagation()
       }}
     >
+      {confirmNoSubject && <SubjectConfirmation onCancel={cancelNoSubject} onSend={sendWithoutSubject} />}
       <ComposerHeader
         draft={draft}
         mode={mode}
@@ -179,13 +189,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       />
 
       <div
-        className={
-          mode === 'inline'
-            ? 'flex w-full flex-col rounded-b-[10px]'
-            : 'mx-auto mt-3 flex min-h-0 w-full max-w-[900px] flex-1 flex-col rounded-xl border border-edge bg-raised shadow-composer'
-        }
+        className={mode === 'inline' ? 'flex w-full flex-col' : 'mt-7 flex min-h-0 w-full flex-1 flex-col'}
       >
         <ComposerEnvelope
+          closing={closing}
+          closeAndSave={closeAndSave}
           draft={draft}
           mode={mode}
           attaching={attaching}
@@ -212,6 +220,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           <DraftSourceMessageIdContext.Provider value={draft.sourceMessageId}>
             <LexicalComposer initialConfig={editorConfig}>
               <div
+                data-testid="composer-body-area"
+                onPointerDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    event.preventDefault()
+                    event.currentTarget.querySelector<HTMLElement>('[data-testid="composer-editor"]')?.focus()
+                  }
+                }}
                 className={`relative min-h-48 flex-1 ${
                   mode === 'inline' ? '' : 'overflow-y-auto [scrollbar-gutter:stable]'
                 }`}
@@ -219,14 +234,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <RichTextPlugin
                   contentEditable={
                     <ContentEditable
-                      className="min-h-full px-5 py-5 text-[13px] leading-5 text-ink outline-none"
+                      className="px-0 pt-5 pb-4 text-[13px] leading-6 text-ink outline-none"
                       data-testid="composer-editor"
                       aria-label="Message body"
                     />
                   }
                   placeholder={
                     aiTipReady ? null : (
-                      <div className="pointer-events-none absolute left-5 top-5 text-[13px] leading-5 text-ink-faint">
+                      <div className="pointer-events-none absolute left-0 top-5 text-[13px] leading-5 text-ink-faint">
                         Write a message…
                       </div>
                     )
@@ -255,7 +270,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <ComposerCommandPlugin
                   onAttach={pickAttachments}
                   onRemoveAttachment={removeLastAttachment}
-                  onClose={mode === 'inline' ? closeAndExit : closeAndSave}
+                  onClose={closeAndSave}
                   onDiscard={discard}
                   onSend={send}
                   onFollowUp={openFollowUp}
@@ -267,14 +282,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                   onPreservedContent={notePreservedContent}
                 />
                 <SnippetsPlugin onInserted={handleSnippetInserted} />
-                <ComposerBodyHintPlugin showAiTip={aiTipReady} />
+                <ComposerBodyHintPlugin showAiTip={aiTipReady} suppressed={autocompleteVisible || aiBusy} />
                 <AiAutocompletePlugin
+                  onPreviewChange={setAutocompleteVisible}
                   subject={subject}
                   recipientName={recipientGreetingName(to[0])}
                   getThreadContext={aiDraft?.getThreadContext}
                 />
                 {aiDraft && (
                   <AiDraftPlugin
+                    onBusyChange={setAiBusy}
                     kind={draft.kind}
                     threadId={draft.threadId}
                     request={aiDraft.request}
@@ -284,6 +301,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     onToast={onToast}
                   />
                 )}
+                <ComposerAttachments
+                  attachmentError={attachmentError}
+                  retryAttachment={retryAttachment}
+                  dismissAttachmentError={dismissAttachmentError}
+                  visibleAttachments={visibleAttachments}
+                  attaching={attaching}
+                  closing={closing}
+                  removeAttachment={removeAttachment}
+                />
                 <InlineQuote
                   draftId={draft.id}
                   html={draft.quoteHtml}
@@ -293,6 +319,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 />
               </div>
               <ComposerFooter
+                mode={mode}
+                saveStatus={saveStatus}
+                localRevision={localRevision}
+                savedRevision={savedRevision}
+                attachmentError={attachmentError}
+                retryAttachment={retryAttachment}
+                dismissAttachmentError={dismissAttachmentError}
                 visibleAttachments={visibleAttachments}
                 attaching={attaching}
                 closing={closing}

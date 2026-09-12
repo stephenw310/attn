@@ -1,9 +1,13 @@
-import { memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { memo, type ReactNode, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { DraftKind } from '../../../shared/drafts'
+import type { MailLabel } from '../../../shared/mail'
 import { bodyHydrationStatusMessage } from '../bodyHydrationStatus'
 import { createCommand, registerCommands } from '../commands'
+import { labelColor } from '../list/labelColor'
 import type { DisplayConversation, DisplayThread } from '../list/mailDisplay'
+import { Button } from './Button'
 import { Kbd } from './Kbd'
+import { MailIcon } from './MailIcon'
 import { MessageCard } from './MessageCard'
 
 export interface MessageReplyTarget {
@@ -14,7 +18,14 @@ export interface MessageReplyTarget {
 }
 
 interface ConversationMessagesProps {
+  selected: DisplayThread
+  onChangeSnooze?: () => void
+  onUnsnooze?: () => void
+  onCancelFollowUp?: () => void
   conversation: DisplayConversation
+  labels: readonly MailLabel[]
+  labelIds: readonly string[]
+  onOpenLabel: (labelId: string) => void
   account: string | null
   online: boolean
   inlineComposer: ReactNode | null
@@ -35,6 +46,10 @@ function newestReadableIndex(messages: readonly DisplayConversation['messages'][
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
   const {
     conversation,
+    selected,
+    labels,
+    labelIds,
+    onOpenLabel,
     account,
     online,
     inlineComposer,
@@ -237,6 +252,17 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     ])
   }, [activeMessageId, conversation.messages, onReply, replyToMessage, revealedTrashedIds])
 
+  const readableMessages = useMemo(
+    () => conversation.messages.filter((message) => !message.trashed || revealedTrashedIds.has(message.id)),
+    [conversation.messages, revealedTrashedIds]
+  )
+  const allExpanded =
+    readableMessages.length > 0 && readableMessages.every((message) => expandedMessageIds.has(message.id))
+  const toggleAll = useCallback(() => {
+    setExpandedMessageIds(allExpanded ? new Set() : new Set(readableMessages.map((message) => message.id)))
+  }, [allExpanded, readableMessages])
+  useLayoutEffect(() => registerCommands([createCommand('message.toggleAll', toggleAll)]), [toggleAll])
+
   const items = conversation.messages.map((message) => (
     <div
       key={`message:${message.id}`}
@@ -249,7 +275,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       data-active-message={activeMessageId === message.id ? 'true' : undefined}
       aria-current={activeMessageId === message.id ? 'true' : undefined}
       data-latest-conversation-item={!inlineComposer && activeMessageId === message.id ? '' : undefined}
-      className="relative"
+      className="relative border-t border-edge"
       onPointerDownCapture={() => {
         if (!inlineComposer) setActiveMessageId(message.id)
       }}
@@ -261,13 +287,13 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         <span
           data-testid="message-cursor"
           aria-hidden
-          className="pointer-events-none absolute inset-y-1.5 left-0 z-10 w-0.5 rounded-full bg-accent/40"
+          className="pointer-events-none absolute top-[21px] left-0.5 z-10 h-[18px] w-0.5 rounded-full bg-accent"
         />
       )}
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
         <div
           data-testid="trashed-message-marker"
-          className="flex items-center gap-2 rounded-lg border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
+          className="my-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-active px-4 py-4 text-xs text-ink-dim"
         >
           This message was moved to Trash.
           <button
@@ -297,6 +323,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           onToggleCollapsed={() => toggleMessage(message.id)}
           trimExpanded={expandedTrimIds.has(message.id)}
           onToggleTrim={() => toggleTrim(message.id)}
+          onReply={onReply && !message.pending ? (kind) => replyToMessage(kind, message.id) : undefined}
         />
       )}
     </div>
@@ -313,22 +340,117 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         data-testid="conversation-latest-item"
         data-composer-source-message-id={inlineComposerSourceMessageId ?? undefined}
         data-latest-conversation-item=""
-        className="relative"
+        className="relative ml-[52px] mr-3 mt-4 mb-6"
       >
         {inlineComposer}
       </div>
     )
   }
-  return <>{items}</>
+  return (
+    <>
+      <div
+        data-testid="conversation-summary"
+        className="mb-5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-ink-dim"
+      >
+        <span className="shrink-0">
+          {conversation.messages.length} {conversation.messages.length === 1 ? 'message' : 'messages'}
+        </span>
+        {(selected.followUpReturned || selected.followUpDueLabel) && (
+          <span data-testid="conversation-follow-up" className="inline-flex items-center gap-1.5 text-accent">
+            ↩ Follow up{!selected.followUpReturned && ` ${selected.followUpDueLabel}`}
+          </span>
+        )}
+        {selected.returned && !selected.followUpReturned && <span className="text-accent">↩ Returned</span>}
+        {labels
+          .filter((label) => labelIds.includes(label.id))
+          .map((label) => (
+            <button
+              type="button"
+              key={label.id}
+              onClick={() => onOpenLabel(label.id)}
+              className="max-w-24 truncate rounded border px-1.5 py-0.5 text-[10px]"
+              style={labelColor(label.id)}
+            >
+              {label.name}
+            </button>
+          ))}
+        {readableMessages.length > 1 && (
+          <Button data-testid="conversation-toggle-all" className="ml-auto" onClick={toggleAll}>
+            {allExpanded ? 'Collapse all messages' : 'Expand all messages'}
+          </Button>
+        )}
+      </div>
+      {!selected.labelIds.some((id) => ['INBOX', 'TRASH', 'SPAM', 'DRAFT'].includes(id)) &&
+        !selected.snoozed &&
+        !selected.followUpDueLabel &&
+        !selected.followUpReturned && (
+          <div data-testid="conversation-done" className="mb-5 flex items-center gap-3 text-xs text-ink-dim">
+            <span className="text-accent">✓ Done</span>
+            <span>Available in All Mail and its labels.</span>
+          </div>
+        )}
+      {selected.snoozed && (
+        <div
+          data-testid="conversation-snooze-banner"
+          className="mb-5 flex flex-wrap items-center gap-3 rounded-[5px] bg-active px-3.5 py-3 text-xs text-ink-dim"
+        >
+          <span className="min-w-0 flex-1">
+            Snoozed{selected.dueLabel ? ` until ${selected.dueLabel}` : ''}.
+          </span>
+          <button
+            type="button"
+            onClick={props.onChangeSnooze}
+            className="cursor-pointer rounded px-2 py-1 hover:text-ink"
+          >
+            Change snooze <Kbd>H</Kbd>
+          </button>
+          <button
+            type="button"
+            data-testid="conversation-unsnooze"
+            onClick={props.onUnsnooze}
+            className="cursor-pointer rounded px-2 py-1 hover:text-ink"
+          >
+            Return to Inbox now
+          </button>
+        </div>
+      )}
+      {(selected.followUpReturned || selected.followUpDueLabel) && (
+        <div
+          data-testid="conversation-follow-up-banner"
+          className="mb-5 rounded-[5px] bg-active px-3.5 py-3 text-xs text-ink-dim"
+        >
+          {selected.followUpReturned
+            ? 'No reply yet. This conversation returned for follow-up.'
+            : `Follow up ${selected.followUpDueLabel} if no one replies.`}
+          {!selected.followUpReturned && (
+            <button
+              type="button"
+              data-testid="conversation-cancel-follow-up"
+              className="ml-4 cursor-pointer rounded px-2 py-1 hover:text-ink"
+              onClick={props.onCancelFollowUp}
+            >
+              Cancel follow-up
+            </button>
+          )}
+        </div>
+      )}
+      {items}
+    </>
+  )
 }
 
 interface ConversationViewProps {
   selected: DisplayThread
+  onChangeSnooze?: () => void
+  onUnsnooze?: () => void
+  onCancelFollowUp?: () => void
   selectedIndex: number
   threadCount: number
   threadCountExact: boolean
   mailboxTitle: string
   conversation: DisplayConversation | null
+  labels: readonly MailLabel[]
+  onOpenLabel: (labelId: string) => void
   account: string | null
   online: boolean
   scrollRef: React.RefObject<HTMLDivElement | null>
@@ -345,9 +467,6 @@ export const ConversationView = memo(function ConversationView(
 ): React.JSX.Element {
   const {
     selected,
-    selectedIndex,
-    threadCount,
-    threadCountExact,
     mailboxTitle,
     conversation,
     account,
@@ -400,7 +519,9 @@ export const ConversationView = memo(function ConversationView(
               sourceRect.top,
               targetRect.top - Math.max(140, scroll.clientHeight - targetRect.height - paddingTop * 2)
             )
-          : targetRect.top
+          : target === content.querySelector('[data-testid="conversation-message"]')
+            ? content.getBoundingClientRect().top
+            : targetRect.top
         // Move only the conversation pane. `scrollIntoView()` also scrolls the
         // document's root scrolling element, which pulls the app shell above
         // the Electron window and strands both footers mid-window.
@@ -438,31 +559,50 @@ export const ConversationView = memo(function ConversationView(
     scrollRef.current?.focus({ preventScroll: true })
   }, [pendingFocusMessageId, scrollRef])
 
+  const hadInlineComposer = useRef(Boolean(inlineComposer))
+  useLayoutEffect(() => {
+    if (hadInlineComposer.current && !inlineComposer) scrollRef.current?.focus({ preventScroll: true })
+    hadInlineComposer.current = Boolean(inlineComposer)
+  }, [inlineComposer, scrollRef])
+
   return (
-    <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-raised/35">
-      <div className="flex items-center gap-4 border-b border-edge px-6 pt-3 pb-3">
-        <h1
-          data-testid="conversation-subject"
-          className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-lg font-bold tracking-tight"
-        >
-          {conversation?.subject ?? selected.subject}
-        </h1>
-        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
-          <span data-testid="conversation-position" className="tabular-nums">
-            {selectedIndex + 1} of {threadCount}
-            {threadCountExact ? '' : '+'}
-          </span>{' '}
-          <button
-            type="button"
-            data-testid="conversation-back"
-            aria-label={`Back to ${mailboxTitle}`}
-            data-tooltip={`Back to ${mailboxTitle} (Esc)`}
-            onClick={onClose}
-            className="cursor-pointer rounded-md px-2 py-1 hover:bg-active hover:text-ink"
+    <section
+      data-testid="conversation-view"
+      data-thread-index={props.selectedIndex}
+      className="flex min-w-0 flex-1 flex-col bg-ground"
+    >
+      <div className="overflow-y-hidden px-6 [scrollbar-gutter:stable]">
+        <div className="mx-auto flex w-full max-w-[896px] items-start gap-4 pt-6 pb-3">
+          <h1
+            data-testid="conversation-subject"
+            className="min-w-0 flex-1 break-words text-xl font-semibold tracking-tight"
           >
-            <Kbd>Esc</Kbd>
-          </button>
-        </span>
+            {(conversation?.subject ?? selected.subject).trim() || '(no subject)'}
+            <span
+              data-testid="conversation-star"
+              data-starred={selected.starred}
+              role="img"
+              aria-label={selected.starred ? 'Starred' : 'Not starred'}
+              data-tooltip={selected.starred ? 'Starred' : 'Not starred'}
+              className={`ml-2 inline-flex align-middle ${selected.starred ? 'text-star [&_svg]:fill-current' : 'text-ink-faint'}`}
+            >
+              <MailIcon name="starred" />
+            </span>
+          </h1>
+          <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
+            {!inlineComposer && (
+              <Button
+                data-testid="conversation-back"
+                aria-label={`Back to ${mailboxTitle}`}
+                data-tooltip=""
+                onClick={onClose}
+                className="cursor-pointer rounded-md px-2 py-1 hover:bg-active hover:text-ink"
+              >
+                Back to {mailboxTitle} <Kbd>Esc</Kbd>
+              </Button>
+            )}
+          </span>
+        </div>
       </div>
       <div
         ref={scrollRef}
@@ -471,11 +611,7 @@ export const ConversationView = memo(function ConversationView(
         className="min-h-0 flex-1 overflow-y-auto px-6 py-5 focus:outline-none [scrollbar-gutter:stable]"
       >
         {conversation || inlineComposer ? (
-          <div
-            data-testid="conversation-content"
-            className="mx-auto flex w-full flex-col gap-3.5"
-            style={{ maxWidth: 'clamp(576px, 57.6vw, 896px)' }}
-          >
+          <div data-testid="conversation-content" className="mx-auto flex w-full max-w-[896px] flex-col">
             <ConversationMessages
               key={selected.id}
               conversation={
@@ -486,6 +622,13 @@ export const ConversationView = memo(function ConversationView(
                   bodyHydrationFailed: false
                 }
               }
+              selected={selected}
+              onChangeSnooze={props.onChangeSnooze}
+              onUnsnooze={props.onUnsnooze}
+              onCancelFollowUp={props.onCancelFollowUp}
+              labels={props.labels}
+              labelIds={selected.labelIds}
+              onOpenLabel={props.onOpenLabel}
               account={account}
               online={online}
               inlineComposer={inlineComposer}

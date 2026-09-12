@@ -50,6 +50,7 @@ const replyRequest = { purpose: 'reply', thread: [{ author: 'Maya Lin', text: 'P
 
 async function openAiSettings(page: Page): Promise<void> {
   await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-ai').click()
   await expect(page.getByTestId('settings-view')).toBeVisible()
   await expect(page.getByTestId('settings-ai')).toBeVisible()
 }
@@ -79,7 +80,7 @@ test('enabling shows the disclosure, a key round-trips, and a scripted generatio
   // Key round trip: saved keys show presence only, never the value.
   await page.getByTestId('settings-ai-key-input').fill('sk-test-key-e2e')
   await page.getByTestId('settings-ai-key-save').click()
-  await expect(page.getByTestId('settings-ai-key-present')).toBeVisible()
+  await expect(page.getByTestId('settings-ai-key-present')).toHaveText('sk-t••••••••-e2e')
   await expect(page.getByTestId('settings-ai-key-input')).toHaveCount(0)
 
   // A scripted generation streams through the production transport.

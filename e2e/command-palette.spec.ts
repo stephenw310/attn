@@ -84,6 +84,8 @@ test('keeps focus, selection, and keyboard commands inside the open palette', as
   await expect(page.getByTestId('mail-sidebar')).toBeVisible()
   await expect(input).toBeFocused()
   await page.keyboard.press('Tab')
+  await expect(palette.getByRole('button', { name: 'Close Esc' })).toBeFocused()
+  await page.keyboard.press('Tab')
   await expect(input).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(palette).toHaveCount(0)

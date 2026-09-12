@@ -45,7 +45,7 @@ test('exposes layout shortcuts and fast icon hints', async ({ page }) => {
   await expect(page.getByTestId('footer-toggle')).toHaveCount(0)
   await expect(page.getByTestId('status-note')).toBeVisible()
   await expect(page.getByTestId('composer-to')).toHaveCSS('min-height', '44px')
-  await expect(page.getByTestId('composer-subject')).not.toHaveAttribute('placeholder')
+  await expect(page.getByTestId('composer-subject')).toHaveAttribute('placeholder', 'Add a subject')
   await expect(page.getByTestId('composer-to').locator('input')).not.toHaveAttribute('placeholder')
   const attach = page.getByTestId('composer-attach')
   await attach.hover()

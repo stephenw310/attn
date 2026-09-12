@@ -17,7 +17,7 @@ export function InboxOverlays({ controller: c }: { controller: InboxController }
           targetCount={c.targetedThreads.length}
           onCancel={c.closeSnooze}
           onConfirm={c.snoozeSelected}
-          onUnsnooze={c.view === 'snoozed' ? c.unsnoozeSelected : undefined}
+          onUnsnooze={c.selected.snoozed ? c.unsnoozeSelected : undefined}
         />
       )}
       {!c.composerDraft && c.labelTargets && (
@@ -45,6 +45,7 @@ export function InboxOverlays({ controller: c }: { controller: InboxController }
       )}
       {!c.composerDraft && c.splitRulesOpen && c.splits.state && (
         <SplitRuleManager
+          accountEmail={c.activeAccount ?? undefined}
           state={c.splits.state}
           onSave={c.splits.save}
           onNotify={c.splits.setNotify}
@@ -75,7 +76,24 @@ export function InboxOverlays({ controller: c }: { controller: InboxController }
           onToast={c.showToast}
         />
       )}
-      <Toast toast={c.toast} progress={c.outboxProgress} />
+      <Toast
+        toast={c.toast}
+        progress={c.outboxProgress}
+        onUndo={
+          c.composerDraft ||
+          c.accounts.accountSwitchPending ||
+          c.settingsOpen ||
+          c.splitRulesOpen ||
+          c.cheatSheetOpen ||
+          c.paletteOpen ||
+          c.accounts.removeAccountOpen ||
+          c.snoozeOpen ||
+          c.labelTargets ||
+          c.moveRequest
+            ? undefined
+            : c.undoFromToast
+        }
+      />
     </>
   )
 }

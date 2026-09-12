@@ -13,7 +13,8 @@ import {
   matchComposerKey,
   matchKey,
   readingScrollDelta,
-  registerCommands
+  registerCommands,
+  shortcutReferenceCommands
 } from './commands'
 
 const cleanups: Array<() => void> = []
@@ -411,9 +412,9 @@ describe('keyboard dispatch', () => {
       createCommand('conversation.close', () => {})
     ])
     expect(listFooterHints('reader')).toEqual([
-      { id: 'reply', label: 'reply', order: 10, shortcuts: ['r'] },
-      { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] },
-      { id: 'forward', label: 'forward', order: 12, shortcuts: ['f'] },
+      { id: 'reply', label: 'Reply', order: 10, shortcuts: ['r'] },
+      { id: 'reply-all', label: 'Reply all', order: 11, shortcuts: ['a'] },
+      { id: 'forward', label: 'Forward', order: 12, shortcuts: ['f'] },
       { id: 'done', label: 'done', order: 20, shortcuts: ['e'] },
       { id: 'snooze', label: 'snooze', order: 30, shortcuts: ['h'] },
       { id: 'move', label: 'move', order: 40, shortcuts: ['v'] },
@@ -464,4 +465,17 @@ describe('keyboard dispatch', () => {
     expect(readingScrollDelta(key('ArrowDown', { altKey: true }), 1000)).toBeNull()
     expect(readingScrollDelta(key('j'), 1000)).toBeNull()
   })
+})
+
+test('shortcut reference includes unmounted views and preserves live command labels', () => {
+  const before = getCommandRegistrySnapshot()
+  const reference = shortcutReferenceCommands([
+    createCommand('triage.star', () => {}, { titleOf: () => 'Unstar' })
+  ])
+  expect(
+    reference.some((command) => command.id === 'composer.send' && command.shortcut === 'Mod+Enter')
+  ).toBe(true)
+  expect(reference.find((command) => command.id === 'triage.star')?.titleOf?.()).toBe('Unstar')
+  expect(new Set(reference.map((command) => command.id)).size).toBe(reference.length)
+  expect(getCommandRegistrySnapshot()).toBe(before)
 })

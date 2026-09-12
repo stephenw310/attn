@@ -98,6 +98,21 @@ test('animates a marked-done row before removing it', async ({ page }) => {
   await expect(page.getByTestId('toast')).not.toHaveAttribute('data-toast-id', firstToastId ?? '')
 })
 
+test('an empty date group fades without sliding with its mail rows', async ({ page }) => {
+  const rows = page.getByTestId('thread-row')
+  await expect(rows).toHaveCount(8)
+  await page.keyboard.press('x')
+  for (let index = 1; index < 8; index++) await page.keyboard.press('Shift+j')
+  await expect(page.getByTestId('selection-count')).toHaveText('8 selected')
+  await page.keyboard.press('e')
+  const heading = page.getByTestId('thread-date-group').first()
+  await expect(heading).toHaveCSS('animation-name', 'thread-group-exit')
+  await expect(heading).toHaveCSS('transform', 'none')
+  await expect(rows.first()).toHaveCSS('animation-name', 'thread-exit')
+  await expect(rows).toHaveCount(0)
+  await expect(page.getByTestId('thread-date-group')).toHaveCount(0)
+})
+
 test('does not drop rapid archives or an undo during the exit animation', async ({ page }) => {
   const rows = page.getByTestId('thread-row')
   await expect(rows).toHaveCount(8)
@@ -160,11 +175,11 @@ test('selects a range and archives it as one undoable bulk action', async ({ pag
   await expect
     .poll(() =>
       rows.evaluateAll((items) => {
-        const borders = items.slice(0, 3).map((item) => getComputedStyle(item).borderLeftColor)
-        return [borders[0] === 'rgba(0, 0, 0, 0)', borders[1] === 'rgba(0, 0, 0, 0)', borders[2]]
+        const markers = items.slice(0, 3).map((item) => getComputedStyle(item).backgroundColor)
+        return [markers[0] === markers[1], markers[1] !== markers[2], markers[2] !== markers[0]]
       })
     )
-    .toEqual([true, true, 'rgb(255, 178, 36)'])
+    .toEqual([true, true, true])
 
   // Reader Escape always returns to the list; a second list Escape clears selection.
   await page.keyboard.press('k')
@@ -431,8 +446,8 @@ test('extends the selection with Shift+Arrow in the list and in the reader', asy
   await expect(count).toHaveText('2 selected')
 
   // A bare arrow in the reader scrolls the conversation instead of navigating.
-  const position = page.getByTestId('conversation-position')
-  const before = await position.textContent()
+  const position = page.getByTestId('conversation-view')
+  const before = await position.getAttribute('data-thread-index')
   await page.keyboard.press('ArrowDown')
-  await expect(position).toHaveText(before ?? '')
+  await expect(position).toHaveAttribute('data-thread-index', before ?? '')
 })

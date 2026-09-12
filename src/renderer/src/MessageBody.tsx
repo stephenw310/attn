@@ -343,13 +343,9 @@ function SingleMessageBody({
       {remoteImagesBanner && (
         <div
           data-testid="remote-images-banner"
-          className={`mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-1.5 text-xs ${
-            surface === 'light'
-              ? 'border-mail-light-ink-dim/30 text-mail-light-ink-dim'
-              : 'border-edge text-ink-faint'
-          }`}
+          className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md bg-active px-4 py-4 text-xs text-ink-dim"
         >
-          <span>Remote images blocked</span>
+          <span className="min-w-0 flex-1">Remote images blocked</span>
           <button
             type="button"
             data-testid="remote-images-load-once"

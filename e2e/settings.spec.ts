@@ -36,10 +36,14 @@ test.describe('settings surface', () => {
     await expect(row(page, 'Your receipt')).toHaveAttribute('data-selected', 'true')
 
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-accounts').click()
     const settings = page.getByTestId('settings-view')
     await expect(settings).toBeVisible()
-    // The prior list stays mounted and hidden; the sidebar stays visible.
-    await expect(page.getByTestId('mail-sidebar')).toBeVisible()
+    await expect(page.getByTestId('write-button')).toHaveCount(0)
+    await expect(page.getByTestId('sidebar-toggle')).toHaveCount(0)
+    await expect(page.getByTestId('account-menu')).toBeVisible()
+    // The prior list stays mounted and hidden; settings hides the mail sidebar.
+    await expect(page.getByTestId('mail-sidebar')).toHaveCount(0)
     await expect(page.getByTestId('thread-list')).toBeHidden()
     await expect(settings.getByTestId('settings-account-row')).toHaveCount(1)
     await expect(settings.getByTestId('settings-account-row')).toContainText('seed@attn.test')
@@ -47,23 +51,25 @@ test.describe('settings surface', () => {
     const allAccountsScope = settings.getByTestId('settings-all-accounts-scope')
     await expect(accountScope).toContainText('This account')
     await expect(accountScope).toContainText('seed@attn.test')
+    await settings.getByTestId('settings-nav-sync').click()
     await expect(accountScope.getByTestId('settings-sync')).toBeVisible()
+    await settings.getByTestId('settings-nav-compose').click()
     await expect(accountScope.getByTestId('settings-compose')).toBeVisible()
     await expect(accountScope.getByTestId('settings-split-rules')).toHaveCount(0)
     await expect(allAccountsScope).toContainText('All accounts')
     await expect(allAccountsScope).toContainText('every signed-in account and mailbox')
+    await settings.getByTestId('settings-nav-triage').click()
     await expect(allAccountsScope.getByTestId('settings-triage')).toBeVisible()
+    await settings.getByTestId('settings-nav-security').click()
     await expect(allAccountsScope.getByTestId('settings-security')).toBeVisible()
     await expect(settings.getByTestId('settings-sync-limit-mode')).toContainText(
       'Recommended — 400,000 email threads'
     )
-    await expect(settings.getByTestId('settings-security')).toContainText('Security')
-    await expect(settings.getByTestId('settings-remote-images-description')).toContainText(
-      'every mailbox and signed-in account'
-    )
+    await expect(settings.getByTestId('settings-security')).toContainText('Privacy')
+    await expect(settings.getByTestId('settings-remote-images-description')).toContainText('every account')
 
     // Settings remain readable and every control fits its row at the default
-    // app size. The AI rules field is deliberately fixed at ten lines.
+    // app size. The AI rules field is deliberately four lines tall.
     const layout = await settings.evaluate((root) => {
       const syncDescription = root.querySelector<HTMLElement>('[data-testid="settings-sync-description"]')
       const rules = root.querySelector<HTMLTextAreaElement>('[data-testid="settings-ai-voice-rules"]')
@@ -81,10 +87,10 @@ test.describe('settings surface', () => {
     })
     expect(layout).toEqual({
       noHorizontalOverflow: true,
-      descriptionFontSize: '13px',
+      descriptionFontSize: '11px',
       headingsUseNormalCase: true,
       rulesResize: 'none',
-      rulesRows: 10
+      rulesRows: 4
     })
 
     mkdirSync(artifactDirectory, { recursive: true })
@@ -92,14 +98,12 @@ test.describe('settings surface', () => {
     await page.screenshot({ path })
     await testInfo.attach('settings', { path, contentType: 'image/png' })
 
-    await allAccountsScope.evaluate((section) => section.scrollIntoView({ block: 'start' }))
+    await settings.getByTestId('settings-nav-sync').click()
     const scopesPath = join(artifactDirectory, 'settings-scopes.png')
     await page.screenshot({ path: scopesPath })
     await testInfo.attach('settings scopes', { path: scopesPath, contentType: 'image/png' })
 
-    await settings
-      .getByTestId('settings-ai')
-      .evaluate((section) => section.scrollIntoView({ block: 'start' }))
+    await settings.getByTestId('settings-nav-ai').click()
     const aiPath = join(artifactDirectory, 'settings-ai.png')
     await page.screenshot({ path: aiPath })
     await testInfo.attach('settings-ai', { path: aiPath, contentType: 'image/png' })
@@ -133,6 +137,7 @@ test.describe('settings surface', () => {
   }) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(8)
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-triage').click()
     await page.getByTestId('settings-undo-send-delay').selectOption('20')
     await page.keyboard.press('Escape')
 
@@ -144,7 +149,7 @@ test.describe('settings surface', () => {
     await composer.triggerSend()
 
     const toast = page.getByTestId('toast')
-    await expect(toast).toHaveText('Sent — Undo (Z)')
+    await expect(toast).toHaveText(/Sending in \d+ secondsUndo Z/)
     const durationMs = Number(await toast.getAttribute('data-toast-duration-ms'))
     expect(durationMs).toBeGreaterThan(15_000)
     expect(durationMs).toBeLessThanOrEqual(20_000)
@@ -156,6 +161,7 @@ test.describe('settings surface', () => {
     const { page: relaunched } = await boot.relaunch()
     await expect(relaunched.getByTestId('thread-row')).toHaveCount(8)
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-triage').click()
     await expect(relaunched.getByTestId('settings-undo-send-delay')).toHaveValue('20')
   })
 
@@ -168,6 +174,9 @@ test.describe('settings surface', () => {
     const settings = page.getByTestId('settings-view')
     await expect(settings).toBeVisible()
     // The palette deep-link lands focus on the auto-advance control.
+    await expect(page.getByTestId('settings-auto-advance')).toBeFocused()
+    await page.getByTestId('settings-nav-appearance').click()
+    await runPaletteCommand(page, 'Set auto-advance')
     await expect(page.getByTestId('settings-auto-advance')).toBeFocused()
     await page.getByTestId('settings-auto-advance').selectOption('previous')
     await page.keyboard.press('Escape')
@@ -182,6 +191,7 @@ test.describe('settings surface', () => {
 
     // 'Back to list' closes the reader after triage instead of advancing.
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-triage').click()
     await page.getByTestId('settings-auto-advance').selectOption('list')
     await page.keyboard.press('Escape')
     await row(page, 'Lunch next week').click()
@@ -194,6 +204,7 @@ test.describe('settings surface', () => {
     const { page: relaunched } = await boot.relaunch()
     await expect(relaunched.getByTestId('thread-row')).toHaveCount(6)
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-triage').click()
     await expect(relaunched.getByTestId('settings-auto-advance')).toHaveValue('list')
   })
 
@@ -203,22 +214,24 @@ test.describe('settings surface', () => {
   }) => {
     await expect(page.getByTestId('thread-row')).toHaveCount(8)
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-notifications').click()
     const unreadBadge = page.getByTestId('settings-unread-badge')
     await expect(unreadBadge).toBeChecked()
     await unreadBadge.uncheck()
     await expect(unreadBadge).not.toBeChecked()
-    await expect(page.getByTestId('settings-pause-state')).toHaveText('Notifications are on')
+    await expect(page.getByTestId('settings-notifications')).toContainText('Notifications are active')
     await page.getByTestId('settings-pause-tomorrow').click()
-    await expect(page.getByTestId('settings-pause-state')).toContainText('Paused until')
+    await expect(page.getByTestId('settings-notifications')).toContainText('Paused until')
     await page.keyboard.press('Escape')
 
     const { page: relaunched } = await boot.relaunch()
     await expect(relaunched.getByTestId('thread-row')).toHaveCount(8)
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-notifications').click()
     await expect(relaunched.getByTestId('settings-unread-badge')).not.toBeChecked()
-    await expect(relaunched.getByTestId('settings-pause-state')).toContainText('Paused until')
+    await expect(relaunched.getByTestId('settings-notifications')).toContainText('Paused until')
     await relaunched.getByTestId('settings-pause-resume').click()
-    await expect(relaunched.getByTestId('settings-pause-state')).toHaveText('Notifications are on')
+    await expect(relaunched.getByTestId('settings-notifications')).toContainText('Notifications are active')
     await runPaletteCommand(relaunched, 'Toggle unread app badge')
     await expect(relaunched.getByTestId('settings-unread-badge')).toBeChecked()
     await relaunched.keyboard.press('Escape')
@@ -226,9 +239,9 @@ test.describe('settings surface', () => {
     // The palette exposes the same pause without a tray icon (Linux has none).
     await runPaletteCommand(relaunched, 'Pause notifications for 1 hour')
     await relaunched.keyboard.press('ControlOrMeta+,')
-    await expect(relaunched.getByTestId('settings-pause-state')).toContainText('Paused until')
+    await expect(relaunched.getByTestId('settings-notifications')).toContainText('Paused until')
     await runPaletteCommand(relaunched, 'Resume notifications')
-    await expect(relaunched.getByTestId('settings-pause-state')).toHaveText('Notifications are on')
+    await expect(relaunched.getByTestId('settings-notifications')).toContainText('Notifications are active')
   })
 
   test('cheat sheet renders from the command registry and needs no source edit to stay current', async ({
@@ -258,6 +271,13 @@ test.describe('settings surface', () => {
       'Mark done'
     )
 
+    await expect(sheet.locator('[data-command-id="composer.send"]')).toBeVisible()
+    await expect(
+      sheet
+        .getByTestId('cheat-sheet-group')
+        .filter({ has: page.getByRole('heading', { name: 'Conversation', exact: true }) })
+    ).toContainText('Next message')
+    await expect(sheet.locator('[data-command-id="composer.bold"]')).toContainText('B')
     mkdirSync(artifactDirectory, { recursive: true })
     const path = join(artifactDirectory, 'cheat-sheet.png')
     await page.screenshot({ path })
@@ -349,6 +369,7 @@ test.describe('account reorder', () => {
     await expect(row(page, 'Alpha roadmap')).toBeVisible()
 
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-accounts').click()
     const rows = page.getByTestId('settings-account-row')
     await expect(rows).toHaveCount(3)
     await expect(rows.nth(0)).toHaveAttribute('data-email', 'primary@attn.test')
@@ -401,6 +422,7 @@ test.describe('account reorder', () => {
     // Sign-out successor selection uses the same order: removing the active
     // account (position 1) activates the account now holding that position.
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-accounts').click()
     await relaunched.getByTestId('settings-sign-out').click()
     await relaunched.getByTestId('remove-account-keep').click()
     await expect(relaunched.getByTestId('account-menu')).toContainText('third@attn.test')
@@ -410,6 +432,7 @@ test.describe('account reorder', () => {
   test('a held reorder response cannot roll back an account switch it raced', async ({ app, page }) => {
     await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-accounts').click()
     const rows = page.getByTestId('settings-account-row')
     await expect(rows).toHaveCount(3)
 
@@ -526,6 +549,7 @@ test.describe('historical sync limit', () => {
     // Raising the reached limit resumes the same listing and preserves the
     // partial page's start count when it caps again mid-walk.
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-sync').click()
     await setCustomLimit(page, '6')
     await page.keyboard.press('Escape')
     const resumed = await runSweep(app, sweepRequest)
@@ -536,6 +560,7 @@ test.describe('historical sync limit', () => {
     // A lower reached limit makes no lifetime Gmail requests and deletes
     // nothing already stored.
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-sync').click()
     await setCustomLimit(page, '3')
     await page.keyboard.press('Escape')
     const lowered = await runSweep(app, sweepRequest)
@@ -545,6 +570,7 @@ test.describe('historical sync limit', () => {
 
     // All mail asks for confirmation, then walks the saved page to the end.
     await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-sync').click()
     await page.getByTestId('settings-sync-limit-mode').selectOption('all')
     await expect(page.getByTestId('settings-sync-limit-confirm')).toContainText('disk space')
     await page.getByTestId('settings-sync-limit-confirm-apply').click()
@@ -561,6 +587,7 @@ test.describe('historical sync limit', () => {
     const { page: relaunched } = await boot.relaunch()
     await expect(relaunched.getByTestId('thread-row')).toHaveCount(2)
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-sync').click()
     await expect(relaunched.getByTestId('settings-sync-limit-mode')).toHaveValue('all')
     await relaunched.keyboard.press('Escape')
     const settled = await runSweep(boot.app, sweepRequest)
@@ -570,6 +597,7 @@ test.describe('historical sync limit', () => {
     await relaunched.keyboard.press('ControlOrMeta+2')
     await expect(relaunched.getByTestId('account-menu')).toContainText('second@attn.test')
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-sync').click()
     await expect(relaunched.getByTestId('settings-sync-limit-mode')).toHaveValue('default')
   })
 })
@@ -648,6 +676,7 @@ test.describe('"Sent with Attn" footer', () => {
     const { page: relaunched } = await boot.relaunch()
     await expect(relaunched.getByTestId('thread-row')).toHaveCount(2)
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-compose').click()
     await expect(relaunched.getByTestId('settings-attn-signature')).toBeChecked()
   })
 

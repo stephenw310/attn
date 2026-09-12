@@ -5,10 +5,12 @@ import { accountNeedsAttention, useAccountHealth } from '../hooks/useAccountHeal
 import { isMacPlatform, modKeyLabel } from '../platform'
 import { useTheme } from '../theme'
 import { AccountHealthLine } from './AccountHealthLine'
+import { Button } from './Button'
 import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
+import { MailIcon } from './MailIcon'
 
-const CHIP_CLASS = 'app-no-drag rounded-full border border-edge px-2.5 py-1 text-xs text-ink-faint'
+const CHIP_CLASS = 'app-no-drag app-button max-w-56 truncate'
 
 function MailActivity({
   pendingActions,
@@ -191,7 +193,7 @@ function AccountMenu({
           </button>
           <hr className="my-1.5 border-edge" />
           <label className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim">
-            <span>Theme</span>
+            <span>Appearance</span>
             <select
               data-testid="theme-picker"
               aria-label="Theme"
@@ -258,6 +260,7 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
+  preferencesOpen?: boolean
   syncStatus: React.ReactNode
   pendingActionCount: number
   pausedActionCount: number
@@ -272,6 +275,8 @@ interface MailHeaderProps {
   onReconnectActions: () => void
   onOpenOutbox: () => void
   onToggleSidebar: () => void
+  onWrite: () => void
+  writeDisabled: boolean
   onSwitchAccount: (accountId: string) => void
   onAddAccount: () => void
   onRemoveAccount: () => void
@@ -282,6 +287,7 @@ interface MailHeaderProps {
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   const {
+    preferencesOpen = false,
     pendingActionCount,
     pausedActionCount,
     outboxCount,
@@ -295,6 +301,8 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
     onReconnectActions,
     onOpenOutbox,
     onToggleSidebar,
+    onWrite,
+    writeDisabled,
     onSwitchAccount,
     onAddAccount,
     onRemoveAccount,
@@ -307,9 +315,9 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   return (
     <header
       data-testid="mail-header"
-      className="app-drag app-titlebar-safe-area flex h-11 flex-none items-center gap-6 border-b border-edge"
+      className="app-mail-header app-drag app-titlebar-safe-area flex flex-none items-center"
     >
-      {!composerOpen && (
+      {!composerOpen && !preferencesOpen && (
         <>
           <button
             type="button"
@@ -326,10 +334,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
             }}
             className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
-              <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
-              <path d="M8.5 4v16" strokeWidth="1.75" />
-            </svg>
+            <MailIcon name="sidebar" />
           </button>
           <button
             type="button"
@@ -343,17 +348,27 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
               onToggleFooter()
               event.currentTarget.blur()
             }}
-            className="app-no-drag -ml-4 flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="app-no-drag flex size-7 cursor-pointer items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current">
-              <rect x="3" y="4" width="18" height="16" rx="2.5" strokeWidth="1.75" />
-              <path d="M3 15h18" strokeWidth="1.75" />
-            </svg>
+            <MailIcon name="keyboard" />
           </button>
         </>
       )}
+      {composerOpen && <span aria-hidden className="w-16 flex-none" />}
+      {!preferencesOpen && (
+        <Button
+          data-testid="write-button"
+          className="app-no-drag app-write"
+          onClick={onWrite}
+          disabled={writeDisabled}
+          data-tooltip="Write (C)"
+        >
+          <MailIcon name="write" />
+          Write
+        </Button>
+      )}
       <div className="app-no-drag ml-auto flex items-center gap-4">
-        {!composerOpen && selectionCount > 0 && (
+        {!composerOpen && !preferencesOpen && selectionCount > 0 && (
           <span
             data-testid="selection-count"
             className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent tabular-nums"

@@ -105,6 +105,29 @@ function onlyAlpha(rows: readonly { id: string }[]): void {
 }
 
 describe('two-account read isolation', () => {
+  it('keeps snooze deadlines scoped to the account in mailbox and search rows', async () => {
+    const db = await twoAccountStore()
+    try {
+      db.prepare(`UPDATE reminders SET due_at = ? WHERE account_id = ?`).run(123000, A)
+      db.prepare(`INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+        VALUES (?, 'alpha-t7', 'snooze', 456000, 'pending')`).run(B)
+      db.prepare(`INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+        VALUES (?, 'alpha-t7', 'follow_up', ?, 'pending')`).run(A, 789000)
+      db.prepare(`INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+        VALUES (?, 'alpha-t7', 'follow_up', ?, 'pending')`).run(B, 999000)
+      expect(queries.listMailboxThreads(db, A, 'allMail').find((row) => row.id === 'alpha-t7')).toMatchObject(
+        { snoozed: true, snoozeDueAt: 123000, followUpDueAt: 789000 }
+      )
+      expect(search.searchThreads(db, A, 'roadmap').rows.find((row) => row.id === 'alpha-t7')).toMatchObject({
+        snoozed: true,
+        snoozeDueAt: 123000,
+        followUpDueAt: 789000
+      })
+    } finally {
+      db.close()
+    }
+  })
+
   it('scopes every list, count, conversation, contact, and search read to its account', async () => {
     const db = await twoAccountStore()
 
@@ -126,6 +149,11 @@ describe('two-account read isolation', () => {
     expect(countsA.inbox).toBe(3)
     expect(countsB.inbox).toBe(4)
     expect(queries.listUserLabels(db, A).map((label) => label.id)).toEqual(['alpha-label'])
+    for (const accountId of [A, B]) {
+      for (const label of queries.listUserLabels(db, accountId)) {
+        expect(label.threadCount).toBe(queries.listLabelThreads(db, accountId, label.id).length)
+      }
+    }
 
     expect(queries.getConversation(db, A, 'alpha-t1', 'unavailable')).not.toBeNull()
     expect(queries.getConversation(db, A, 'beta-t1', 'unavailable')).toBeNull()

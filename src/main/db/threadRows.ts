@@ -10,12 +10,18 @@ import type { ThreadRow } from '../../shared/mail'
 export const THREAD_AUXILIARY_PROJECTION_SQL = `EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'snooze' AND r.state = 'pending') AS snoozed,
+              (SELECT MIN(r.due_at) FROM reminders r
+               WHERE r.account_id = t.account_id AND r.thread_id = t.id
+                 AND r.kind = 'snooze' AND r.state = 'pending') AS snooze_due_at,
               EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'snooze' AND r.state = 'returned') AS returned,
               EXISTS(SELECT 1 FROM reminders r
                      WHERE r.account_id = t.account_id AND r.thread_id = t.id
                        AND r.kind = 'follow_up' AND r.state = 'returned') AS follow_up_returned,
+              (SELECT MIN(r.due_at) FROM reminders r
+               WHERE r.account_id = t.account_id AND r.thread_id = t.id
+                 AND r.kind = 'follow_up' AND r.state = 'pending') AS follow_up_due_at,
               EXISTS(SELECT 1 FROM outbox o
                      WHERE o.account_id = t.account_id AND o.thread_id = t.id
                        AND o.state IN ('composing', 'drafted')) AS has_draft`
@@ -45,6 +51,8 @@ export interface ThreadProjectionRow {
   is_starred: number
   has_attachment: number
   snoozed: number
+  snooze_due_at?: number | null
+  follow_up_due_at?: number | null
   returned: number
   follow_up_returned: number
   has_draft: number
@@ -63,6 +71,8 @@ export function toThreadRow(row: ThreadProjectionRow, lastMsgAt: number | null):
     starred: row.is_starred === 1,
     hasAttachment: row.has_attachment === 1,
     snoozed: row.snoozed === 1,
+    ...(row.snooze_due_at != null ? { snoozeDueAt: row.snooze_due_at } : {}),
+    ...(row.follow_up_due_at != null ? { followUpDueAt: row.follow_up_due_at } : {}),
     returned: row.returned === 1,
     followUpReturned: row.follow_up_returned === 1,
     hasDraft: row.has_draft === 1,

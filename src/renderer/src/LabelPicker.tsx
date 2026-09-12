@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { MailLabel } from '../../shared/mail'
 import { PickerDialog } from './components/PickerDialog'
 import { useHighlightedOption } from './hooks/useHighlightedOption'
+import { labelMarkerColor } from './list/labelColor'
 
 export type LabelCheckState = 'all' | 'some' | 'off'
 
@@ -41,10 +42,11 @@ export function LabelPicker({ labels, targets, onClose, onToggle }: LabelPickerP
     <PickerDialog
       testId="label-picker"
       ariaLabel="Label conversations"
+      title={targets.length > 1 ? `Label ${targets.length} conversations` : 'Label conversation'}
       searchTestId="label-search"
       searchPlaceholder="Search labels…"
       optionsTestId="label-options"
-      footer="↑↓ navigate · Enter toggle · Esc close"
+      actionLabel="Toggle"
       query={query}
       onQuery={setQuery}
       highlight={highlight}
@@ -64,23 +66,33 @@ export function LabelPicker({ labels, targets, onClose, onToggle }: LabelPickerP
               data-testid="label-option"
               data-label-id={label.id}
               data-state={state}
+              aria-pressed={state === 'some' ? 'mixed' : state === 'all'}
               data-highlighted={index === highlight.index || undefined}
               onMouseEnter={() => highlight.setIndex(index)}
               onClick={() => onToggle(label, state)}
-              className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${
+              className={`flex w-full cursor-pointer items-center gap-3 rounded-md px-3 py-3 text-left text-[13px] ${
                 index === highlight.index ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
               }`}
             >
               <span
                 className={`flex size-4 items-center justify-center rounded border text-[11px] font-bold ${
-                  state === 'off' ? 'border-edge text-transparent' : 'border-accent bg-accent text-ground'
+                  state === 'off'
+                    ? 'border-dialog-edge text-transparent'
+                    : 'border-accent bg-accent text-on-accent'
                 }`}
                 aria-hidden
               >
                 {state === 'some' ? '−' : '✓'}
               </span>
+              <span
+                aria-hidden
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: labelMarkerColor(label.id) }}
+              />
               <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{label.name}</span>
-              {state === 'some' && <span className="text-xs text-ink-faint">some</span>}
+              {state === 'some' && (
+                <span className="text-xs text-ink-faint">Some selected conversations</span>
+              )}
             </button>
           )
         })

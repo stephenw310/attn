@@ -35,3 +35,16 @@ export function normalizeThemePreference(value: unknown): ThemePreference {
   if (value === 'sand') return 'dispatch-light'
   return isThemePreference(value) ? value : 'system'
 }
+
+export const PALETTE_IDS = ['matcha', 'mist', 'linen', 'dusk'] as const
+export type PaletteId = (typeof PALETTE_IDS)[number]
+export const PALETTE_OPTIONS = PALETTE_IDS.map((id) => ({
+  id,
+  label: id[0].toUpperCase() + id.slice(1)
+}))
+export function isPaletteId(value: unknown): value is PaletteId {
+  return PALETTE_IDS.some((id) => id === value)
+}
+export function normalizePalette(value: unknown): PaletteId {
+  return isPaletteId(value) ? value : 'matcha'
+}

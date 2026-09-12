@@ -40,6 +40,8 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     threadCountExact: false,
     view: 'inbox' as const,
     mailboxTitle: 'Inbox',
+    labels: [],
+    onOpenLabel: () => {},
     conversation: null,
     account: 'seed@attn.test',
     online: true,
@@ -60,7 +62,7 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     await act(async () => root.render(createElement(ConversationView, props)))
     const readsAfterFirstRender = subjectReads
     expect(readsAfterFirstRender).toBeGreaterThan(0)
-    expect(container.querySelector('[data-testid="conversation-position"]')?.textContent).toBe('1 of 100+')
+    expect(container.querySelector('[data-testid="conversation-position"]')).toBeNull()
 
     await act(async () => root.render(createElement(ConversationView, props)))
     expect(subjectReads).toBe(readsAfterFirstRender)
@@ -128,6 +130,8 @@ it('opens a message appended to the current conversation by default', async () =
     threadCountExact: true,
     view: 'inbox' as const,
     mailboxTitle: 'Inbox',
+    labels: [],
+    onOpenLabel: () => {},
     account: 'me@example.com',
     online: true,
     scrollRef,
@@ -248,6 +252,8 @@ it('keeps unsaved composer state when its source loads, disappears, or moves in 
     threadCount: 1,
     threadCountExact: true,
     mailboxTitle: 'Inbox',
+    labels: [],
+    onOpenLabel: () => {},
     account: 'me@example.com',
     online: true,
     scrollRef: { current: null as HTMLDivElement | null },

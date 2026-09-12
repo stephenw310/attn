@@ -1,46 +1,21 @@
 import type { Draft, DraftSaveInput } from '../../../shared/drafts'
+import { MailIcon } from '../components/MailIcon'
 import { formatBytes } from '../formatBytes'
 import { modKeyLabel } from '../platform'
+import { ComposerSaveStatus, type ComposerSaveStatusProps } from './ComposerChrome'
 import { EditorToolbar } from './EditorToolbar'
 import { FollowUpControl } from './FollowUpControl'
 
-function TrashIcon(): React.JSX.Element {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="size-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-    >
-      <title>{`Discard draft (${modKeyLabel()}⇧D)`}</title>
-      <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" strokeLinecap="round" />
-    </svg>
-  )
-}
-
 export function PaperclipIcon(): React.JSX.Element {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="size-4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-    >
-      <path
-        d="m8.5 12.5 6.2-6.2a3 3 0 0 1 4.2 4.2l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
+  return <MailIcon name="attachment" />
 }
 
-interface ComposerFooterProps {
+interface ComposerFooterProps extends ComposerSaveStatusProps {
+  mode: 'full' | 'inline'
   visibleAttachments: Draft['attachments']
+  attachmentError: string | null
+  retryAttachment: () => void
+  dismissAttachmentError: () => void
   attaching: boolean
   closing: boolean
   removeAttachment: (attachmentId: string) => void
@@ -56,18 +31,113 @@ interface ComposerFooterProps {
 
 export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
   return (
-    <>
+    <footer
+      data-testid="composer-footer"
+      className="flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-t border-edge py-3"
+    >
+      <button
+        type="button"
+        data-testid="composer-send"
+        disabled={props.attaching || props.closing}
+        className="inline-flex cursor-pointer items-center gap-3 rounded-md bg-accent px-3.5 py-2 text-xs font-medium text-on-accent disabled:cursor-wait disabled:opacity-50"
+        data-tooltip="Send message"
+        onClick={props.send}
+      >
+        Send <span className="text-[10px]">{modKeyLabel()} ↵</span>
+      </button>
+      <EditorToolbar />
+      <span aria-hidden className="mx-1 h-4 border-l border-edge" />
+      <button
+        type="button"
+        className="flex size-8 items-center justify-center rounded-md text-ink-dim hover:bg-active hover:text-ink disabled:opacity-50"
+        data-testid="composer-attach"
+        aria-label="Attach files"
+        data-tooltip={`Attach files (${modKeyLabel()}⇧A)`}
+        disabled={props.attaching || props.closing}
+        onClick={props.pickAttachments}
+      >
+        <PaperclipIcon />
+      </button>
+      <FollowUpControl
+        followUpAt={props.followUpAt}
+        open={props.followUpOpen}
+        onOpenChange={props.setFollowUpOpen}
+        onChange={(value) => {
+          props.setFollowUpAt(value)
+          props.updateFields({ followUpAt: value })
+        }}
+      />
       {props.visibleAttachments.length > 0 && (
-        <div className="flex shrink-0 flex-wrap gap-2 px-4 py-2.5" data-testid="composer-attachment-chips">
+        <span className="sr-only" data-testid="composer-attachment-count">
+          {props.visibleAttachments.length} attachment{props.visibleAttachments.length === 1 ? '' : 's'}
+        </span>
+      )}
+      <span className="ml-auto">{props.mode === 'full' && <ComposerSaveStatus {...props} />}</span>
+      <button
+        type="button"
+        className="flex size-8 items-center justify-center rounded-md text-ink-dim hover:bg-active hover:text-danger disabled:opacity-50"
+        data-testid="composer-discard"
+        aria-label="Discard draft"
+        data-tooltip={`Discard draft (${modKeyLabel()}⇧D)`}
+        disabled={props.attaching || props.closing}
+        onClick={props.discard}
+      >
+        <MailIcon name="trash" />
+      </button>
+    </footer>
+  )
+}
+
+export function ComposerAttachments(
+  props: Pick<
+    ComposerFooterProps,
+    | 'attachmentError'
+    | 'retryAttachment'
+    | 'dismissAttachmentError'
+    | 'visibleAttachments'
+    | 'attaching'
+    | 'closing'
+    | 'removeAttachment'
+  >
+): React.JSX.Element {
+  return (
+    <div data-testid="composer-attachments">
+      {props.attachmentError && (
+        <div
+          data-testid="composer-attachment-error"
+          role="alert"
+          className="my-2 flex items-center gap-3 rounded-md bg-active px-3 py-2 text-xs"
+        >
+          <span className="flex-1 text-danger">{props.attachmentError}</span>
+          <button
+            type="button"
+            className="app-button"
+            onClick={props.retryAttachment}
+            disabled={props.attaching || props.closing}
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            className="app-button"
+            aria-label="Dismiss attachment error"
+            onClick={props.dismissAttachmentError}
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {props.visibleAttachments.length > 0 && (
+        <div className="flex shrink-0 flex-wrap gap-2 py-2.5" data-testid="composer-attachment-chips">
           {props.visibleAttachments.map((attachment) => (
             <div
               key={attachment.id}
-              className="flex min-w-0 max-w-72 items-center gap-2 rounded-lg border border-edge bg-active/60 px-2.5 py-1.5 text-xs"
+              className="flex min-w-0 max-w-72 items-center gap-2 rounded-md border border-edge bg-transparent px-2.5 py-1.5 text-xs"
               data-testid="composer-attachment-chip"
               data-attachment-id={attachment.id}
             >
               <PaperclipIcon />
-              <span className="min-w-0 truncate font-medium text-ink">{attachment.filename}</span>
+              <span className="min-w-0 truncate font-normal text-ink-dim">{attachment.filename}</span>
               <span className="shrink-0 text-ink-faint">{formatBytes(attachment.sizeBytes)}</span>
               <button
                 type="button"
@@ -83,65 +153,15 @@ export function ComposerFooter(props: ComposerFooterProps): React.JSX.Element {
           ))}
         </div>
       )}
-      <footer
-        data-testid="composer-footer"
-        className="flex min-h-14 shrink-0 items-center justify-between gap-3 px-4"
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-visible">
-          <EditorToolbar />
-          {props.visibleAttachments.length > 0 && (
-            <div
-              className="shrink-0 border-l border-edge pl-3 text-xs text-ink-faint"
-              data-testid="composer-attachments"
-            >
-              {props.visibleAttachments.length} attachment{props.visibleAttachments.length === 1 ? '' : 's'}
-            </div>
-          )}
+      {props.attaching && (
+        <div
+          data-testid="composer-attachment-progress"
+          role="status"
+          className="flex items-center gap-2 py-2 text-xs text-ink-dim"
+        >
+          <span className="size-3 animate-pulse rounded-full bg-accent/40" /> Updating attachments…
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            type="button"
-            className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-wait disabled:opacity-50"
-            data-testid="composer-attach"
-            aria-label="Attach files"
-            data-tooltip={`Attach files (${modKeyLabel()}⇧A)`}
-            disabled={props.attaching || props.closing}
-            onClick={props.pickAttachments}
-          >
-            <PaperclipIcon />
-          </button>
-          <FollowUpControl
-            followUpAt={props.followUpAt}
-            open={props.followUpOpen}
-            onOpenChange={props.setFollowUpOpen}
-            onChange={(value) => {
-              props.setFollowUpAt(value)
-              props.updateFields({ followUpAt: value })
-            }}
-          />
-          <button
-            type="button"
-            className="flex size-8 items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-danger disabled:cursor-wait disabled:opacity-50"
-            data-testid="composer-discard"
-            aria-label="Discard draft"
-            data-tooltip={`Discard draft (${modKeyLabel()}⇧D)`}
-            disabled={props.attaching || props.closing}
-            onClick={props.discard}
-          >
-            <TrashIcon />
-          </button>
-          <button
-            type="button"
-            data-testid="composer-send"
-            disabled={props.attaching || props.closing}
-            className="cursor-pointer rounded-md bg-accent/20 px-3.5 py-2 text-xs font-semibold text-accent disabled:cursor-wait disabled:opacity-50"
-            data-tooltip="Send message"
-            onClick={props.send}
-          >
-            Send <span className="ml-1 opacity-65">{modKeyLabel()}↵</span>
-          </button>
-        </div>
-      </footer>
-    </>
+      )}
+    </div>
   )
 }

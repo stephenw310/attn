@@ -320,6 +320,7 @@ test('opening Settings cancels an AI reply whose settings read is still pending'
   await page.keyboard.press('ControlOrMeta+j')
   await expectResponseHeld(app)
   await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-ai').click()
   await expect(page.getByTestId('settings-view')).toBeVisible()
   await release()
 
@@ -371,4 +372,18 @@ test.describe('AI replies to an individual message', () => {
     await expect(page.getByTestId('composer')).toHaveCount(0)
     expect(await aiRequests(app)).toHaveLength(0)
   })
+})
+
+test('the drafting status Stop button cancels generation', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page)
+  await installFakeAi(app, { chunks: ['Pending text'], chunkIntervalMs: 10_000 })
+  await openDesignReader(page)
+  await page.keyboard.press('ControlOrMeta+j')
+  await expect(page.getByTestId('ai-drafting')).toBeVisible()
+  await page.screenshot({ path: 'e2e/.artifacts/ai-drafting-status.png' })
+  await page.getByTestId('ai-draft-stop').click()
+  await expect(page.getByTestId('ai-drafting')).toHaveCount(0)
+  await expect.poll(() => aiRequests(app).then((requests) => requests[0]?.canceled)).toBe(true)
+  await expect(page.getByTestId('composer')).toBeVisible()
 })

@@ -18,17 +18,17 @@ test('shows the minimal registry-derived footer for each keyboard context', asyn
   await expect(page.getByTestId('thread-row')).toHaveCount(1)
   await expect
     .poll(() => footerHintIds(page))
-    .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'snooze', 'move', 'palette'])
+    .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'palette', 'go-to'])
   await expect(page.getByTestId('footer-shortcut-compose')).toBeInViewport()
-  await expect(page.getByTestId('footer-shortcut-palette')).toContainText('command palette')
+  await expect(page.getByTestId('footer-shortcut-palette')).toContainText('Command palette')
 
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect
     .poll(() => footerHintIds(page))
-    .toEqual(['reply', 'reply-all', 'forward', 'done', 'snooze', 'move', 'navigate', 'back'])
-  await expect(page.getByTestId('footer-shortcut-reply-all')).toBeInViewport()
-  await expect(page.getByTestId('footer-shortcut-forward')).toBeInViewport()
+    .toEqual(['message-navigation', 'message-toggle', 'reply', 'done', 'snooze', 'back'])
+  await expect(page.getByTestId('footer-shortcut-message-navigation')).toBeInViewport()
+  await expect(page.getByTestId('footer-shortcut-message-toggle')).toBeInViewport()
 
   await page.keyboard.press('Escape')
   await page.keyboard.press('g')
@@ -36,7 +36,7 @@ test('shows the minimal registry-derived footer for each keyboard context', asyn
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
   await expect
     .poll(() => footerHintIds(page))
-    .toEqual(['navigate', 'open', 'delete-draft', 'compose', 'undo', 'palette'])
+    .toEqual(['navigate', 'open', 'delete-draft', 'compose', 'undo', 'palette', 'go-to'])
   await expect(page.getByTestId('footer-shortcut-delete-draft')).toBeInViewport()
 
   await page.keyboard.press('g')
@@ -185,7 +185,10 @@ test('cancels pending chords before overlays stop keyboard propagation', async (
   await expect(page.getByTestId('view-title')).toHaveText('Inbox')
 })
 
-test('keeps the footer height fixed when reader shortcuts overflow', async ({ app, page }) => {
+test('keeps footer hints visible when switching between compact list and reader contexts', async ({
+  app,
+  page
+}) => {
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.setContentSize(900, 420)
   })
@@ -201,13 +204,15 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
         scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
       }))
     )
-    .toEqual({ overflows: true, scrollbarHeight: 0 })
+    .toEqual({ overflows: false, scrollbarHeight: 0 })
 
+  await expect(page.getByTestId('footer-shortcut-palette')).toBeInViewport()
+  await expect(page.getByTestId('footer-shortcut-go-to')).toBeInViewport()
   await page.keyboard.press('g')
   await expect(page.getByTestId('footer-chord-guide')).toBeVisible()
   await expect
     .poll(() => footer.evaluate((element) => element.getBoundingClientRect().height))
-    .toBe(initialHeight)
+    .toBeLessThanOrEqual(initialHeight)
   await expect
     .poll(() =>
       shortcuts.evaluate((element) => ({
@@ -224,7 +229,7 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
   await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)
   await expect
     .poll(() => footer.evaluate((element) => element.getBoundingClientRect().height))
-    .toBe(initialHeight)
+    .toBeLessThanOrEqual(initialHeight)
   await expect
     .poll(() =>
       shortcuts.evaluate((element) => ({
@@ -232,12 +237,8 @@ test('keeps the footer height fixed when reader shortcuts overflow', async ({ ap
         scrollbarHeight: Math.round(element.getBoundingClientRect().height - element.clientHeight)
       }))
     )
-    .toEqual({ overflows: true, scrollbarHeight: 0 })
+    .toEqual({ overflows: false, scrollbarHeight: 0 })
 
-  await shortcuts.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth
-  })
-  await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('conversation-view')).toHaveCount(0)
   await expect.poll(() => shortcuts.evaluate((element) => element.scrollLeft)).toBe(0)

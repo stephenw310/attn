@@ -50,7 +50,7 @@ export class ComposerPage {
   }
 
   get attachments(): Locator {
-    return this.page.getByTestId('composer-attachments')
+    return this.page.getByTestId('composer-attachment-count')
   }
 
   get attachmentChips(): Locator {
@@ -78,7 +78,16 @@ export class ComposerPage {
     return this.recipientField(field).getByTestId('recipient-chip')
   }
 
+  async expandRecipients(): Promise<void> {
+    await expect(this.root).toBeVisible()
+    const summary = this.page.getByTestId('composer-recipient-summary')
+    if ((await summary.isVisible()) && (await summary.getAttribute('aria-expanded')) === 'false') {
+      await summary.click()
+    }
+  }
+
   async addRecipient(address: string, field: RecipientField = 'to'): Promise<void> {
+    await this.expandRecipients()
     const input = this.recipientField(field).locator('input')
     await input.fill(address)
     await input.press('Enter')
@@ -90,6 +99,7 @@ export class ComposerPage {
    * of falling back to display text, so the contract above stays enforced here.
    */
   async expectRecipients(emails: string[], field: RecipientField = 'to'): Promise<void> {
+    await this.expandRecipients()
     await expect
       .poll(() =>
         this.chips(field).evaluateAll((chips) => chips.map((chip) => chip.getAttribute('data-email')))
@@ -98,6 +108,7 @@ export class ComposerPage {
   }
 
   async expectFrom(email: string): Promise<void> {
+    await this.expandRecipients()
     await expect(this.from).toHaveAttribute('data-email', email)
     await expect(this.from).toContainText(email)
   }

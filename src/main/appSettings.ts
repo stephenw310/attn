@@ -12,6 +12,7 @@ import {
   isAutoAdvanceDirection,
   validateAppSettingUpdate
 } from '../shared/settings'
+import { normalizePalette } from '../shared/theme'
 import type { Db } from './db'
 import { undoSendDelayMs } from './outbox/queue'
 import { attnSignatureEnabled } from './outbox/sendAs'
@@ -71,6 +72,7 @@ export function readAppSettings(db: Db): AppSettings {
   return {
     // One source of truth with the sender: the same helper the outbox queue
     // uses to time real sends resolves the stored value and its default.
+    palette: normalizePalette(readSetting(db, 'palette')),
     undoSendDelaySeconds: undoSendDelayMs(db) / 1_000,
     autoAdvanceDirection: isAutoAdvanceDirection(autoAdvance)
       ? autoAdvance

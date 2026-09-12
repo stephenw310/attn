@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { snoozePresets } from './snooze'
+import { formatSnoozeDate, parseSnoozeText, snoozePresets } from './snooze'
 
 describe('snoozePresets', () => {
   it('computes every preset from the supplied local time', () => {
@@ -22,4 +22,13 @@ describe('snoozePresets', () => {
     expect(presets.tonight).toBe(new Date(2026, 7, 16, 19).getTime())
     expect(presets.weekend).toBe(new Date(2026, 7, 22, 9).getTime())
   })
+})
+
+it('resolves an omitted year to the next occurrence and displays that year', () => {
+  const now = new Date(2026, 8, 11, 12).getTime()
+  const due = parseSnoozeText('sep1', now)
+  if (due === null) throw new Error('Expected a parsed date')
+  expect(new Date(due).getFullYear()).toBe(2027)
+  expect(formatSnoozeDate(due)).toContain('2027')
+  expect(parseSnoozeText('September 1, 2026', now)).toBeLessThan(now)
 })

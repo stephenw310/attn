@@ -21,6 +21,7 @@ import { persistThread } from '../sync/persist'
 import { type HistoryPoller, historyEvents } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
+import { type SchedulerTime, systemTime } from '../time'
 import type { ServiceAccountsState, ServiceEvent, ServiceInitialize } from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
 
@@ -120,13 +121,27 @@ describe('ServiceRuntime with several accounts', () => {
   }
 
   async function createRuntime(
-    input: ServiceInitialize
+    input: ServiceInitialize,
+    time: SchedulerTime = systemTime
   ): Promise<{ runtime: ServiceRuntime; events: ServiceEvent[] }> {
     const events: ServiceEvent[] = []
-    const runtime = await ServiceRuntime.create(input, (event) => events.push(event))
+    const runtime = await ServiceRuntime.create(input, (event) => events.push(event), time)
     runtimes.push(runtime)
     return { runtime, events }
   }
+
+  it('validates snooze deadlines against the injected reminder clock', async () => {
+    let now = Date.now() + 86400000
+    const { runtime } = await createRuntime(makeInput(), { ...systemTime, now: () => now })
+    await expect(
+      runtime.invoke(IPC_CHANNELS.mailSnooze, [{ threadIds: ['t-alpha'], dueAt: now - 1 }])
+    ).rejects.toThrow('Choose a future snooze time')
+    await runtime.invoke(IPC_CHANNELS.mailSnooze, [{ threadIds: ['t-alpha'], dueAt: now + 1000 }])
+    now += 2000
+    await expect(
+      runtime.invoke(IPC_CHANNELS.mailSnooze, [{ threadIds: ['t-alpha'], dueAt: now - 1 }])
+    ).rejects.toThrow('Choose a future snooze time')
+  })
 
   /**
    * Apply a roster without awaiting the deferred session creates, the way

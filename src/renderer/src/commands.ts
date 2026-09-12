@@ -77,9 +77,25 @@ export const COMMAND_SPECS = {
     context: 'reader',
     footer: { reader: { id: 'back', label: 'back to list', order: 60 } }
   },
-  'message.next': { title: 'Next message in conversation', shortcut: 'n', context: 'reader' },
-  'message.previous': { title: 'Previous message in conversation', shortcut: 'p', context: 'reader' },
-  'message.toggle': { title: 'Expand or collapse message', shortcut: 'o', context: 'reader' },
+  'message.next': {
+    title: 'Next message in conversation',
+    shortcut: 'n',
+    context: 'reader',
+    footer: { reader: { id: 'message-navigation', label: 'Messages', order: 0 } }
+  },
+  'message.previous': {
+    title: 'Previous message in conversation',
+    shortcut: 'p',
+    context: 'reader',
+    footer: { reader: { id: 'message-navigation', label: 'Messages', order: 0 } }
+  },
+  'message.toggleAll': { title: 'Expand or collapse all messages', context: 'reader' },
+  'message.toggle': {
+    title: 'Expand or collapse message',
+    shortcut: 'o',
+    context: 'reader',
+    footer: { reader: { id: 'message-toggle', label: 'Expand / collapse', order: 5 } }
+  },
   'message.openOrReplyAll': { title: 'Open message or reply all', shortcut: 'Enter', context: 'reader' },
   'message.trim.toggle': { title: 'Show or hide trimmed message content', context: 'reader' },
   'sync.retry': { title: 'Retry mail sync', context: 'global', allowInComposer: true },
@@ -170,6 +186,10 @@ export const COMMAND_SPECS = {
     context: 'global',
     allowInComposer: true
   },
+  'palette.matcha': { title: 'Use Matcha color palette', context: 'global', allowInComposer: true },
+  'palette.mist': { title: 'Use Mist color palette', context: 'global', allowInComposer: true },
+  'palette.linen': { title: 'Use Linen color palette', context: 'global', allowInComposer: true },
+  'palette.dusk': { title: 'Use Dusk color palette', context: 'global', allowInComposer: true },
   'theme.system': { title: 'Use System theme', context: 'global', allowInComposer: true },
   'theme.dispatch-dark': {
     title: 'Use Dark theme',
@@ -279,7 +299,7 @@ export const COMMAND_SPECS = {
     title: 'Reply',
     shortcut: 'r',
     context: 'reader',
-    footer: { reader: { id: 'reply', label: 'reply', order: 10 } }
+    footer: { reader: { id: 'reply', label: 'Reply', order: 10 } }
   },
   'message.reply': {
     title: 'Reply to this message',
@@ -297,13 +317,13 @@ export const COMMAND_SPECS = {
     title: 'Reply all',
     shortcut: 'a',
     context: 'reader',
-    footer: { reader: { id: 'reply-all', label: 'reply all', order: 11, shortcuts: ['a'] } }
+    footer: { reader: { id: 'reply-all', label: 'Reply all', order: 11, shortcuts: ['a'] } }
   },
   'composer.forward': {
     title: 'Forward',
     shortcut: 'f',
     context: 'reader',
-    footer: { reader: { id: 'forward', label: 'forward', order: 12 } }
+    footer: { reader: { id: 'forward', label: 'Forward', order: 12 } }
   },
   'composer.close': {
     title: 'Save and close draft',
@@ -324,9 +344,14 @@ export const COMMAND_SPECS = {
     context: 'composer',
     footer: { composer: { id: 'send', label: 'send', order: 10 } }
   },
+  'composer.retryAttachment': { title: 'Retry attachment change', context: 'composer' },
   'composer.attach': { title: 'Attach files', shortcut: 'Mod+Shift+A', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
-  'composer.bold': { title: 'Bold', shortcut: 'Mod+B', context: 'composer' },
+  'composer.bold': {
+    title: 'Bold',
+    shortcut: 'Mod+B',
+    context: 'composer'
+  },
   'composer.italic': { title: 'Italic', shortcut: 'Mod+I', context: 'composer' },
   'composer.underline': { title: 'Underline', shortcut: 'Mod+U', context: 'composer' },
   'composer.strikethrough': { title: 'Strikethrough', context: 'composer' },
@@ -337,8 +362,18 @@ export const COMMAND_SPECS = {
   'composer.alignLeft': { title: 'Align left', context: 'composer' },
   'composer.alignCenter': { title: 'Align center', context: 'composer' },
   'composer.alignRight': { title: 'Align right', context: 'composer' },
-  'composer.bullets': { title: 'Bulleted list', context: 'composer' },
-  'composer.numbering': { title: 'Numbered list', context: 'composer' },
+  'composer.bullets': {
+    title: 'Bulleted list',
+    shortcut: 'Mod+Shift+8',
+    shortcutAliases: ['Mod+Shift+*'],
+    context: 'composer'
+  },
+  'composer.numbering': {
+    title: 'Numbered list',
+    shortcut: 'Mod+Shift+7',
+    shortcutAliases: ['Mod+Shift+&'],
+    context: 'composer'
+  },
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
   // F17: works from the reader (opening the inline reply first) and inside a
@@ -350,6 +385,7 @@ export const COMMAND_SPECS = {
     context: 'global',
     allowInComposer: true
   },
+  'composer.format': { title: 'Show formatting toolbar', shortcut: 'Mod+Shift+F', context: 'composer' },
   'composer.aiRefine': { title: 'Refine AI draft…', context: 'composer' },
   'composer.snippets': { title: 'Insert snippet…', shortcut: 'Mod+;', context: 'composer' },
   'composer.followUp': {
@@ -367,6 +403,7 @@ export const COMMAND_SPECS = {
     }
   },
   'triage.notDone': { title: 'Mark not done', shortcut: 'Shift+E', context: 'mail' },
+  'triage.cancelFollowUp': { title: 'Cancel follow-up', context: 'mail' },
   'triage.snooze': {
     title: 'Snooze / remind me later',
     shortcut: 'h',
@@ -479,6 +516,15 @@ export function createCommand(
   > = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
+}
+
+/** All defined shortcuts, including views that are not currently mounted. */
+export function shortcutReferenceCommands(registered: readonly Command[]): Command[] {
+  const reference = new Map<string, Command>(
+    (Object.keys(COMMAND_SPECS) as StaticCommandId[]).map((id) => [id, createCommand(id, () => {})])
+  )
+  for (const command of registered) reference.set(command.id, command)
+  return [...reference.values()].filter((command) => command.shortcut)
 }
 
 export function createDynamicSplitCommand(splitId: string, title: string, run: () => void): Command {

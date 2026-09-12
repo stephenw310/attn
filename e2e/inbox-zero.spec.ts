@@ -38,6 +38,10 @@ test.describe('complete Inbox metadata', () => {
 
     const zero = page.getByTestId('inbox-zero')
     await expect(zero).toBeVisible()
+    await expect(page.getByTestId('footer-shortcut-done')).toHaveCount(0)
+    await expect(page.getByTestId('footer-shortcut-navigate')).toHaveCount(0)
+    await expect(page.getByTestId('footer-shortcut-compose')).toContainText('Write')
+    await expect(page.getByTestId('footer-shortcut-search')).toContainText('Search')
     await expect(page.getByTestId('inbox-zero-message')).toContainText('Inbox zero')
     await expect(page.getByTestId('inbox-zero-message').locator('time')).toHaveText(/\d{1,2}:\d{2}/)
     await expect(page.getByTestId('inbox-zero-split')).toHaveText([

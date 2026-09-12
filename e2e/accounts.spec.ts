@@ -340,6 +340,7 @@ test('account removal blocks shortcuts and composer opens until the response set
   await expect(page.getByTestId('account-remove')).toHaveText('Sign out')
   await page.getByTestId('account-remove').click()
   await expect(page.getByTestId('remove-account-dialog')).toBeVisible()
+  await expect(page.getByTestId('remove-account-cancel')).toBeFocused()
   await page.keyboard.press('ControlOrMeta+2')
   await page.keyboard.press('c')
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)
@@ -684,7 +685,7 @@ test('an undo-send window survives a switch with its toast hidden and Z inert el
   await composer.typeBody('Body')
   await page.keyboard.press('ControlOrMeta+Enter')
   await expect(composer.root).toHaveCount(0)
-  await expect(page.getByTestId('toast')).toHaveText('Sent — Undo (Z)')
+  await expect(page.getByTestId('toast')).toHaveText(/Sending in \d+ secondsUndo Z/)
 
   // The toast belongs to the sending account's context: hidden after the
   // switch, while the durable deadline keeps counting (F18/F6).

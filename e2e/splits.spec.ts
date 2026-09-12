@@ -178,7 +178,7 @@ test('classifies once, navigates locally, and restores each split selection', as
 
   await rows.first().click()
   await expect(page.getByTestId('conversation-view')).toBeVisible()
-  await expect(page.getByTestId('conversation-position')).toHaveText('1 of 2')
+  await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '0')
   await expect(strip).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(strip).toBeVisible()
@@ -273,6 +273,42 @@ test('changes Gmail importance without presenting splits as move destinations', 
   await expect(boardMemo).toBeVisible()
 })
 
+test('opening Settings from split rules closes the manager', async ({ page }) => {
+  await openSplitRules(page)
+  await page.getByTestId('account-menu').getByRole('button').first().click()
+  await page.getByTestId('account-settings').click()
+  await expect(page.getByTestId('split-rules')).toHaveCount(0)
+  await expect(page.getByTestId('settings-view')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-view')).toHaveCount(0)
+  await expect(page.getByTestId('split-strip')).toBeVisible()
+})
+
+test('manager selects the first rule, keeps account controls, and closes with one Escape', async ({
+  page
+}) => {
+  await openSplitRules(page)
+  await expect(page.getByTestId('split-rule').first().getByTestId('split-rule-summary')).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await expect(page.getByTestId('account-menu')).toBeVisible()
+  await expect(page.getByTestId('write-button')).toHaveCount(0)
+  await page
+    .locator('[data-split-id="preset:calendar"][data-testid="split-rule"]')
+    .getByTestId('split-rule-summary')
+    .click()
+  const editor = page.getByTestId('split-rule-editor')
+  await expect(editor).toBeVisible()
+  expect(await editor.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect(
+    await editor.evaluate((element) => parseFloat(getComputedStyle(element).paddingRight))
+  ).toBeGreaterThanOrEqual(16)
+  await page.screenshot({ path: join(__dirname, '.artifacts/split-rule-editor.png') })
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('split-rules')).toHaveCount(0)
+})
+
 test('edits, reorders, deletes, persists, and explicitly restores a starter preset', async ({
   boot,
   page
@@ -311,15 +347,23 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await conditionValue.pressSequentially('sam@example.com')
   await expect(conditionValue).toBeFocused()
   await expect(conditionValue).toHaveValue('sam@example.com')
-  await page.getByRole('button', { name: 'Save split' }).click()
+  await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByTestId('split-rule')).toHaveCount(6)
-  await expect(page.getByTestId('split-rule').filter({ hasText: 'Personal' })).toContainText('1 total')
+  await expect(page.getByTestId('split-rule').filter({ hasText: 'Personal' })).toContainText('1 condition')
 
   const github = page.locator('[data-testid="split-rule"][data-split-id="preset:github"]')
-  await github.getByRole('button', { name: 'Edit' }).click()
+  await github.getByTestId('split-rule-summary').click()
   await page.getByTestId('split-rule-name').fill('Code reviews')
-  await page.getByRole('button', { name: 'Save split' }).click()
+  await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(github).toContainText('Code reviews')
+  await expect(
+    page.getByTestId('split-rules').getByRole('heading', { name: 'Important', exact: true })
+  ).toBeVisible()
+  await expect(
+    page
+      .locator('[data-testid="split-rule"][data-split-id="base:important"]')
+      .getByTestId('split-rule-summary')
+  ).toHaveAttribute('aria-pressed', 'true')
 
   const newsletters = page.locator('[data-testid="split-rule"][data-split-id="preset:newsletters"]')
   const newslettersHandle = newsletters.getByTestId('split-rule-drag-handle')
@@ -361,7 +405,8 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await newslettersHandle.press('ArrowUp')
   await expect(page.getByTestId('split-rule').nth(1)).toHaveAttribute('data-split-id', 'preset:newsletters')
 
-  await github.getByTestId('split-rule-delete').click()
+  await github.getByTestId('split-rule-summary').click()
+  await page.getByTestId('split-rule-delete').click()
   await expect(github).toHaveCount(0)
   await expect(page.getByTestId('split-rule-restore').filter({ hasText: 'GitHub' })).toBeVisible()
   await page.getByRole('button', { name: 'Close split rules' }).click()
@@ -415,7 +460,7 @@ test('notification focus owns selection over a queued split restore', async ({ a
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`split header stays fixed across selection and unread changes in ${theme}`, async ({ page }) => {
+  test(`split tabs fit their content and stay fixed across selection in ${theme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme })
     await expect(page.locator('html')).toHaveAttribute('data-theme-appearance', theme)
     await expect(page.getByTestId('split-tab')).toHaveCount(5)
@@ -446,7 +491,10 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByTestId('conversation-view')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(tabs.first().getByTestId('split-unread-count')).toHaveCount(0)
-    expect(await geometry()).toEqual(baseline)
+    const afterRead = await geometry()
+    expect(afterRead[0].width).toBeLessThan(baseline[0].width)
+    expect(afterRead[1].x).toBeLessThan(baseline[1].x)
+    expect(afterRead.map((tab) => tab.height)).toEqual(baseline.map((tab) => tab.height))
     await expect(page.getByTestId('queue-readout')).toHaveCount(0)
     const headerBox = await page.getByTestId('mail-header').boundingBox()
     const accountBox = await page.getByTestId('account-menu').boundingBox()
@@ -465,13 +513,14 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
-test('shares one header row and remembers the hidden status and hint bar', async ({ boot, page }) => {
+test('places splits below the title and remembers the hidden hint bar', async ({ boot, page }) => {
   const header = page.getByTestId('mail-view-header')
   const strip = page.getByTestId('split-strip')
   await expect(strip).toBeVisible()
   const headerBox = await header.boundingBox()
   const stripBox = await strip.boundingBox()
-  expect(stripBox?.y).toBe(headerBox?.y)
+  expect(stripBox?.y).toBeGreaterThan(headerBox?.y ?? 0)
+  await expect(header).toHaveCSS('border-bottom-width', '0px')
   expect(stripBox?.height).toBeLessThanOrEqual(headerBox?.height ?? 0)
   const before = await page.getByTestId('thread-list').boundingBox()
   await page.getByTestId('footer-toggle').click()

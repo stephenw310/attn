@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SplitSummary } from '../../../shared/splits'
 import { modKeyLabel } from '../platform'
+import { MailIcon } from './MailIcon'
 
 interface SplitStripProps {
   splits: readonly SplitSummary[]
@@ -48,8 +49,12 @@ export function SplitStrip({
 
   if (splits.length <= 1) return null
   return (
-    <div data-testid="split-strip" className="flex h-full min-w-0 items-stretch">
-      <div role="tablist" aria-label="Inbox splits" className="flex min-w-0 overflow-x-auto">
+    <div data-testid="split-strip" className="flex min-w-0 items-center gap-1">
+      <div
+        role="tablist"
+        aria-label="Inbox splits"
+        className="flex min-w-0 items-center gap-1 overflow-x-auto"
+      >
         {visibleSplits.map((split) => {
           const active = split.id === activeSplitId
           return (
@@ -61,11 +66,8 @@ export function SplitStrip({
               data-split-id={split.id}
               data-active={active || undefined}
               aria-selected={active}
-              data-tooltip={`${split.total.toLocaleString()} conversations`}
-              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-3 text-xs font-semibold transition-colors ${
-                active
-                  ? 'border-accent text-ink'
-                  : 'border-transparent text-ink-dim hover:bg-active/60 hover:text-ink'
+              className={`app-no-drag flex flex-none cursor-pointer items-center gap-1.5 border-b-2 px-2 py-1.5 text-[12px] font-normal transition-colors ${
+                active ? 'border-accent text-ink' : 'border-transparent text-ink-dim hover:text-ink'
               }`}
               onClick={(event) => {
                 onSelect(split.id)
@@ -73,17 +75,15 @@ export function SplitStrip({
               }}
             >
               <span>{split.name}</span>
-              <span className="w-10 flex-none text-center">
-                {split.unread > 0 && (
-                  <span
-                    data-testid="split-unread-count"
-                    data-count={split.unread}
-                    className="inline-block min-w-5 rounded-full bg-active px-1.5 py-0.5 text-[10px] leading-none font-semibold tabular-nums text-accent"
-                  >
-                    {split.unread > 999 ? '999+' : split.unread}
-                  </span>
-                )}
-              </span>
+              {split.unread > 0 && (
+                <span
+                  data-testid="split-unread-count"
+                  data-count={split.unread}
+                  className="flex-none text-[10px] leading-none tabular-nums"
+                >
+                  {split.unread > 999 ? '999+' : split.unread}
+                </span>
+              )}
             </button>
           )
         })}
@@ -96,18 +96,7 @@ export function SplitStrip({
         onClick={onManage}
         className="app-no-drag mx-1 flex size-7 flex-none cursor-pointer items-center justify-center self-center rounded-md text-ink-faint hover:bg-active hover:text-ink"
       >
-        <svg
-          aria-hidden
-          viewBox="0 0 24 24"
-          className="size-4 fill-none stroke-current"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <title>Manage Inbox splits</title>
-          <rect x="3" y="4" width="18" height="16" rx="2" />
-          <path d="M9 4v16M15 4v16" />
-        </svg>
+        <MailIcon name="splits" />
       </button>
       {overflowSplits.length > 0 && (
         <div ref={overflowRef} className="relative flex-none">

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncStage, SyncState } from '../../../shared/mail'
-import { blurActive } from './blurActive'
+import { Kbd } from './Kbd'
 
 function syncStageLabel(stage: SyncStage): string {
   if (stage === 'metadata') return 'Message list'
@@ -23,6 +23,7 @@ function lifetimeEta(etaMs: number | undefined): string {
 }
 
 interface SyncStatusProps {
+  detailsRequest?: number
   sync: SyncState
   networkOnline: boolean
   onRetry: () => void
@@ -32,6 +33,9 @@ interface SyncStatusProps {
 export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
   const { sync, networkOnline, onRetry, onCopyError } = props
   const [detailsOpen, setDetailsOpen] = useState(false)
+  useEffect(() => {
+    if (props.detailsRequest) setDetailsOpen(true)
+  }, [props.detailsRequest])
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const displayState =
     sync.phase === 'error'
@@ -83,7 +87,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
 
   const closeDetails = useCallback(() => {
     setDetailsOpen(false)
-    blurActive()
+    wrapRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
   }, [])
 
   useEffect(() => {
@@ -159,9 +163,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
 
   const body = (
     <>
-      <span className="app-status-dot size-[7px] rounded-full" aria-hidden />
+      <span className="app-status-dot size-[5px] rounded-full" aria-hidden />
       <span
-        className={`whitespace-nowrap text-[11.5px] font-semibold ${
+        className={`whitespace-nowrap text-[11px] font-normal ${
           displayState === 'error' ? 'text-danger' : 'text-ink-dim'
         }`}
       >
@@ -176,7 +180,6 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
       data-testid="status-note"
       data-status={displayState}
       className="relative flex min-w-0 flex-none justify-end"
-      data-tooltip={title}
     >
       <span className="sr-only" aria-live="polite">
         {liveAnnouncement}
@@ -197,7 +200,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           type="button"
           aria-expanded={detailsOpen}
           aria-label={`${label}: show sync details`}
-          data-tooltip={title}
+          data-tooltip=""
           onClick={() => setDetailsOpen((open) => !open)}
           data-testid="status-content"
           className="flex h-7 cursor-pointer items-center gap-2"
@@ -210,9 +213,26 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
         <div
           role="dialog"
           aria-label="Sync details"
-          className="absolute right-0 top-full z-50 mt-2 w-72 rounded-[10px] border border-edge bg-raised p-3.5 text-xs text-ink-dim shadow-menu"
+          data-testid="status-details"
+          className="absolute right-0 top-full z-50 mt-2 w-[min(360px,90vw)] rounded-[10px] border border-edge bg-raised p-3.5 text-xs text-ink-dim shadow-menu"
         >
-          {title}
+          <h2 className="mb-2.5 text-base font-medium tracking-[-0.2px] text-ink">
+            {displayState === 'indexing'
+              ? 'Indexing mail history'
+              : displayState === 'syncing'
+                ? 'Syncing mail'
+                : displayState === 'offline'
+                  ? 'Offline'
+                  : 'All changes synced'}
+          </h2>
+          <p className="break-words text-[11px] leading-[1.65]">{title}</p>
+          <button
+            type="button"
+            onClick={closeDetails}
+            className="mt-4 flex items-center gap-2 text-xs hover:text-ink"
+          >
+            Close <Kbd>Esc</Kbd>
+          </button>
         </div>
       )}
       {detailsOpen && sync.phase === 'error' && (
@@ -221,9 +241,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           data-testid="status-error-details"
           role="dialog"
           aria-label="Sync error details"
-          className="absolute right-0 top-full z-50 mt-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
+          className="absolute right-0 top-full z-50 mt-2 w-[min(360px,90vw)] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
         >
-          <div className="flex items-center gap-2 text-xs font-bold text-ink">
+          <div className="flex items-center gap-2 text-base font-medium tracking-[-0.2px] text-ink">
             <span className="text-danger" aria-hidden>
               ●
             </span>
@@ -239,7 +259,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
             <button
               type="button"
               data-testid="status-retry"
-              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              className="cursor-pointer rounded-md px-2.5 py-1.5 text-xs text-ink-dim hover:bg-active hover:text-ink"
               onClick={() => {
                 setDetailsOpen(false)
                 onRetry()
@@ -250,10 +270,17 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
             <button
               type="button"
               data-testid="status-copy-error"
-              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              className="cursor-pointer rounded-md px-2.5 py-1.5 text-xs text-ink-dim hover:bg-active hover:text-ink"
               onClick={() => onCopyError(sync.message)}
             >
               Copy details
+            </button>
+            <button
+              type="button"
+              onClick={closeDetails}
+              className="ml-auto flex items-center gap-2 px-2 text-xs text-ink-dim hover:text-ink"
+            >
+              Close <Kbd>Esc</Kbd>
             </button>
           </div>
         </div>

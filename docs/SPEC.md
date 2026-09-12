@@ -67,15 +67,21 @@ Initial sync fetches recent Inbox bodies. Older bodies and attachment bytes down
 
 ### D6. Layout and themes
 
-The default visual direction uses graphite backgrounds, an amber accent, and the `attn:` wordmark. Built-in themes share semantic color tokens.
+The Tide visual direction uses quiet, palette-tinted backgrounds, readable secondary text, and the `attn:` wordmark. Built-in palettes share semantic color tokens. Secondary actions use a subtle hover fill without a resting border. Fields and shortcut keycaps retain visible boundaries.
 
-A 216-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader.
+A 190-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader. The logo hides with the sidebar; there is no compact icon rail. Mailboxes use icons and names. The flat label list uses the same colors as message label chips. System mailbox entries show their chord shortcuts on hover. Settings and split editing hide the mail sidebar without changing the saved preference.
 
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
-The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title and Inbox splits share one header row above the list. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight, and fixed count slots prevent movement when selection or unread totals change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
-Reader, Settings, and new-message headers use one clickable `Esc` close control without a separate Back button.
+The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title sits above the Inbox splits without enclosing header borders. The top-bar controls start at the expanded sidebar boundary and stay there when the sidebar closes. Write stays in the top bar outside the sidebar. The sidebar and keyboard-hint toggles sit together. The hint footer uses the page background and boxed keycaps without a contrasting panel. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight and do not show hover tooltips. Each tab fits its label and visible unread count. Zero unread counts reserve no space; tabs resize when counts change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
+Reader and new-message headers use one clickable `Esc` close control. Settings uses one Back to mail control with an `Esc` keycap.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
+
+The mailbox hint bar shows Navigate, Open, Mark done, Write, Go to, Undo, and Command palette when applicable. Inbox zero reduces it to Write and Search. Reader hints retain message navigation and expand/collapse, and show Reply, Mark done, Snooze or Change snooze, and Back. At narrow widths, reader hints prioritize Reply, Mark done, Snooze, and Back. Message-navigation shortcuts remain available through All shortcuts. Settings, split rules, and full-window compose omit the global hint bar. Bulk selection shows its count and Mark done, Snooze, Label, and Clear actions above the list.
+
+A sync error shows an inline mailbox notice with Retry and Details. Details opens the same popover as the top-right status. The status retains retry and error-copy controls. Sync details use a state-specific heading with Close below the detail text. Follow-up picker presets align left. Sync popover headings use 16px medium text; detail copy uses 11px text with 1.65 line height.
+
+The reader header stays compact without an action toolbar or separate message-actions dialog. It omits participant names and mailbox-position counters. Snooze timing appears in the actionable banner, not again below the subject. Conversations outside Inbox, Spam, Trash, Drafts, and pending reminders show Done and their All Mail location. Trashed-message and blocked-image notices use filled panels. Message details use an unbordered grid. Search rows place sender and subject together without date-group headings. Search timestamps include the year for mail outside the current calendar year; the search header and submission controls keep their existing positions.
 
 The signed-in window initially focuses the mail view without highlighting a toolbar button or showing its hint. Toolbar controls retain keyboard focus hints.
 
@@ -91,7 +97,7 @@ Electron `safeStorage` encrypts OAuth tokens through macOS Keychain or Windows D
 
 **Accounts:** the account menu and palette expose Add account. Each account has separate tokens keyed by its normalized email address. Existing single-account token files migrate to the account map on first launch. Signing in with an existing address refreshes that account's tokens. All accounts use the same OAuth client, with separate per-user quota budgets.
 
-**Signed-out state:** the app shows the sign-in screen without mounting mail views, subscriptions, or mail commands. The sign-in action has keyboard focus. If `oauth.config.json` is missing, the screen refers to the README setup instructions. If the authentication status request fails, the screen offers Retry.
+**Signed-out state:** the app shows the approved tidal-inlet illustration behind the centered sign-in content, with theme-specific shading for readable text. The app shows the sign-in screen without mounting mail views, subscriptions, or mail commands. The sign-in action has keyboard focus. If `oauth.config.json` is missing, the screen refers to the README setup instructions. If the authentication status request fails, the screen offers Retry.
 
 Each user supplies a Google Cloud OAuth client. `gmail.modify` is a restricted scope. A shared public OAuth client requires a separate distribution decision. See [Google's scope requirements](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
@@ -163,7 +169,7 @@ progress; page-level `resultSizeEstimate` is not a mailbox total and must never 
 Contact statistics derive from the same header stream — recipients of Sent mail, senders of
 received mail — so an address last emailed years ago autocompletes locally; messages labeled SPAM or TRASH
 never contribute to contacts. While the pass runs, sync status reads **Indexing**.
-Hover or click the status for progress and quota-wait details. Importing a user's saved Google Contacts through the People API remains a
+Click the status for progress and quota-wait details. Importing a user's saved Google Contacts through the People API remains a
 separate opt-in product decision because it adds OAuth scope and consent requirements; autocomplete must not
 imply that the mail-derived index contains an address book the user has never emailed.
 
@@ -207,7 +213,7 @@ their unread counts; the top bar has no unread-progress meter.
 
 Conflict rule: server state wins, except locally-pending actions replay on top of it.
 
-**Sync visibility:** The top bar shows a dot and one label: Live, Checking, Syncing, Indexing, Offline, or Error. Hover or click for progress details. Click Error to read the full message, retry, or copy details. Status remains visible when keyboard hints are hidden.
+**Sync visibility:** The top bar shows a dot and one label: Live, Checking, Syncing, Indexing, Offline, or Error. Click for progress details; the status does not show a hover tooltip. Click Error to read the full message, retry, or copy details. Status remains visible when keyboard hints are hidden.
 
 **Acceptance criteria**
 - Airplane mode: archive 20 conversations, quit the app, relaunch online → all 20 sync; none lost, none duplicated.
@@ -222,7 +228,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 
 **List ⇄ focused conversation**: the list owns the content region while deciding. Opening a conversation replaces the list with one dedicated reading surface while the navigation sidebar stays put. Closing restores the list at the same selection and scroll position.
 
-**Mailbox and label navigation:** everything this section describes — mailboxes, counts, user labels, splits, the list, and the reader — belongs to the active account (F18); switching accounts swaps it all at once. A left sidebar, expanded by default and completely removable with the persistent top-bar toggle, groups Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash, Outbox, and the account's user labels. Every system row keeps its `G` chord visible beside an exact local conversation total, including zero; large totals use a compact visual label while exposing the exact value. Sidebar count slots keep a fixed width across total changes. The active destination has one stable highlight. System mailboxes remain reachable from the command palette (`Go to …`) and their `G` chords. Label chips and label rows open the same local list view. Important/Other and user-defined splits are queues inside Inbox, not mailbox destinations, so a compact split strip appears above the Inbox list only when splits exist. The ordinary list begins directly below the top bar.
+**Mailbox and label navigation:** everything this section describes — mailboxes, counts, user labels, splits, the list, and the reader — belongs to the active account (F18); switching accounts swaps it all at once. A left sidebar, expanded by default and completely removable with the persistent top-bar toggle, groups Inbox, All Mail, Sent, Drafts, Starred, Snoozed, Spam, Trash, Outbox, and the account's user labels. Every system row shows its `G` chord on hover and an exact local conversation total, including zero; large totals use a compact visual label while exposing the exact value. The sidebar is 190px wide. Mailbox counts use a right-aligned column with 10px text. The selected destination name and count use semibold text; other counts use regular weight. The Labels heading does not show a catalog total. Each label shows its cached conversation count using the same membership rules as its local view. Counts refresh after local actions and Gmail sync. The active destination has one stable highlight. System mailboxes remain reachable from the command palette (`Go to …`) and their `G` chords. Label chips and label rows open the same local list view. Important/Other and user-defined splits are queues inside Inbox, not mailbox destinations, so a compact split strip appears above the Inbox list only when splits exist. The ordinary list begins directly below the top bar.
 
 - Inbox = `INBOX`; Sent = `SENT`; Drafts = `DRAFT`; Starred = `STARRED`; Spam = `SPAM`; Trash = `TRASH`; Snoozed is the local reminders view from F4. Spam and Trash include a thread when any message carries the matching label. All Mail includes a thread when any message is outside `SPAM` and `TRASH`, including archived mail. A partially trashed thread therefore appears in both All Mail and Trash. Normal and All Mail readers hide spammed messages. They keep each trashed message's chronological position as a compact `This message was moved to Trash. Show message.` marker. `Show message` reveals that message only in the current reader and does not restore it or change its Gmail labels. Spam and Trash readers show only messages from the active mailbox. Draft and legacy `CHAT` messages never render as sent mail.
 - Mailbox and user-label queries run entirely against the local store. Metadata sync extends beyond the current Inbox window so lifetime system and user-label membership is cached; switching a cached destination never waits on Gmail. Bodies still follow F2's on-demand policy.
@@ -233,10 +239,12 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 
 - The content-width list groups conversations under Today, Yesterday, Last 7 days, Earlier this month, then calendar-year headings so month/day timestamps on old mail stay unambiguous. It shows sender(s), subject, a 1–2 line snippet, timestamp, and chips (attachment, starred, snoozed-return, follow-up). Unread rows are visually distinct. Every mailbox and user-label view reads 100 rows initially, loads the next keyset page near the tail, and keeps fixed-height windowing with overscan over the accumulated rows. No list count is shown because a loaded-page count is not a mailbox total.
 - In the list, `J`/`K` and unmodified `ArrowUp`/`ArrowDown` move the selection.
-- `Enter` or clicking a row opens the **full-window conversation** at a responsive readable measure (576–896px), positioned at its newest message or restored thread-bound draft. Its header contains subject, quiet queue position ("4 of 12"), and a clickable `Esc` control that returns to the list. The newest message is expanded; older messages start as one-line summaries and their bodies (including HTML frames) are not mounted until expanded. Clicking an expanded message's header collapses it into that same summary row; clicking the summary reopens it.
-- While reading, `J`/`K` opens the next/previous conversation at its newest message or restored draft; at the first conversation, `K` returns to the full-width list instead of remaining in the reader. The adjacent conversations are fetched into the local renderer cache beforehand so this usually has no loading state. Unmodified `ArrowUp`/`ArrowDown`, `Space`/`Shift+Space`, and `PageUp`/`PageDown` scroll the current conversation, while `Shift+ArrowUp`/`Shift+ArrowDown` extend the selection exactly as `Shift+J`/`Shift+K` do — the arrow aliases behave the same in the list and the reader. Modifier+key chords retain their platform/browser meaning. Keyboard handling continues after clicking recipient, attachment, or trim controls and while focus is inside an HTML-mail frame; `Enter` on a focused mail link retains its native link action. Unless a transient overlay consumes it first, `Esc` or Back/List returns to the full-width list from every Tab stop—including focused buttons and mail links—with selection and scroll intact.
-- **Message display:** each message card shows the sender, with the active account rendered consistently as `Me` before and after send confirmation, plus a recipient summary ("to me, Priya · cc Daniel") that expands on click to the full From/To/Cc/Bcc/Reply-To set with the full date, the body, and attachment chips (filename + size — click downloads to the OS Downloads folder and reveals the file). The actual outgoing `From` header uses the primary Gmail send-as display name so recipients see the configured identity. Bare HTTP(S) and `www.` URLs in plain text or unlinked HTML text render as external links. Quoted trails and signatures auto-collapse behind a plain-text `...` control rendered inline at the trim boundary; the control stays in place while expanding/collapsing and a second click collapses again. `Tab` always retains native focus navigation across the product. For collapsed HTML mail, the `...` control precedes links inside the mail frame in keyboard order; reaching it reveals the hidden trail without changing the reading viewport dimensions, and the next Tab continues into the mail links. Revealing a long trail makes the existing reading surface scroll instead of growing the window. Text-like HTML and fallback text use Attn's padded native reading surface. Typography, media, tables, dimensions, alignment, and layout-only CSS remain native because they do not require a white document. Meaningful inline text colors remain distinct on the native dark surface, with low-contrast hues brightened and ordinary dark foregrounds normalized to the native text color. Uncolored quoted text is dimmed so preserved answer colors remain easy to distinguish. HTML whose rendered meaning depends on the winning non-neutral background or background image keeps a light document canvas shared by its body, trim control, and attachments. Attn does not add padding inside light documents; sender-authored body padding still takes precedence. Light HTML body containers use the message card's 10px corner radius. Decorative markup confined to a signature does not promote the message. A real authored canvas inside a quoted trail is content and retains the light treatment, while ordinary quoted formatting does not turn every later reply white. Wide mail gets an in-frame horizontal scrollbar, and the conversation reserves its vertical scrollbar gutter so expanding content does not shift the reader. Bcc appears only on the user's own sent copies — Gmail never exposes other senders' Bcc.
+- `Enter` or clicking a row opens the **full-window conversation** at a responsive readable measure up to 896px, positioned at its newest message or restored thread-bound draft. Its header contains the subject and a clickable `Esc` control that returns to the list. It omits the queue-position counter. The newest message is expanded; older messages start as one-line summaries and their bodies (including HTML frames) are not mounted until expanded. Clicking an expanded message's header collapses it into that same summary row; clicking the summary reopens it.
+- While reading, `J`/`K` opens the next/previous conversation at its newest message or restored draft; at the first conversation, `K` returns to the full-width list instead of remaining in the reader. The adjacent conversations are fetched into the local renderer cache beforehand so this usually has no loading state. Unmodified `ArrowUp`/`ArrowDown`, `Space`/`Shift+Space`, and `PageUp`/`PageDown` scroll the current conversation, while `Shift+ArrowUp`/`Shift+ArrowDown` extend the selection exactly as `Shift+J`/`Shift+K` do — the arrow aliases behave the same in the list and the reader. Modifier+key chords retain their platform/browser meaning. Keyboard handling continues after clicking recipient, attachment, or trim controls and while focus is inside an HTML-mail frame; `Enter` on a focused mail link retains its native link action. When no inline draft is open and no transient overlay consumes it first, `Esc` or Back/List returns to the full-width list from every Tab stop—including focused buttons and mail links—with selection and scroll intact.
+- **Reader layout:** conversation messages use flat rows with top separators and no trailing bottom border. Expanded headers have no filled banner. The active message has a short accent line beside an outlined avatar in both expanded and collapsed states. `N` and `P` move that marker; `O` expands or collapses the active message. Expand all messages and Collapse all messages affect readable messages without revealing hidden Trash copies. These controls are also available through the command palette. Expanded messages expose Reply, Reply all, and Forward actions when no draft is open. The reader summary shows message count and current user-label chips without a participant summary. An outlined or filled star beside the subject shows the current thread star state and updates after the Star command. Back to the originating list shows an Escape keycap only when no inline draft is open. The reader hint bar shows Reply, Mark done, Snooze or Change snooze, and Back. Wide windows also show N/P and O; narrow windows hide those hints while retaining their keyboard commands. Reply, Reply all, and Forward buttons show their shortcuts on hover. Message expansion controls have no hover hints.
+- **Message display:** each message card shows the sender, with the active account rendered consistently as `Me` before and after send confirmation, plus a recipient summary ("to me, Priya · cc Daniel") that expands on click to the full From/To/Cc/Bcc/Reply-To set with the full date, the body, and attachment chips (filename + size — click downloads to the OS Downloads folder and reveals the file). The actual outgoing `From` header uses the primary Gmail send-as display name so recipients see the configured identity. Bare HTTP(S) and `www.` URLs in plain text or unlinked HTML text render as external links. Quoted trails and signatures auto-collapse behind a plain-text `...` control rendered inline at the trim boundary; the control stays in place while expanding/collapsing and a second click collapses again. `Tab` always retains native focus navigation across the product. For collapsed HTML mail, the `...` control precedes links inside the mail frame in keyboard order; reaching it reveals the hidden trail without changing the reading viewport dimensions, and the next Tab continues into the mail links. Revealing a long trail makes the existing reading surface scroll instead of growing the window. Text-like HTML and fallback text use Attn's padded native reading surface. Typography, media, tables, dimensions, alignment, and layout-only CSS remain native because they do not require a white document. Meaningful inline text colors remain distinct on the native dark surface, with low-contrast hues brightened and ordinary dark foregrounds normalized to the native text color. Uncolored quoted text is dimmed so preserved answer colors remain easy to distinguish. HTML whose rendered meaning depends on the winning non-neutral background or background image keeps a light document canvas shared by its body, trim control, and attachments. Attn does not add padding inside light documents; sender-authored body padding still takes precedence. Light HTML body containers retain a 10px corner radius. Decorative markup confined to a signature does not promote the message. A real authored canvas inside a quoted trail is content and retains the light treatment, while ordinary quoted formatting does not turn every later reply white. Wide mail gets an in-frame horizontal scrollbar, and the conversation reserves its vertical scrollbar gutter so expanding content does not shift the reader. Bcc appears only on the user's own sent copies — Gmail never exposes other senders' Bcc.
 - Bodies for the selected and adjacent conversations are preloaded so opening never shows a spinner.
+- When the last row in a date group exits, its date heading fades in place while the mail row slides out.
 - **Auto-advance:** after done/snooze/trash, selection (and the open reader) moves to the next conversation automatically (setting: next / previous / back to list).
 
 **Acceptance criteria**
@@ -324,8 +332,11 @@ The Done action confirmation says `Marked done`.
   state and due time.
 - Marking a thread important or not important updates `IMPORTANT` through Gmail. Moving into or out of Spam
   and Trash updates `SPAM` or `TRASH` through Gmail. The optimistic row membership matches the chosen action.
+- The reader banner shows the snooze deadline in every mailbox, label, and search view. It offers Change snooze and Return to Inbox now. Snoozed list items also show the clock, and their footer identifies H as Change snooze.
 - A snoozed thread returns within 60s of its due time while the app runs, or immediately on next launch if it was closed; a reply during snooze surfaces it immediately.
 - Snoozed threads are findable in the local "Snoozed" view (`G` then `H`) while the Attn profile exists. Reinstall durability and cross-device visibility are not v1 promises (decision #6).
+
+Resolved snooze dates include the year. Dates without a year resolve to their next occurrence. Snooze confirmation rejects deadlines that have passed, including while the picker is open. The service validates the deadline before changing mail.
 
 ### F5 — Command palette
 
@@ -333,24 +344,27 @@ The Done action confirmation says `Marked done`.
 
 - Fuzzy-matches every registered command: triage verbs with arguments ("Remind me tomorrow 9am"), navigation ("Go to Sent"), settings ("Switch theme"), snippets ("Snippet: intro").
 - Parameterized commands accept inline arguments with natural-language parsing where applicable (snooze and reminder times).
-- Each result shows its keyboard shortcut — the palette is also how users learn the keys.
+- Each result shows its keyboard shortcut with spaces between keys, without plus separators. macOS uses modifier symbols. The palette has a Close/Esc control and boxed navigation hints. Tab cycles between its search field and Close button.
 - Ranking: exact prefix > fuzzy score, with recently/frequently used commands boosted.
 - **Engineering rule:** every user-facing feature must register a palette command. No feature ships reachable only by mouse.
 
+The keyboard reference uses grouped columns and includes shortcuts from the shared definitions even when their reader, composer, or outbox view is not mounted. Registered commands supply current labels and dynamic additions. The reference scrolls at smaller window sizes.
+
+Label, move, and snooze pickers share a title, Close/Esc control, and boxed navigation hints. Labels retain colors and mixed selection. Invalid snooze input explains the required time format.
+
 The shortcut footer is a context-aware guide. A persistent top-bar control, `Mod+Shift+B`, and the command palette show or hide
 the keyboard hints. The hint bar is visible by default. It sits below the right-hand content pane. The sidebar extends to the bottom of the window. Sync status stays visible beside the account menu when hints are hidden. The saved choice applies across mail views and survives
-relaunch. Its default state is a single,
-non-wrapping line of only the commands relevant to the active view. Footer hints are explicit command
+relaunch. It shows commands relevant to the active view and wraps at narrow widths. Footer hints are explicit command
 metadata, not automatic ranking. They favor frequent or view-defining actions, appear only while that
-command is registered, and group equivalent keys under one label. The main list orders `J/K` Navigate,
-`Enter` Open, `E` Done, `C` Compose, `Z` Undo, `H` Snooze, `V` Move, and `Mod+K` Command palette.
-Pressing a chord prefix such as `G` temporarily replaces that line with the visible completions from the
+command is registered, and group equivalent keys under one label. The main list shows `J/K` Navigate, `Enter` Open, `E` Mark done, `C` Write, `Z` Undo,
+`Mod+K` Command palette, and `G` Go to. Snoozed also shows `H` Snooze or Change snooze.
+Pressing a chord prefix such as `G` temporarily replaces the hints with the visible completions from the
 same command registry. The guide shows only the completion keys and labels, without repeating the prefix.
 Fixed mailboxes use
 `I/A/T/D/S/H/P/R/O`. Inbox splits remain in the command palette and use `Tab` or `Shift+Tab` for direct
 navigation. The guide remains visible until completion, `Esc`, a view change, or a 3-second timeout. The
 command palette (`Mod+K`) and cheat sheet (`Mod+/`) remain the exhaustive discovery surfaces. Narrow windows
-can pan the line horizontally without a native scrollbar changing the footer height.
+wrap the hints onto additional rows. The footer grows to fit them without horizontal scrolling.
 
 **Acceptance criteria**
 - Opens in < 50ms; results re-rank per keystroke in < 30ms.
@@ -382,14 +396,19 @@ Opening a conversation with an existing thread-bound draft reopens its newest dr
 selecting and expanding that message. If the source is no longer available, the draft appears at the end of
 the conversation. Loading or refreshing the conversation never remounts the composer or loses unsaved edits.
 New incoming messages do not move the message cursor away from what the user is reading.
-Inline drafts are separate rounded cards with a gap below their source message. The message cursor ends at the source card.
-New-message drafts have a rounded card with space above and below it. Recipient and Subject fields use inset bottom rules and persistent labels. From stays unruled. The action toolbar has no divider. Full-screen compose hides the sidebar and hint-bar toggles while keeping sync status visible.
-The reminder control uses a bell icon. Its popup renders above the composer without clipping.
-The inline
-composer's close button saves the draft and leaves the reader open; `Esc` or the reader close control
-saves it and returns directly to the originating list in one action. Thread-bound drafts opened from Drafts
-return to this same inline context whenever the parent conversation is locally available. While composing, the global mail shortcut
-footer is absent and the composer owns its action footer, so editing controls can never overlap global hints.
+Inline drafts align with the source message body and use horizontal boundaries without a surrounding card. A Reply draft or Forward draft heading, Not sent marker, and live save state identify unsent content. The message cursor is a short accent line beside the source avatar.
+Full-screen compose hides the sidebar and hint-bar toggles while keeping sync status visible.
+The reminder control uses a bell icon. Its popup shows the heading Remind me if no reply and left-aligned presets. It renders above the composer without clipping.
+Dedicated and inline composers share recipient chips, flat envelope rows, and a Send-first footer with Aa, attachment, and reminder controls. The dedicated composer has no enclosing card or shadow. Save state appears beside its footer actions; inline drafts keep it in their header. Attachment chips follow the authored body and signature inside the scrollable editor area. Attachment mutations show progress and retain a retryable error beside the chips. Draft rows include body previews and saved timestamps. Outbox rows show send state, errors, and an explicit reopen action; reviewing an uncertain send never sends it automatically.
+
+Selecting editable body text shows a floating formatting toolbar. Aa and the Show formatting toolbar command expose the same controls without a text selection. Formatting retains the editor selection and undo history. The toolbar excludes collapsed signatures, the Attn footer, and opaque imported content, stays within the visible editor width, and closes independently with Escape. AI drafting shows a centered rounded Drafting reply... pill with a Stop button and Esc keycap, then a refine field. The reply invitation uses quiet inline text. Generation status uses a ground-colored floating pill with a subtle border and shadow at the bottom center of the editor. After 1.2 seconds without editing, a nonempty draft shows Continue draft with AI if no autocomplete suggestion, generation, or refinement is visible. The invitation is a non-clickable placeholder at the collapsed caret in authored text. Hide it when the editor loses focus or the user selects text. Mod+J invokes the existing AI draft command and preserves authored text. AI invitations, drafting status, and refine controls overlay the editor without changing its size or moving the sending controls. Snippet menus share the application menu styling.
+
+Recipient chips display names followed by email addresses in angle brackets. Empty subjects display as `(no subject)` in lists and readers, without modifying the stored subject. Sending a blank or whitespace-only subject requires a Send without subject confirmation for both the button and keyboard command. Keep editing and Escape cancel the send. Mod+Enter confirms Send without subject. Both actions display keycaps. Envelope errors and informational notices appear above the subject.
+
+Inline replies initially show a compact recipient summary. Clicking it exposes recipient editing; Cc/Bcc also exposes the copy fields. Collapsing the envelope commits pending addresses. If any address is invalid or incomplete, the fields stay expanded and retain the input. The inline envelope and footer have no internal dividers. Formatting opens with `Mod+Shift+F`; bulleted and numbered lists use `Mod+Shift+8` and `Mod+Shift+7`. Individual Bold hints do not appear in the composer footer.
+
+The inline composer's Save & close button and `Esc` save and close the draft, then restore focus to the reader at its source message. Back to the originating list is hidden while replying. A second `Esc` returns to that list. Attachment mutations, invalid recipients, and save errors still prevent closing. The inline close control shows the sole visible Escape keycap. Thread-bound drafts opened from Drafts
+return to this same inline context whenever the parent conversation is locally available. A full-window composer hides the global mail shortcut footer. An inline draft keeps that footer with composer hints, while its own action footer remains inside the draft.
 
 - **From identity:** every draft belongs to exactly one account, and its read-only From field shows that
   account. New mail binds to the account active when the composer opened; replies, reply-alls, and forwards
@@ -441,7 +460,7 @@ footer is absent and the composer owns its action footer, so editing controls ca
 - **A round trip keeps the body and the quoted trail apart:** Gmail stores a draft as one document, so a reply or forward returns with its quote joined to the body. Attn separates them again on reimport by recognizing the trailing quote structurally — never by matching bytes, since Gmail rewrites markup. Reopening therefore shows the same collapsed quote it showed before the round trip, rather than loading quoted mail into the editor as authored content. Attn declines to split when authored or styled content follows the quote, because reassembly always puts the quote last; such a draft stays merged. Blank editor lines may follow a quote, including outside nested wrappers, and remain with the quoted trail. Empty lines before those wrappers remain with the authored body.
 - **A mirrored draft is complete:** attachments mirror with the body, so a draft composed in Attn can be opened and **sent from Gmail web or mobile** with its files intact. Because Gmail replaces a draft wholesale, each checkpoint re-sends every attachment byte; the mirror interval therefore lengthens once a draft carries meaningful payload, while attaching or removing a file still pushes on the normal interval. Bytes stream from the local spool rather than being held in memory, and a file that Gmail echoes back is recognized as the one already held locally rather than stored a second time.
 - **Send:** `Mod+Enter`.
-- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/**5**/8/10/20/30s, default 5). A queued reply or forward closes the composer and appears in its conversation immediately, without waiting for either the send deadline or a sync poll; that newest message is expanded by default. A toast shows "Sent — Undo (Z)", stays visible for the entire window, and counts down the durable send deadline with a progress bar. Undo removes the queued message from the conversation and reopens the composer with everything intact. The API call happens only after the window elapses.
+- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/**5**/8/10/20/30s, default 5). A queued reply or forward closes the composer and appears in its conversation immediately, without waiting for either the send deadline or a sync poll; that newest message is expanded by default. A toast shows the remaining seconds until sending, stays visible for the entire window, and counts down the durable send deadline with a progress bar. Its Undo button invokes the same action as Z. The button is unavailable while another draft or modal owns input. Undo removes the queued message from the conversation and reopens the composer with everything intact. The API call happens only after the window elapses.
 - Outbox state machine (`composing → queued → sending → sent`) guarantees exactly-once send across crashes: on relaunch, `sending`-state items are verified against the server before any retry.
 
 **Acceptance criteria**
@@ -467,7 +486,7 @@ Named, reusable text blocks inserted into the composer via palette ("Snippet: �
 
 ### F9 — Follow-up reminders
 
-When sending, optionally set "remind me if no reply" (composer control or palette: 3 days / 1 week / custom). If no reply arrives by the deadline, the thread resurfaces at the top of the inbox with a **Follow up** chip. Any reply cancels the reminder. Pending follow-ups are listed in the Snoozed/Reminders view.
+When sending, optionally set "remind me if no reply" (composer control or palette: 3 days / 1 week / custom). If no reply arrives by the deadline, the thread resurfaces at the top of the inbox with a **Follow up** chip. Any reply cancels the reminder. Cancel a pending follow-up from its reader banner or the Cancel follow-up command. Undo restores it unless a later reply has answered it. Cancellation preserves mail labels and any snooze. Pending follow-ups are listed in the Snoozed/Reminders view. Their deadline also appears in Sent, other lists, and the reader. The reader explains that a pending follow-up waits for a reply. A returned follow-up displays “No reply yet. This conversation returned for follow-up.”
 
 The sent message that created the reminder does not cancel it. A subsequent reply from any participant,
 including the user, does. The reminder retains its originating message identity and date independently of
@@ -521,6 +540,7 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   nearby rows rearrange immediately, and release chooses the nearest position. A focused drag handle also
   accepts Up and Down for keyboard access. Attn never recreates a changed or deleted preset during launch,
   sync, or an app update. The rule manager can restore a preset only after an explicit user action.
+- The split-rule manager keeps the sortable list beside the selected rule editor. It identifies the current account and explains first-match ordering. Important and Other show their built-in behavior and notification preference. Custom rules expose their existing conditions, notification preference, save, and delete actions. The manager selects the first rule on opening. Escape closes it in one step, except during a drag.
 - A split expression combines conditions with **any** or **all**. Conditions match a sender address, a sender
   domain, an exact `List-Id`, `List-Id` presence, a label, an attachment MIME type, or an attachment filename
   suffix. A thread matches when at least one message satisfies the whole expression. Under **all**, the same
@@ -567,11 +587,18 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 ### F14 — Themes
 
-Attn ships two palettes: Dark and Light. The default System preference follows the
-OS and resolves to the dark/light pair; selecting a named palette pins it
-regardless of OS changes. Theme choices are available from the account menu and as palette commands. User-
-customizable palettes and accent colors remain post-v1. Every built-in uses D6's semantic token names rather
-than component-level color branches. Saved Midnight preferences resolve to Dark; saved Sand preferences resolve to Light.
+Attn ships Matcha, Mist, Linen, and Dusk color palettes. Matcha is the default for existing and new profiles.
+The app-wide palette preference is independent of System, Light, and Dark appearance. System follows the OS.
+Both preferences persist across restart and account switches. Color palettes are available in Appearance settings
+and command-palette commands. The account menu offers only System, Light, and Dark appearance, not color palettes.
+Appearance settings also provide these appearance choices. Existing saved appearance preferences remain valid.
+Saved Midnight resolves to Dark; saved Sand resolves to Light. Invalid or absent color palette values resolve to Matcha.
+
+All app text tokens meet normal-text AA contrast on the page, elevated panel, and selection backgrounds.
+Primary actions use the palette accent with a contrasting foreground. Secondary text remains readable in dark mode.
+Message rows show labels as tinted chips, a separate star slot, and a checkmark for Done in All Mail.
+Rows retain state markers for snooze, returned mail, and follow-up alongside labels. Initial loading uses a static
+skeleton with a loading announcement. Cached mail remains usable during sync errors and offline operation.
 
 Scrollbars use narrow, rounded thumbs, transparent tracks, and theme-specific normal and hover colors.
 The same styling covers app panes, controls, and mail frames. Light sender canvases retain light scrollbars.
@@ -583,6 +610,8 @@ centered on a solid light mail surface. Dark palettes keep the safe background
 normalization that `mailSurface.ts` applies today, with a per-message "View original" escape hatch.
 
 ### F15 — Settings
+
+Settings uses a left navigation list and one content panel. All accounts groups app-wide preferences. Current account identifies the owning email and groups Sync & storage and Signature. Connections contains Accounts. Existing palette commands open the relevant panel. Settings and split rules hide mail controls while retaining status and the profile menu. Appearance offers palette swatches. The profile menu does not repeat the palette picker. Snippets remain in Settings, with search, message previews, and an inline editor.
 
 Settings and the palette expose:
 
@@ -627,14 +656,14 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 ### F17 — AI reply drafting and inline autocomplete (opt-in, bring-your-own key)
 
-**Off by default.** Enabling requires the user's own API key — an Anthropic key or any OpenAI-compatible endpoint (which also covers fully local models via Ollama / LM Studio for a zero-cloud setup). Keys live in `safeStorage`; requests go **directly from the client to the chosen provider**, no intermediary (consistent with D2). Provider-agnostic; model user-selectable with a sensible default per provider.
+**Off by default.** Enabling requires the user's own API key — an Anthropic key or any OpenAI-compatible endpoint (which also covers fully local models via Ollama / LM Studio for a zero-cloud setup). Settings shows only a masked key preview: the first four and last four characters, with short keys fully masked. Main creates this preview before sending it to the renderer. Keys live in `safeStorage`; requests go **directly from the client to the chosen provider**, no intermediary (consistent with D2). Provider-agnostic; model user-selectable with a sensible default per provider.
 
 **Reply drafting:**
 
 - **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. When the authored reply region already contains text, that text accompanies the request as an immutable prefix and the generated continuation appends after it. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
-- An empty inline reply or reply-all composer shows `Tip: Hit Mod+J for AI` only when AI writing is enabled
+- An empty inline reply or reply-all composer shows `Draft a reply with AI` with a `Mod+J` keycap only when AI writing is enabled
   and its configured provider has the required key. The hint is transient UI outside the saved draft and
-  disappears as soon as the authored body contains content. New-mail and forward composers do not advertise
+  hides while typing. After a pause, a continuation hint appears at the caret when no autocomplete is visible. New-mail and forward composers do not advertise
   the reply-only command.
   Generation, refinement, and undo affect the authored reply region above the signature. Preserve the
   Gmail signature and optional Attn footer, including user edits or removal (F6).
@@ -766,7 +795,7 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   queues and polling and no other's.
 - **Sign out:** the account menu and palette use this short label. The confirmation identifies the account
   and asks what to do with local data. Confirming always removes the account's tokens
-  and stops its sync. The default, **Delete local data**, purges every local trace —
+  and stops its sync. Cancel receives initial focus; neither removal choice is preselected. **Delete local data** purges every local trace —
   store rows in every account-keyed table, FTS entries, attachment and draft spool files, reminders, and
   per-account settings — so removal is the privacy boundary and re-adding re-syncs from scratch (local data
   is a cache of Gmail, decision #6's posture). **Keep local data** leaves those rows in place, unreadable

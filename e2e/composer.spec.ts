@@ -4,7 +4,7 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
-import { selectedIndex } from './nav'
+import { openPalette, runPaletteCommand, selectedIndex } from './nav'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 test.setTimeout(60_000)
@@ -241,7 +241,7 @@ test('inserts the saved Gmail signature collapsed and reveals it for editing', a
     .poll(() => composer.editor.evaluate((element) => getComputedStyle(element).fontFamily))
     .toContain('Inter Variable')
   await expect(composer.editor).toHaveCSS('font-size', '13px')
-  await expect(composer.editor).toHaveCSS('line-height', '20px')
+  await expect(composer.editor).toHaveCSS('line-height', '24px')
   await composer.revealSignature()
   await expect(signature).toHaveCSS('margin-top', '20px')
   await expect(signature.locator('p').first()).toHaveCSS('margin-bottom', '0px')
@@ -346,10 +346,10 @@ test('keeps legacy-font Gmail signatures editable without preview scrollbars', a
   )
   await expect(composer.signature.getByText('Alex Rivera', { exact: true })).toHaveCSS(
     'color',
-    'rgb(157, 162, 172)'
+    'rgb(179, 197, 185)'
   )
   const signatureLink = composer.signature.getByRole('link', { name: 'northstar.test', exact: true })
-  await expect(signatureLink).toHaveCSS('color', 'rgb(255, 178, 36)')
+  await expect(signatureLink).toHaveCSS('color', 'rgb(190, 209, 189)')
   await page.evaluate(() => {
     window.open = (url, target) => {
       document.body.dataset.openedSignatureLink = String(url)
@@ -451,6 +451,9 @@ test('keeps formatting edits made inside the saved Gmail signature', async ({ ap
   await page.getByRole('button', { name: 'Bold' }).click()
   await composer.expectSaved()
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer-selection-toolbar')).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
 
   const drafts = await page.evaluate(async () => window.attn.draft.list())
@@ -522,6 +525,9 @@ test('carries source attachments into a forward draft and preserves them on reop
   await composer.typeBody('Sharing this receipt.')
   await composer.expectSaved()
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(receipt.getByTestId('chip-draft')).toBeVisible()
 
@@ -541,6 +547,9 @@ test('adds a signature and discards an untouched forward with a source attachmen
   await expect(page.getByTestId('composer-attachment-chip')).toContainText('receipt.pdf')
 
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(receipt.getByTestId('chip-draft')).toHaveCount(0)
   await goToDrafts(page)
@@ -555,6 +564,9 @@ test('keeps a forward draft when the user removes its source attachment', async 
 
   await page.getByTestId('composer-attachment-remove').click()
   await expect(page.getByTestId('composer-attachment-chip')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(receipt.getByTestId('chip-draft')).toBeVisible()
@@ -576,6 +588,24 @@ test('validates recipients before queueing a send', async ({ page }) => {
   await composer.expectPending(0)
 })
 
+test('undo feedback cannot replace another open draft', async ({ page, app }) => {
+  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 20), TEST_CHANNELS.setUndoSendDelay)
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('undo@example.com')
+  await composer.subject.fill('Queued message')
+  await composer.typeBody('Keep this queued while another draft is open.')
+  await composer.triggerSend()
+  await expect(page.getByTestId('toast-undo')).toBeVisible()
+  await composer.openNew()
+  await composer.subject.fill('Different draft')
+  await expect(page.getByTestId('toast-undo')).toHaveCount(0)
+  await expect(composer.subject).toHaveValue('Different draft')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('toast')).toHaveText('Draft saved')
+  await composer.expectPending(1)
+})
+
 test('queues durably and undo send reopens the intact composer', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
@@ -587,7 +617,7 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
 
   await expect(composer.root).toHaveCount(0)
   const toast = page.getByTestId('toast')
-  await expect(toast).toHaveText('Sent — Undo (Z)')
+  await expect(toast).toHaveText(/Sending in \d+ secondsUndo Z/)
   await expect(page.getByTestId('toast-countdown')).toBeVisible()
   const timing = await toast.evaluate((element) => {
     const durationMs = Number(element.getAttribute('data-toast-duration-ms'))
@@ -611,7 +641,7 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
   expect(Math.abs(timing.countdownDurationMs - timing.durationMs)).toBeLessThan(50)
   expect(timing.countdownAnimation).toBe('toast-countdown')
   await composer.expectPending(1)
-  await page.keyboard.press('z')
+  await page.getByTestId('toast-undo').click()
 
   await expect(composer.root).toBeVisible()
   await composer.expectRecipients(['undo@example.com'])
@@ -724,6 +754,18 @@ test('rejects an oversized picked attachment without creating a chip', async ({ 
 
   await expect(page.getByTestId('toast')).toHaveText('Each attachment must be 25 MB or less')
   await expect(composer.attachmentChips).toHaveCount(0)
+  const error = page.getByTestId('composer-attachment-error')
+  await expect(error).toContainText('Each attachment must be 25 MB or less')
+  truncateSync(source, 100)
+  await setAttachmentPickerFiles(app, [source])
+  await runPaletteCommand(page, 'Retry attachment change')
+  await expect(composer.attachmentChips).toHaveCount(1)
+  await expect(error).toHaveCount(0)
+  await openPalette(page, 'Retry attachment change')
+  await expect(
+    page.getByTestId('command-palette').getByText('Retry attachment change', { exact: true })
+  ).toHaveCount(0)
+  await page.keyboard.press('Escape')
 })
 
 test('renders coarse attachment upload progress in the global toast', async ({ app, page }) => {
@@ -910,10 +952,12 @@ test('opens the composer, validates chips, autocompletes locally, and saves on E
   await expect.poll(() => toInput.evaluate((input) => document.activeElement === input)).toBe(true)
 
   const formattingToolbar = page.getByRole('toolbar', { name: 'Formatting toolbar' })
+  await expect(formattingToolbar).toHaveCount(0)
+  await page.getByTestId('composer-format-toggle').click()
   await expect(formattingToolbar).toBeVisible()
   await expect
     .poll(() => formattingToolbar.evaluate((toolbar) => getComputedStyle(toolbar).flexWrap))
-    .toBe('nowrap')
+    .toBe('wrap')
   await page.getByTestId('composer-format-more').click()
   await expect(page.getByTestId('composer-format-menu')).toBeVisible()
   await expect(page.getByTestId('composer-format-menu')).toContainText('Strikethrough')
@@ -1003,7 +1047,7 @@ test('strikes text through with the format menu action (B10)', async ({ page }) 
   const composer = new ComposerPage(page)
   await composer.openNew()
   await composer.typeBody('Struck through')
-  await composer.editor.selectText()
+  await composer.editor.locator('p').first().selectText()
 
   await page.getByTestId('composer-format-more').click()
   await page.getByTestId('composer-format-menu').getByText('Strikethrough').click()
@@ -1024,7 +1068,7 @@ test('adds links from the toolbar and the registered composer shortcut', async (
   const composer = new ComposerPage(page)
   await composer.openNew()
   await composer.typeBody('Visit Attn')
-  await composer.editor.selectText()
+  await composer.editor.locator('p').first().selectText()
 
   await page.getByTestId('composer-link').click()
   await page.getByTestId('composer-link-url').fill('attn.test')
@@ -1147,6 +1191,30 @@ test('discards a draft with Mod+Shift+D from the composer and Drafts list', asyn
   await expect(rows.first()).toHaveAttribute('data-selected', 'true')
 })
 
+test('keeps pending inline recipients when collapsing the envelope', async ({ page }) => {
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await page.getByTestId('composer-show-copies').click()
+  const summary = page.getByTestId('composer-recipient-summary')
+  for (const field of ['to', 'cc', 'bcc']) {
+    const input = page.getByTestId(`composer-${field}`).locator('input')
+    await input.fill('unfinished@')
+    await summary.click()
+    await expect(summary).toHaveAttribute('aria-expanded', 'true')
+    await expect(input).toHaveValue('unfinished@')
+    await expect(input).toHaveAttribute('aria-invalid', 'true')
+    await input.fill(`${field}@example.com`)
+    await summary.click()
+    await expect(summary).toHaveAttribute('aria-expanded', 'false')
+    await summary.click()
+    await expect(page.getByTestId(`composer-${field}`).getByTestId('recipient-chip')).toContainText([
+      `${field}@example.com`
+    ])
+    await expect(input).toHaveValue('')
+  }
+})
+
 test('opens reply, reply-all, and forward drafts from the reader and reuses the reply draft', async ({
   page
 }, testInfo) => {
@@ -1161,7 +1229,7 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await expect(page.getByTestId('conversation-view')).toBeVisible()
   await expect(page.getByTestId('conversation-content').getByTestId('composer')).toBeVisible()
   await expect(page.getByTestId('message-card')).toHaveCount(2)
-  await expect(page.getByTestId('conversation-back')).toBeEnabled()
+  await expect(page.getByTestId('conversation-back')).toHaveCount(0)
   await composer.expectRecipients(['maya+roadmap@example.com'])
   await expect
     .poll(async () => {
@@ -1194,6 +1262,9 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await page.screenshot({ path })
   await testInfo.attach('inline-reply', { path, contentType: 'image/png' })
   const replyId = await composer.root.getAttribute('data-draft-id')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(composer.root).toHaveCount(0)
   await expect(page.getByTestId('thread-list')).toBeVisible()
@@ -1229,6 +1300,8 @@ test('opens reply, reply-all, and forward drafts from the reader and reuses the 
   await expect(page.getByTestId('composer-quote-toggle')).toBeVisible()
   await composer.typeBody('Forward this roadmap context')
   await composer.expectSaved()
+  await page.getByTestId('composer-close').click()
+  await expect(composer.root).toHaveCount(0)
   await page.getByTestId('conversation-back').click()
   await expect(composer.root).toHaveCount(0)
   await expect(page.getByTestId('thread-list')).toBeVisible()
@@ -1244,6 +1317,9 @@ test('releases a delayed draft reopen when the reader closes first', async ({ ap
   await composer.openReply()
   await composer.typeBody('Keep this delayed reply')
   await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(thread.getByTestId('chip-draft')).toBeVisible()
 
@@ -1275,6 +1351,9 @@ test('keeps a detached draft escapable when its parent thread is missing', async
   await composer.typeBody('Detached reply body')
   await composer.expectSaved()
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
 
   const deleteError = await app.evaluate(
     ({ ipcMain }, args) =>
@@ -1290,6 +1369,9 @@ test('keeps a detached draft escapable when its parent thread is missing', async
   await draft.click()
   await expect(composer.root).toBeVisible()
   await expect(composer.root).toContainText('Detached reply body')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('draft-list')).toBeVisible()
 
@@ -1322,6 +1404,9 @@ test('uses one control for the signature and quote, then discards an untouched r
   await expect(composer.signature).toContainText('Chao Wu')
   await expect(composer.quote).toBeVisible()
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
 
   // The quote, planned recipients and "Re:" subject are ours, not the user's,
@@ -1338,6 +1423,9 @@ test('uses one control for the signature and quote, then discards an untouched r
   await composer.openReply()
   await composer.typeBody('Worth keeping')
   await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(design.getByTestId('chip-draft')).toBeVisible()
 })
@@ -1398,6 +1486,9 @@ test('keeps the signature discardable when a reply becomes reply-all', async ({ 
   await expect(composer.root).toHaveAttribute('data-draft-kind', 'replyAll')
   await composer.expectSignatureAndQuoteCollapsed()
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(design.getByTestId('chip-draft')).toHaveCount(0)
 })
@@ -1451,6 +1542,9 @@ test('restores a bound draft when J reads into its conversation', async ({ page 
   await composer.typeBody('Restored by keyboard navigation')
   await composer.expectSaved()
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await expect(design.getByTestId('chip-draft')).toBeVisible()
   await expect.poll(() => selectedIndex(page)).toBe(2)
@@ -1477,6 +1571,9 @@ test('releases a superseded reopen lease when J leaves before it resolves', asyn
   await composer.openReply()
   await composer.typeBody('Lease released by navigation')
   await composer.expectSaved()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-view')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(design.getByTestId('chip-draft')).toBeVisible()
 
@@ -1527,10 +1624,12 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
   await expect(page.getByTestId('composer')).toHaveAttribute('data-draft-kind', 'forward')
-  await expect(page.getByTestId('conversation-back')).toHaveAttribute('aria-label', 'Back to Drafts')
+  await expect(page.getByTestId('conversation-back')).toHaveCount(0)
 
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('composer')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-back')).toHaveAttribute('aria-label', 'Back to Drafts')
+  await page.keyboard.press('Escape')
   await expect(page.getByTestId('draft-list')).toBeVisible()
   await expect(page.getByTestId('view-title')).toHaveText('Drafts')
   await page.keyboard.press('g')
@@ -1560,7 +1659,7 @@ test('marks and opens a Gmail forward draft inline when its parent thread is cac
   await page.getByTestId('draft-row').filter({ hasText: 'Fwd: Re: Q3 roadmap review' }).click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Re: Q3 roadmap review')
   await expect(page.getByTestId('message-card')).toContainText('Thanks — I added my notes.')
-  await expect(page.getByTestId('conversation-back')).toHaveAttribute('aria-label', 'Back to Drafts')
+  await expect(page.getByTestId('conversation-back')).toHaveCount(0)
   await expect(page.getByTestId('composer')).toHaveAttribute('data-composer-mode', 'inline')
 })
 
@@ -1595,6 +1694,8 @@ test('preserves a newsletter surface and CID resources in a forward draft', asyn
   await composer.editor.click()
   await composer.typeBody('Sharing this long read.')
   await composer.expectSaved()
+  await page.getByTestId('composer-close').click()
+  await expect(composer.root).toHaveCount(0)
   await page.getByTestId('conversation-back').click()
   await expect(page.getByTestId('thread-list')).toBeVisible()
   await page.getByTestId('thread-subject').getByText('This week in focus', { exact: true }).click()
@@ -2141,6 +2242,7 @@ test('adopts closed remote edits, preserves Bcc, and defers an edit while open',
   const id = await composer.root.getAttribute('data-draft-id')
   if (!id) throw new Error('missing draft id')
   await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
   const mirrorError = await app.evaluate(
     ({ ipcMain }, args) =>
       new Promise<string | undefined>((resolve) =>
@@ -2190,6 +2292,7 @@ test('adopts closed remote edits, preserves Bcc, and defers an edit while open',
   await reconcile('Deferred remote edit', '<p>Do not rewrite the open editor</p>')
   await expect(composer.subject).toHaveValue('Remote closed edit')
   await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
   await reconcile('Deferred remote edit', '<p>Adopted after close</p>')
   await goToDrafts(page)
   await page.getByTestId('draft-row').filter({ hasText: 'Deferred remote edit' }).click()
@@ -2480,9 +2583,10 @@ test('keeps the caret in a recipient field while a preserved region sits in the 
   await page.keyboard.press('Enter')
   // Inline placement is load-bearing: the editor only takes focus on open in
   // this mode, which is what leaves a selection for the update to write back.
+  await expect(composer.editor).toBeFocused()
+  await composer.expandRecipients()
   await expect(page.getByTestId('conversation-view').getByTestId('composer-to')).toBeVisible()
   await expect(page.getByTestId('composer-editor').locator('iframe')).toHaveCount(1)
-  await expect(page.getByTestId('composer-editor')).toBeFocused()
 
   const to = page.getByTestId('composer-to').locator('input').first()
   await to.click()
@@ -2607,4 +2711,80 @@ test('quit checkpoints composer text no autosave timer has reached yet (B28)', a
   composer = new ComposerPage(page)
   await expect(composer.root).toBeVisible()
   await expect(composer.editor).toContainText(typed)
+})
+
+test('confirms an empty subject with Escape and Mod+Enter without losing the draft', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('recipient@example.com')
+  await composer.typeBody('Keep this text while confirming.')
+  await composer.triggerSend()
+  const confirmation = page.getByTestId('no-subject-confirmation')
+  await expect(confirmation).toBeVisible()
+  mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+  await page.screenshot({ path: join(__dirname, '.artifacts/composer-no-subject.png') })
+  await page.keyboard.press('Escape')
+  await expect(confirmation).toHaveCount(0)
+  await expect(composer.editor).toContainText('Keep this text while confirming.')
+  await composer.triggerSend()
+  await expect(confirmation).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect(confirmation).toHaveCount(0)
+  await composer.expectPending(1)
+})
+
+test('opens formatting by shortcut and applies numbered and bulleted lists', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('List item')
+  await page.keyboard.press('ControlOrMeta+Shift+f')
+  await expect(page.getByTestId('composer-selection-toolbar')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await composer.editor.click()
+  await page.keyboard.press('ControlOrMeta+Shift+7')
+  await expect(composer.editor.locator('ol')).toContainText('List item')
+  await page.keyboard.press('ControlOrMeta+Shift+8')
+  await expect(composer.editor.locator('ul')).toContainText('List item')
+})
+
+test('Escape dismisses a selection toolbar before closing the draft', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.typeBody('Keep this selected text')
+  await composer.editor.locator('p').first().selectText()
+  const toolbar = page.getByTestId('composer-selection-toolbar')
+  await expect(toolbar).toBeVisible()
+  await expect(composer.editor).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(toolbar).toHaveCount(0)
+  await expect(composer.root).toBeVisible()
+  await expect(composer.editor).toBeFocused()
+  await expect(composer.editor).toContainText('Keep this selected text')
+  await page.keyboard.press('Escape')
+  await expect(composer.root).toHaveCount(0)
+})
+
+test('Drafts and Outbox display whitespace subjects without changing their stored value', async ({
+  page
+}) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('recipient@example.com')
+  await composer.subject.fill('   ')
+  await composer.typeBody('Whitespace subject body')
+  await composer.expectSaved()
+  await page.getByTestId('composer-close').click()
+  await goToDrafts(page)
+  const row = page.getByTestId('draft-row').filter({ hasText: 'Whitespace subject body' })
+  await expect(row).toContainText('(no subject)')
+  await row.click()
+  await expect(composer.subject).toHaveValue('   ')
+  await composer.triggerSend()
+  await expect(page.getByTestId('no-subject-confirmation')).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect(composer.root).toHaveCount(0)
+  await page.getByTestId('outbox-count').click()
+  await expect(page.getByTestId('outbox-row')).toContainText('(no subject)')
+  await page.getByTestId('outbox-open').click()
+  await expect(composer.subject).toHaveValue('   ')
 })

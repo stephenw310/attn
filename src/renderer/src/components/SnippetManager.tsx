@@ -8,7 +8,7 @@ import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin'
 import { ListPlugin } from '@lexical/react/LexicalListPlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { $createParagraphNode, $getRoot, type LexicalEditor } from 'lexical'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { errorMessage } from '../../../shared/error'
 import { normalizeSnippetTrigger, type Snippet } from '../../../shared/snippets'
 import { editorConfig } from '../composer/editorConfig'
@@ -16,12 +16,15 @@ import { prepareHtmlForEditor } from '../composer/preserve'
 import { preserveBlankLineBlocks, rootLevelNodes } from '../composer/rootNodes'
 import { serializeEditorState } from '../composer/serialize'
 import { useShowToast } from '../toastContext'
-import { ACTION_BUTTON, NOTE } from './settingsStyles'
+import { Kbd } from './Kbd'
+import { NOTE } from './settingsStyles'
 
 // F8's manager: a T32 settings section editing the app-global snippet set with
 // the same Lexical document the composer uses, so what is saved here is exactly
 // what expansion inserts. Bodies are untrusted (rule 3): the import below and
 // the serialize on save both run the composer sanitize path.
+
+const PRIMARY = 'cursor-pointer rounded-md bg-accent px-4 py-2.5 text-xs text-on-accent disabled:opacity-45'
 
 const FIELD =
   'h-9 w-full rounded-md border border-edge bg-ground px-2.5 text-sm text-ink outline-none focus:border-accent'
@@ -73,10 +76,11 @@ interface EditingState {
   bodyHtml: string
 }
 
-export function SnippetManager(): React.JSX.Element {
+export function SnippetManager({ active }: { active: boolean }): React.JSX.Element {
   const onToast = useShowToast()
   const [snippets, setSnippets] = useState<Snippet[] | null>(null)
   const [editing, setEditing] = useState<EditingState | null>(null)
+  const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const editorRef = useRef<LexicalEditor | null>(null)
@@ -108,6 +112,23 @@ export function SnippetManager(): React.JSX.Element {
         : { id: null, name: '', trigger: '', subject: '', bodyHtml: '' }
     )
   }, [])
+
+  useEffect(() => {
+    if (!active || !editing) return
+    const close = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || saving) return
+      if (
+        event.target instanceof Element &&
+        event.target.closest('input, textarea, [contenteditable="true"]')
+      )
+        return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setEditing(null)
+    }
+    window.addEventListener('keydown', close, true)
+    return () => window.removeEventListener('keydown', close, true)
+  }, [active, editing, saving])
 
   const save = useCallback(() => {
     const bridge = window.attn
@@ -162,60 +183,81 @@ export function SnippetManager(): React.JSX.Element {
     [onToast]
   )
 
+  const snippetPreviews = useMemo(
+    () =>
+      (snippets ?? []).map((snippet) => ({
+        ...snippet,
+        preview:
+          new DOMParser()
+            .parseFromString(prepareHtmlForEditor(snippet.bodyHtml).html, 'text/html')
+            .body.textContent?.replace(/\s+/g, ' ')
+            .trim() ?? ''
+      })),
+    [snippets]
+  )
+  const visibleSnippets = snippetPreviews.filter((snippet) =>
+    `${snippet.name} ${snippet.trigger ?? ''} ${snippet.preview}`.toLowerCase().includes(query.toLowerCase())
+  )
+
   return (
     <div className="flex flex-col gap-2">
-      {(snippets ?? []).map((snippet) => (
-        <div
-          key={snippet.id}
-          className="flex items-center justify-between gap-4 rounded-md border border-edge px-3 py-2"
-          data-testid="settings-snippet-row"
-          data-snippet-name={snippet.name}
-        >
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm text-ink">{snippet.name}</span>
-            {snippet.trigger && (
-              <span className="shrink-0 rounded bg-active px-1.5 py-0.5 font-mono text-[11px] text-ink-dim">
-                ;{snippet.trigger}
-              </span>
-            )}
-            {snippet.subject && (
-              <span className="min-w-0 truncate text-[11px] text-ink-faint">{snippet.subject}</span>
-            )}
+      {!editing && (
+        <>
+          <div className="mb-3 flex items-center gap-3 border-b border-edge pb-3 text-ink-dim">
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 shrink-0 fill-none stroke-current">
+              <circle cx="10" cy="10" r="7" />
+              <path d="m15 15 6 6" />
+            </svg>
+            <input
+              aria-label="Search snippets"
+              data-testid="settings-snippet-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search"
+              className="min-w-0 flex-1 bg-transparent py-2 text-sm text-ink outline-none placeholder:text-ink-dim"
+            />
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          {visibleSnippets.map((snippet) => (
             <button
+              key={snippet.id}
               type="button"
-              className={ACTION_BUTTON}
-              data-testid="settings-snippet-edit"
               onClick={() => openEditor(snippet)}
+              data-testid="settings-snippet-row"
+              data-snippet-name={snippet.name}
+              className="flex w-full items-center justify-between gap-4 rounded-md px-2 py-3 text-left hover:bg-active focus-visible:bg-active"
             >
-              Edit
+              <span className="min-w-0">
+                <span className="block truncate text-[13px] text-ink">{snippet.name}</span>
+                <span className="mt-1 block truncate text-xs text-ink-dim">
+                  {snippet.preview || snippet.subject}
+                </span>
+              </span>
+              {snippet.trigger && <span className="shrink-0 text-xs text-ink-dim">;{snippet.trigger}</span>}
             </button>
-            <button
-              type="button"
-              className={ACTION_BUTTON}
-              data-testid="settings-snippet-delete"
-              aria-label={`Delete snippet ${snippet.name}`}
-              onClick={() => remove(snippet.id)}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      ))}
-      {snippets !== null && snippets.length === 0 && !editing && (
-        <p className={NOTE} data-testid="settings-snippets-empty">
-          Reusable text blocks for the composer: insert them from the palette (“Snippet: …”), the Mod+;
-          picker, or by typing <span className="font-mono">;trigger</span> followed by a space.
-        </p>
+          ))}
+          {snippets !== null && visibleSnippets.length === 0 && (
+            <p className={NOTE} data-testid="settings-snippets-empty">
+              {query ? 'No matching snippets.' : 'No snippets yet.'}
+            </p>
+          )}
+        </>
       )}
       {editing ? (
-        <div
-          className="flex flex-col gap-2 rounded-md border border-edge p-3"
-          data-testid="settings-snippet-editor"
-        >
-          <div className="grid grid-cols-[1fr_140px] gap-2">
-            <label className="flex flex-col gap-1 text-[11px] text-ink-faint">
+        <div className="flex flex-col gap-5" data-testid="settings-snippet-editor">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="text-base font-medium text-ink">{editing.id ? 'Edit snippet' : 'New snippet'}</h4>
+            <button
+              type="button"
+              data-testid="settings-snippet-cancel"
+              onClick={() => setEditing(null)}
+              disabled={saving}
+              className="flex items-center gap-2 text-xs text-ink-dim"
+            >
+              Close <Kbd>Esc</Kbd>
+            </button>
+          </div>
+          <div className="flex flex-col gap-5">
+            <label className="flex flex-col gap-2 text-xs text-ink">
               Name
               <input
                 className={FIELD}
@@ -226,8 +268,8 @@ export function SnippetManager(): React.JSX.Element {
                 }
               />
             </label>
-            <label className="flex flex-col gap-1 text-[11px] text-ink-faint">
-              Trigger (optional)
+            <label className="flex flex-col gap-2 text-xs text-ink">
+              Trigger · optional
               <input
                 className={`${FIELD} font-mono`}
                 data-testid="settings-snippet-trigger"
@@ -239,19 +281,20 @@ export function SnippetManager(): React.JSX.Element {
               />
             </label>
           </div>
-          <label className="flex flex-col gap-1 text-[11px] text-ink-faint">
-            Subject (fills an empty subject, never overwrites)
+          <label className="flex flex-col gap-2 text-xs text-ink">
+            Subject · optional
             <input
               className={FIELD}
               data-testid="settings-snippet-subject"
+              placeholder="Keep the draft’s subject"
               value={editing.subject}
               onChange={(event) =>
                 setEditing((current) => current && { ...current, subject: event.target.value })
               }
             />
           </label>
-          <div className="flex flex-col gap-1 text-[11px] text-ink-faint">
-            Body — <span className="font-mono">{'{cursor}'}</span> marks where the caret lands
+          <div className="flex flex-col gap-2 text-xs text-ink">
+            Message
             {/* Keyed per target so switching rows remounts the editor: fresh
                 document, fresh undo history. */}
             <LexicalComposer key={editing.id ?? 'new'} initialConfig={editorConfig}>
@@ -259,7 +302,7 @@ export function SnippetManager(): React.JSX.Element {
                 <RichTextPlugin
                   contentEditable={
                     <ContentEditable
-                      className="min-h-24 px-3 py-2 text-[13px] leading-5 text-ink outline-none"
+                      className="min-h-[140px] px-3 py-2 text-[13px] leading-5 text-ink outline-none"
                       data-testid="settings-snippet-body"
                       aria-label="Snippet body"
                     />
@@ -279,6 +322,9 @@ export function SnippetManager(): React.JSX.Element {
               </div>
             </LexicalComposer>
           </div>
+          <p className={NOTE}>
+            Use {'{cursor}'} to place the caret after insertion. A subject fills an empty draft subject only.
+          </p>
           {error && (
             <p className="text-[11px] text-danger" data-testid="settings-snippet-error">
               {error}
@@ -287,34 +333,36 @@ export function SnippetManager(): React.JSX.Element {
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              className={ACTION_BUTTON}
+              className={PRIMARY}
               data-testid="settings-snippet-save"
               disabled={saving}
               onClick={save}
             >
               Save snippet
             </button>
-            <button
-              type="button"
-              className={ACTION_BUTTON}
-              data-testid="settings-snippet-cancel"
-              disabled={saving}
-              onClick={() => setEditing(null)}
-            >
-              Cancel
-            </button>
+            {editing.id && (
+              <button
+                type="button"
+                data-testid="settings-snippet-delete"
+                onClick={() => remove(editing.id as string)}
+                disabled={saving}
+                className="ml-auto text-xs text-ink-dim hover:text-danger"
+              >
+                Delete snippet
+              </button>
+            )}
           </div>
         </div>
       ) : (
         <div>
           <button
             type="button"
-            className={ACTION_BUTTON}
+            className={PRIMARY}
             data-testid="settings-snippet-new"
             data-settings-control="snippets"
             onClick={() => openEditor(null)}
           >
-            New snippet…
+            New snippet
           </button>
         </div>
       )}

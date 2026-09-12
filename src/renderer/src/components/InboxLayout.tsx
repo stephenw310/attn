@@ -1,7 +1,9 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ThreadListView } from '../../../shared/mail'
+import { getCommandRegistrySnapshot, subscribeCommandRegistry } from '../commands'
 import type { InboxController } from '../hooks/useInboxController'
 import { type MailView, userLabelId } from '../list/mailDisplay'
+import { Button } from './Button'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
 import { InboxOverlays } from './InboxOverlays'
@@ -25,6 +27,7 @@ function threadListKind(view: MailView): ThreadListView | 'label' {
 }
 
 export function InboxLayout({ controller: c }: { controller: InboxController }): React.JSX.Element {
+  const [syncDetailsRequest, setSyncDetailsRequest] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     // Give the window a focus target before Electron selects the first button.
@@ -34,16 +37,18 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
   return (
     <div ref={rootRef} tabIndex={-1} data-testid="mail-window" className="flex h-full flex-col outline-none">
       <MailHeader
+        preferencesOpen={c.settingsOpen || c.splitRulesOpen}
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
         outboxCount={c.realOutbox.length}
-        selectionCount={c.searchOpen || (c.view !== 'drafts' && c.view !== 'outbox') ? c.selectedIds.size : 0}
+        selectionCount={c.readerOpen || (!c.searchOpen && c.view === 'drafts') ? c.selectedIds.size : 0}
         composerOpen={c.fullWindowComposerDraft !== null}
         sidebarCollapsed={c.sidebarCollapsed}
         footerCollapsed={c.footerCollapsed}
         onToggleFooter={c.toggleFooter}
         syncStatus={
           <SyncStatus
+            detailsRequest={syncDetailsRequest}
             sync={c.sync}
             networkOnline={c.networkOnline}
             onRetry={c.retrySync}
@@ -55,6 +60,8 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         onReconnectActions={c.accounts.reconnectActions}
         onOpenOutbox={c.openOutbox}
         onToggleSidebar={c.toggleSidebar}
+        onWrite={c.drafting.openComposer}
+        writeDisabled={c.accountActionsBlocked}
         onSwitchAccount={c.accounts.switchAccount}
         onAddAccount={c.accounts.addAccount}
         onRemoveAccount={c.accounts.requestRemoveAccount}
@@ -69,7 +76,7 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         className={`min-h-0 flex-1 ${c.fullWindowComposerDraft ? 'hidden' : 'flex'}`}
         aria-hidden={!!c.fullWindowComposerDraft}
       >
-        {!c.sidebarCollapsed && (
+        {!c.sidebarCollapsed && !c.settingsOpen && !c.splitRulesOpen && (
           <MailSidebar
             view={c.view}
             labels={c.labels}
@@ -93,20 +100,53 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
               onAddAccount={c.accounts.addAccount}
               onReconnect={c.accounts.reconnectActions}
               onSignOut={c.accounts.requestRemoveAccount}
+              onOpenSplits={() => {
+                c.closeSettings()
+                c.setSplitRulesOpen(true)
+              }}
               onClose={c.closeSettings}
               focusControl={c.settingsFocus}
+              onNavigate={c.clearSettingsFocus}
             />
           )}
           <div
-            className={`min-h-0 min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
+            className={`app-mail-content min-h-0 min-w-0 flex-1 flex-col ${c.settingsOpen ? 'hidden' : 'flex'}`}
             aria-hidden={c.settingsOpen || undefined}
           >
             <MailboxTop controller={c} />
+            {!c.readerOpen && !c.splitRulesOpen && c.sync.phase === 'error' && (
+              <div
+                data-testid="mailbox-sync-error"
+                role="alert"
+                className="mx-3 mb-4 flex flex-wrap items-center gap-4 rounded-md bg-active px-4 py-3 text-xs text-ink-dim"
+              >
+                <span className="min-w-0 flex-1">Sync couldn't finish. Your cached mail is available.</span>
+                <Button data-testid="mailbox-sync-retry" onClick={c.retrySync}>
+                  Retry
+                </Button>
+                <Button
+                  data-testid="mailbox-sync-details"
+                  onClick={() => setSyncDetailsRequest((value) => value + 1)}
+                >
+                  Details
+                </Button>
+              </div>
+            )}
+            {!c.readerOpen &&
+              !c.splitRulesOpen &&
+              c.selectedIds.size > 0 &&
+              (c.searchOpen || !['drafts', 'outbox'].includes(c.view)) && (
+                <BulkActions count={c.selectedIds.size} onClear={c.clearSelection} />
+              )}
             <SearchStatus controller={c} />
             <MailboxBody controller={c} />
           </div>
-          {!c.fullWindowComposerDraft && !c.footerCollapsed && (
+          {!c.fullWindowComposerDraft && !c.footerCollapsed && !c.settingsOpen && !c.splitRulesOpen && (
             <MailFooter
+              empty={c.showInboxZero}
+              snoozed={c.view === 'snoozed' && !c.searchOpen}
+              selectedSnoozed={c.selected?.snoozed}
+              onOpenShortcuts={c.openCheatSheet}
               context={
                 c.inlineComposerDraft
                   ? 'composer'
@@ -145,11 +185,8 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
           onSubmit={c.search.submit}
         />
       ) : (
-        <div
-          data-testid="mail-view-header"
-          className="flex h-[44px] flex-none items-center border-b border-edge pr-7 pl-[53px]"
-        >
-          <h1 data-testid="mailbox-title" className="mr-5 flex-none text-base font-semibold text-ink">
+        <div data-testid="mail-view-header" className="app-inbox-header flex-none">
+          <h1 data-testid="mailbox-title" className="text-ink">
             <span data-testid="view-title">{c.activeViewTitle}</span>
           </h1>
           {c.view === 'inbox' && c.splits.state && (
@@ -166,13 +203,13 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
             aria-label="Search mail"
             data-tooltip="Search mail (/)"
             onClick={c.openSearch}
-            className="app-no-drag ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
+            className="app-no-drag col-start-2 row-start-1 ml-auto flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current">
               <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
               <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
-            <span>/</span>
+            <span>Search</span>
           </button>
         </div>
       )}
@@ -264,11 +301,16 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
       {c.readerOpen && c.selected && (
         <ConversationView
           selected={c.selected}
+          onChangeSnooze={c.openSnooze}
+          onUnsnooze={c.unsnoozeSelected}
+          onCancelFollowUp={c.cancelFollowUpSelected}
           selectedIndex={c.conversationSelectedIndex}
           threadCount={c.conversationThreadCount}
           threadCountExact={c.conversationThreadCountExact}
           mailboxTitle={c.searchOpen ? 'Search' : c.activeViewTitle}
           conversation={c.conversation}
+          labels={c.labels}
+          onOpenLabel={c.openLabelView}
           account={c.activeAccount}
           online={c.online}
           scrollRef={c.conversationScrollRef}
@@ -315,6 +357,36 @@ function SearchStatus({ controller: c }: { controller: InboxController }): React
             ? searchCoverageText(c.search.local.response.coverage, c.search.local.response.partial)
             : 'Searching cached mail…'}
       </div>
+    </div>
+  )
+}
+
+function BulkActions({ count, onClear }: { count: number; onClear: () => void }): React.JSX.Element {
+  const commands = useSyncExternalStore(subscribeCommandRegistry, getCommandRegistrySnapshot)
+  return (
+    <div
+      data-testid="bulk-actions"
+      className="mx-3 mb-3 flex flex-wrap items-center gap-4 rounded-md bg-active px-4 py-3 text-xs text-ink-dim"
+    >
+      <span data-testid="selection-count" className="mr-auto">
+        {count} selected
+      </span>
+      {(['triage.archive', 'triage.snooze', 'triage.label'] as const).map((id) => {
+        const command = commands.find((item) => item.id === id)
+        return (
+          <Button
+            key={id}
+            data-testid={`bulk-${id.split('.')[1]}`}
+            disabled={!command}
+            onClick={() => command?.run()}
+          >
+            {id === 'triage.archive' ? 'Mark done' : id === 'triage.snooze' ? 'Snooze' : 'Label'}
+          </Button>
+        )
+      })}
+      <Button data-testid="bulk-clear" onClick={onClear}>
+        Clear
+      </Button>
     </div>
   )
 }

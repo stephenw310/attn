@@ -18,6 +18,7 @@ import type { AiStreamEvent, AiThreadMessage } from '../../../shared/ai'
 import type { Draft } from '../../../shared/drafts'
 import { errorMessage } from '../../../shared/error'
 import { createCommand, registerCommands } from '../commands'
+import { Kbd } from '../components/Kbd'
 import type { ShowToast } from '../hooks/useToast'
 import { $isProtectedComposerNode } from './nodes/protected'
 
@@ -54,6 +55,7 @@ interface AiRun {
 }
 
 interface AiDraftPluginProps {
+  onBusyChange?: (busy: boolean) => void
   kind: Draft['kind']
   threadId: Draft['threadId']
   /** Monotonic invocation counter from the Inbox-owned command. */
@@ -106,6 +108,7 @@ export function AiDraftPlugin({
   claim,
   getThreadContext,
   onContentSettled,
+  onBusyChange,
   onToast
 }: AiDraftPluginProps): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
@@ -395,6 +398,7 @@ export function AiDraftPlugin({
   useEffect(() => {
     if (phase !== 'streaming') return
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.target instanceof Element && event.target.closest('dialog[open]')) return
       if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
       event.preventDefault()
       event.stopPropagation()
@@ -405,6 +409,10 @@ export function AiDraftPlugin({
   }, [phase])
 
   const showRefine = phase === 'landed' && !edited && !refineDismissed
+  const busy = phase === 'streaming' || showRefine
+  useEffect(() => {
+    onBusyChange?.(busy)
+  }, [busy, onBusyChange])
   const dismissRefine = useCallback(() => {
     setRefineDismissed(true)
     editor.focus()
@@ -426,6 +434,7 @@ export function AiDraftPlugin({
   useEffect(() => {
     if (!showRefine) return
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.target instanceof Element && event.target.closest('dialog[open]')) return
       if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
         return
       }
@@ -475,12 +484,20 @@ export function AiDraftPlugin({
   if (phase === 'streaming') {
     return (
       <div className="pointer-events-none absolute inset-x-0 bottom-2 z-20 flex justify-center">
-        <span
+        <div
           data-testid="ai-drafting"
-          className="rounded-full border border-edge bg-raised px-3 py-1 text-[11px] text-ink-dim shadow-lg"
+          className="pointer-events-auto flex items-center gap-5 rounded-full border border-edge/50 bg-ground px-3.5 py-2.5 text-xs text-ink shadow-status"
         >
-          Drafting reply… <span className="text-ink-faint">Esc cancels</span>
-        </span>
+          <span role="status">Drafting reply...</span>
+          <button
+            type="button"
+            data-testid="ai-draft-stop"
+            onClick={cancel}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm hover:text-accent"
+          >
+            Stop <Kbd>Esc</Kbd>
+          </button>
+        </div>
       </div>
     )
   }
@@ -491,10 +508,10 @@ export function AiDraftPlugin({
     void startRef.current(instruction)
   }
   return (
-    <div className="absolute inset-x-0 bottom-2 z-20 flex justify-center" data-composer-transient>
+    <div className="absolute inset-x-0 bottom-4 z-20 flex justify-center" data-composer-transient>
       <div
         data-testid="ai-refine"
-        className="flex w-full max-w-md items-center gap-1.5 rounded-full border border-edge bg-raised py-1 pr-1 pl-3 shadow-lg"
+        className="flex w-full max-w-md items-center gap-1.5 rounded-full border border-edge bg-ground py-2 pr-2 pl-4 shadow-menu"
       >
         <input
           ref={refineInputRef}
@@ -521,7 +538,7 @@ export function AiDraftPlugin({
           data-testid="ai-refine-run"
           disabled={refineText.trim().length === 0}
           onClick={runRefine}
-          className="cursor-pointer rounded-full border border-edge px-2.5 py-0.5 text-[11px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45"
+          className="cursor-pointer rounded-md px-2.5 py-1 text-[11px] text-ink-dim hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-45"
         >
           Refine
         </button>
@@ -532,7 +549,7 @@ export function AiDraftPlugin({
           onClick={() => {
             dismissRefine()
           }}
-          className="cursor-pointer rounded-full px-2 py-0.5 text-[11px] text-ink-faint hover:bg-active hover:text-ink"
+          className="cursor-pointer rounded-md px-2 py-1 text-[11px] text-ink-faint hover:bg-active hover:text-ink"
         >
           ✕
         </button>

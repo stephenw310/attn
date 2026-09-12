@@ -11,7 +11,9 @@ import {
 import type { MailView, NavigableMailView } from '../list/mailDisplay'
 
 /** The triage verbs that act on the focused row alone. */
-type SelectedTriage = { kind: 'archive' | 'trash' | 'spam' } | { kind: 'star' | 'markUnread'; on: boolean }
+type SelectedTriage =
+  | { kind: 'archive' | 'trash' | 'spam' | 'cancelFollowUp' }
+  | { kind: 'star' | 'markUnread'; on: boolean }
 
 interface Options {
   /** Whether a row is focused at all — the commands' registration condition. */
@@ -241,6 +243,7 @@ export function useInboxCommands(options: Options): void {
           ? [
               createCommand('triage.archive', () => triageSelected({ kind: 'archive' })),
               createCommand('triage.notDone', markNotDone),
+              createCommand('triage.cancelFollowUp', () => triageSelected({ kind: 'cancelFollowUp' })),
               createCommand('triage.snooze', openSnooze, {
                 title: view === 'snoozed' ? 'Change reminder / unsnooze' : 'Snooze / remind me later',
                 argument: {

@@ -194,6 +194,7 @@ test('blocking cancels every request type; overrides, live policy changes, and r
     // The settings section lists the override and removes it; blocking then
     // applies to that sender again.
     await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-security').click()
     await expect(relaunched.getByTestId('settings-remote-images')).toBeChecked()
     const override = relaunched.getByTestId('settings-remote-image-override')
     await expect(override).toHaveAttribute('data-address', 'amara@example.com')

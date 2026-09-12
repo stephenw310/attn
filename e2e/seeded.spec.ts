@@ -116,7 +116,17 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await expect(content).toHaveText('Live')
   await setSyncState(app, { phase: 'syncing', stage: 'bodies', threadsDone: 428 })
   await expect(content).toHaveText('Syncing')
-  await expect(content).toHaveAttribute('data-tooltip', 'Recent mail: 428 processed')
+  await expect(content).toHaveAttribute('data-tooltip', '')
+  await content.hover()
+  await page.waitForTimeout(250)
+  await expect(page.getByTestId('quick-tooltip')).toHaveCount(0)
+  await content.focus()
+  await expect(page.getByTestId('quick-tooltip')).toHaveCount(0)
+  await content.click()
+  await expect(page.getByRole('dialog', { name: 'Sync details', exact: true })).toContainText(
+    'Recent mail: 428 processed'
+  )
+  await page.keyboard.press('Escape')
   await expect(content).toHaveCSS('height', '28px')
   await setSyncState(app, {
     phase: 'indexing',
@@ -126,7 +136,6 @@ test('shows phased sync progress and keeps error details behind an accessible co
     reason: 'running'
   })
   await expect(content).toHaveText('Indexing')
-  await expect(content).toHaveAttribute('data-tooltip', /750 of 2,000 threads indexed/)
   await content.click()
   await expect(page.getByRole('dialog', { name: 'Sync details', exact: true })).toContainText('750 of 2,000')
   await page.keyboard.press('Escape')
@@ -138,8 +147,10 @@ test('shows phased sync progress and keeps error details behind an accessible co
     threadsTotal: 201,
     reason: 'running'
   })
-  await expect(content).toHaveAttribute('data-tooltip', /86,200 threads indexed/)
-  await expect(content).not.toHaveAttribute('data-tooltip', /of 201/)
+  await content.click()
+  const syncDetails = page.getByRole('dialog', { name: 'Sync details', exact: true })
+  await expect(syncDetails).toContainText('86,200 threads indexed')
+  await expect(syncDetails).not.toContainText('of 201')
   await setSyncState(app, {
     phase: 'indexing',
     stage: 'lifetime',
@@ -149,10 +160,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
     reason: 'quota-wait',
     waitMs: 1_000
   })
-  await expect(content).toHaveAttribute(
-    'data-tooltip',
-    /Quota pacing · 750 of 2,000 threads indexed · 12 min remaining/
-  )
+  await expect(syncDetails).toContainText(/Quota pacing · 750 of 2,000 threads indexed · 12 min remaining/)
   await setSyncState(app, {
     phase: 'indexing',
     stage: 'lifetime',
@@ -161,10 +169,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
     waitMs: 15_000,
     message: 'rate limited'
   })
-  await expect(content).toHaveAttribute(
-    'data-tooltip',
-    /Indexing paused · retrying soon · 2,400 threads indexed/
-  )
+  await expect(syncDetails).toContainText(/Indexing paused · retrying soon · 2,400 threads indexed/)
   await setSyncState(app, { phase: 'checking' })
   await expect(content).toHaveText('Checking')
   await setSyncState(app, { phase: 'offline', message: 'fetch failed' })
@@ -175,7 +180,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await setSyncState(app, { phase: 'error', message })
   await expect(status).toContainText('Error')
   await expect(status).not.toContainText(message)
-  await expect(status).toHaveAttribute('data-tooltip', message)
+  await expect(status).not.toHaveAttribute('data-tooltip')
 
   await page.getByTestId('status-error-button').click()
   const details = page.getByTestId('status-error-details')

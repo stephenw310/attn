@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import type { MailAddress } from '../../../shared/address'
 import type { Draft, DraftSaveInput } from '../../../shared/drafts'
+import { Button } from '../components/Button'
 import { Kbd } from '../components/Kbd'
-import { modKeyLabel } from '../platform'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
 import type { ComposerDraftController } from './useComposerDraft'
 
@@ -17,6 +18,8 @@ interface ComposerHeaderProps {
 }
 
 interface ComposerEnvelopeProps {
+  closing: boolean
+  closeAndSave: () => void
   draft: Draft
   mode: 'full' | 'inline'
   attaching: boolean
@@ -46,89 +49,170 @@ export function composerTitle(kind: Draft['kind']): string {
   return 'New message'
 }
 
+export type ComposerSaveStatusProps = Pick<
+  ComposerHeaderProps,
+  'saveStatus' | 'localRevision' | 'savedRevision'
+>
+
+export function ComposerSaveStatus(props: ComposerSaveStatusProps): React.JSX.Element {
+  return (
+    <span
+      className={`text-[11px] ${props.saveStatus === 'error' ? 'text-danger' : 'text-ink-dim'}`}
+      data-testid="composer-save-status"
+      data-local-revision={props.localRevision}
+      data-saved-revision={props.savedRevision}
+      data-save-status={props.saveStatus}
+    >
+      {props.saveStatus === 'saving'
+        ? 'Saving…'
+        : props.saveStatus === 'unsaved'
+          ? 'Unsaved changes'
+          : props.saveStatus === 'error'
+            ? 'Save failed — retrying'
+            : 'Saved locally'}
+    </span>
+  )
+}
+
 export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
   const { draft, mode } = props
   return (
     <header
       className={`flex shrink-0 items-center ${
-        mode === 'inline' ? 'min-h-12 gap-3 px-4 py-2' : 'min-h-13 gap-4 px-6 py-2.5'
+        mode === 'inline' ? 'min-h-12 gap-3 py-2' : 'min-h-16 gap-4 pt-6 pb-2'
       }`}
       data-testid={mode === 'inline' ? 'composer-inline-header' : undefined}
     >
-      {mode === 'inline' && (
-        <span className="flex size-7 flex-none items-center justify-center rounded-full bg-accent/10 text-sm text-accent">
-          {draft.kind === 'forward' ? '↪' : '↩'}
-        </span>
-      )}
-      <div className="flex min-w-0 items-center gap-2">
-        {mode === 'full' && <span className="h-2 w-2 rounded-full bg-accent" />}
-        <h1 className={`${mode === 'inline' ? 'text-sm' : 'text-base'} font-bold tracking-tight text-ink`}>
-          {composerTitle(draft.kind)}
-        </h1>
-        <span
-          className="text-[11px] text-ink-faint"
-          data-testid="composer-save-status"
-          data-local-revision={props.localRevision}
-          data-saved-revision={props.savedRevision}
-          data-save-status={props.saveStatus}
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <h1
+          className={`${mode === 'inline' ? 'text-sm' : 'text-base'} font-semibold tracking-tight text-ink`}
         >
-          {props.saveStatus === 'saving'
-            ? 'Saving…'
-            : props.saveStatus === 'unsaved'
-              ? 'Unsaved changes'
-              : props.saveStatus === 'error'
-                ? 'Save failed — retrying'
-                : 'Saved locally'}
-        </span>
+          {mode === 'inline'
+            ? draft.kind === 'forward'
+              ? 'Forward draft'
+              : 'Reply draft'
+            : composerTitle(draft.kind)}
+        </h1>
+        {mode === 'inline' && (
+          <span
+            data-testid="composer-not-sent"
+            className="rounded border border-edge px-1.5 py-0.5 text-[10px] font-normal text-accent"
+          >
+            Not sent
+          </span>
+        )}
+        {mode === 'inline' && <ComposerSaveStatus {...props} />}
       </div>
       <div className="ml-auto flex items-center gap-2">
-        {mode === 'full' ? (
-          <span className="flex items-center gap-2 text-[11px] text-ink-faint">
-            <span className="flex items-center gap-1.5" data-testid="composer-undo-hint">
-              undo <Kbd>{modKeyLabel()}Z</Kbd>
-            </span>
-            <span aria-hidden>·</span>
-            <button
-              type="button"
-              data-testid="composer-close"
-              aria-label="Save and close draft"
-              data-tooltip="Save and close draft (Esc)"
-              disabled={props.attaching || props.closing}
-              onClick={props.closeAndSave}
-              className="cursor-pointer rounded-md px-2 py-1 hover:bg-active hover:text-ink"
-            >
-              <Kbd>Esc</Kbd>
-            </button>
-          </span>
-        ) : (
-          <button
-            type="button"
-            className="flex size-7 items-center justify-center rounded-md text-lg text-ink-faint hover:bg-active hover:text-ink"
+        {mode === 'full' && (
+          <Button
             data-testid="composer-close"
             aria-label="Save and close draft"
-            data-tooltip="Save draft and close reply"
+            data-tooltip=""
+            disabled={props.attaching || props.closing}
             onClick={props.closeAndSave}
           >
-            ×
-          </button>
+            Save &amp; close <Kbd>Esc</Kbd>
+          </Button>
         )}
       </div>
     </header>
   )
 }
 
-export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Element {
+export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Element | null {
   const { draft, mode } = props
+  const [editingRecipients, setEditingRecipients] = useState(draft.kind === 'forward')
+  const inline = mode === 'inline'
+  const context = inline ? (
+    <div className="flex min-h-9 flex-wrap items-center gap-2 text-xs text-ink-dim">
+      <button
+        type="button"
+        className="min-w-0 flex-1 truncate text-left hover:text-ink"
+        onClick={() => {
+          if (editingRecipients) {
+            const fields = [props.toFieldRef, props.ccFieldRef, props.bccFieldRef]
+            const committed = fields.map((field) => field.current?.commitPending() ?? true)
+            if (committed.some((valid) => !valid)) return
+          }
+          setEditingRecipients(!editingRecipients)
+        }}
+        aria-expanded={editingRecipients}
+        data-testid="composer-recipient-summary"
+      >
+        ↩ {composerTitle(draft.kind)}{' '}
+        {props.to.length > 0
+          ? `to ${props.to.map((recipient) => recipient.name || recipient.email).join(', ')}`
+          : '· Add recipients'}
+      </button>
+      <Button
+        data-testid="composer-close"
+        aria-label="Save and close draft"
+        data-tooltip=""
+        disabled={props.attaching || props.closing}
+        onClick={props.closeAndSave}
+      >
+        Save &amp; close <Kbd>Esc</Kbd>
+      </Button>
+      {!props.showCopies && (
+        <Button
+          data-testid="composer-show-copies"
+          aria-label="Show Cc and Bcc fields"
+          onClick={() => {
+            setEditingRecipients(true)
+            props.setShowCopies(true)
+          }}
+        >
+          Cc Bcc
+        </Button>
+      )}
+    </div>
+  ) : null
+  const notices = (
+    <>
+      {props.sendError && (
+        <div
+          data-testid="composer-send-error"
+          className="border-b border-danger/35 bg-danger/10 px-4 py-2 text-xs text-danger"
+        >
+          {props.sendError}
+        </div>
+      )}
+      {props.attaching && (
+        <div className="h-0.5 shrink-0 overflow-hidden bg-edge" data-testid="composer-attach-progress">
+          <div className="app-attachment-progress h-full w-1/3 bg-accent" />
+        </div>
+      )}
+      {props.hasPreservedContent && (
+        <div
+          data-testid="composer-preserved-banner"
+          className="border-b border-edge bg-accent/[0.06] px-4 py-2 text-xs text-ink-dim"
+        >
+          Some formatting is preserved as read-only content and will be sent unchanged.
+        </div>
+      )}
+    </>
+  )
+  if (inline && !editingRecipients)
+    return (
+      <>
+        {context}
+        {notices}
+      </>
+    )
   return (
     <>
-      <div
-        className="flex min-h-10 shrink-0 items-center px-4"
-        data-testid="composer-from"
-        data-email={draft.accountId}
-      >
-        <span className="w-14 shrink-0 text-sm font-medium text-ink-faint">From</span>
-        <span className="min-w-0 truncate text-sm text-ink">{draft.accountId}</span>
-      </div>
+      {context}
+      {
+        <div
+          className="flex min-h-10 shrink-0 items-center border-b border-edge"
+          data-testid="composer-from"
+          data-email={draft.accountId}
+        >
+          <span className="w-12 shrink-0 text-xs font-normal text-ink-dim">From</span>
+          <span className="min-w-0 truncate text-xs text-ink-dim">{draft.accountId}</span>
+        </div>
+      }
       <div className="relative">
         <RecipientField
           ref={props.toFieldRef}
@@ -142,10 +226,10 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
             props.updateFields({ to: recipients })
           }}
         />
-        {!props.showCopies && (
+        {!inline && !props.showCopies && (
           <button
             type="button"
-            className="absolute right-3 top-1.5 inline-flex h-7 items-center gap-1 rounded-md border border-transparent px-2 text-xs text-ink-faint hover:border-edge hover:bg-active hover:text-ink"
+            className="absolute right-0 top-1.5 inline-flex h-7 items-center gap-2 rounded-md px-2 text-xs text-ink-dim hover:bg-active hover:text-ink"
             data-testid="composer-show-copies"
             aria-label="Show Cc and Bcc fields"
             aria-expanded="false"
@@ -192,13 +276,15 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
           />
         </>
       )}
+      {notices}
       {mode === 'full' && (
-        <label className="mx-4 flex h-12 shrink-0 items-center border-b border-edge focus-within:border-accent">
-          <span className="w-14 shrink-0 text-sm font-medium text-ink-faint">Subject</span>
+        <label className="flex min-h-14 shrink-0 items-center pt-3">
+          <span className="sr-only">Subject</span>
           <input
-            className="min-w-0 flex-1 bg-transparent text-sm font-medium text-ink outline-none placeholder:text-ink-faint"
+            className="min-w-0 flex-1 bg-transparent text-base font-semibold text-ink outline-none placeholder:font-normal placeholder:italic placeholder:text-ink-faint/60"
             data-testid="composer-subject"
             aria-label="Subject"
+            placeholder="Add a subject"
             value={props.subject}
             onChange={(event) => {
               props.setSubject(event.target.value)
@@ -206,27 +292,6 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
             }}
           />
         </label>
-      )}
-      {props.sendError && (
-        <div
-          data-testid="composer-send-error"
-          className="border-b border-danger/35 bg-danger/10 px-4 py-2 text-xs text-danger"
-        >
-          {props.sendError}
-        </div>
-      )}
-      {props.attaching && (
-        <div className="h-0.5 shrink-0 overflow-hidden bg-edge" data-testid="composer-attach-progress">
-          <div className="app-attachment-progress h-full w-1/3 bg-accent" />
-        </div>
-      )}
-      {props.hasPreservedContent && (
-        <div
-          data-testid="composer-preserved-banner"
-          className="border-b border-edge bg-accent/[0.06] px-4 py-2 text-xs text-ink-dim"
-        >
-          Some formatting is preserved as read-only content and will be sent unchanged.
-        </div>
       )}
     </>
   )

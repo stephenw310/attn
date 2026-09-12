@@ -8,6 +8,7 @@ import { getSplitState } from '../splits'
 import { ensureAccount, persistThread } from '../sync/persist'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import type { SyncController } from '../syncController'
+import { systemTime } from '../time'
 import { createServiceHandlers, type ServiceHandlerContext } from './handlers'
 import type { ServiceSession } from './session'
 import type { TestHooks } from './testOperations'
@@ -33,6 +34,7 @@ function handlerContext(
   testHooks: TestHooks = defaultTestHooks()
 ): ServiceHandlerContext {
   return {
+    time: systemTime,
     db,
     currentAccountId: () => ACCOUNT,
     accountStatuses: () => [],

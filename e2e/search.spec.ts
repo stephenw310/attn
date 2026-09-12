@@ -183,7 +183,7 @@ test('does not fabricate Gmail results for an unmatched seeded query', async ({ 
   await expect(page.getByTestId('thread-section-divider')).toHaveCount(0)
 })
 
-test('sorts text results newest first and keeps their date headers separated', async ({ page }) => {
+test('sorts text results newest first without date-group headings', async ({ page }) => {
   await page.getByTestId('search-open').click()
   const input = page.getByTestId('search-input')
   await input.fill('visualsort')
@@ -197,10 +197,7 @@ test('sorts text results newest first and keeps their date headers separated', a
   )
   expect(timestamps).toEqual([...timestamps].sort((left, right) => right - left))
 
-  const headerTops = await page
-    .getByTestId('thread-date-group')
-    .evaluateAll((headers) => headers.map((header) => (header as HTMLElement).style.top))
-  expect(new Set(headerTops).size).toBe(headerTops.length)
+  await expect(page.getByTestId('thread-date-group')).toHaveCount(0)
   await page.screenshot({ path: join(artifactDirectory, 'search.png') })
 })
 
@@ -259,7 +256,7 @@ test('enters result browsing and returns to the query with its text intact', asy
   await expect(list).toHaveCSS('outline-style', 'none')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveCount(1)
   await expect(page.getByTestId('footer-shortcut-search-browse')).toHaveCount(0)
-  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('J/Knavigate')
+  await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('JKNavigate')
   await page.keyboard.press('j')
   await expect(page.locator('[data-testid="thread-row"][data-selected="true"]')).toHaveAttribute(
     'data-thread-id',

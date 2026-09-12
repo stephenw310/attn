@@ -4,6 +4,7 @@ import type { UpdateState } from '../../../shared/distribution'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, ThreadListView } from '../../../shared/mail'
 import { readAccountView } from '../accountViewMemory'
+import { getCommandRegistrySnapshot } from '../commands'
 import type { MessageReplyTarget } from '../components/ConversationView'
 import type { SettingsControl } from '../components/SettingsView'
 import type { ComposerHandle } from '../composer/Composer'
@@ -421,12 +422,15 @@ export function useInboxController({
         showToast('Save and close the draft before opening Settings')
         return
       }
+      setSplitRulesOpen(false)
       settingsOpenRef.current = true
       setSettingsFocus(control)
       setSettingsOpen(true)
     },
     [showToast]
   )
+  const clearSettingsFocus = useCallback(() => setSettingsFocus(null), [])
+  const closeSplitRules = useCallback(() => setSplitRulesOpen(false), [])
   const closeSettings = useCallback(() => {
     settingsOpenRef.current = false
     setSettingsOpen(false)
@@ -609,6 +613,7 @@ export function useInboxController({
     closePickers,
     closeMove,
     closeSettings,
+    closeSplitRules,
     setDetachedDraftThread,
     listElRef,
     selectedIndexRef,
@@ -846,7 +851,22 @@ export function useInboxController({
     clearOutboxFailure()
   }, [clearOutboxFailure, outboxFailure, showToast])
 
+  const cancelFollowUpSelected = useCallback(() => {
+    const current = selectedRef.current
+    if (current) triage({ kind: 'cancelFollowUp', threadIds: [current.id] })
+  }, [triage])
+
+  const undoFromToast = useCallback(() => {
+    if (composerOpenRef.current || composerOpeningRef.current || accountSwitchPendingRef.current) return
+    getCommandRegistrySnapshot()
+      .find((command) => command.id === 'triage.undo')
+      ?.run()
+  }, [accountSwitchPendingRef])
+
   return {
+    clearSelection,
+    openSnooze,
+    undoFromToast,
     status,
     onReorderAccounts,
     view,
@@ -863,6 +883,7 @@ export function useInboxController({
     setSplitRulesOpen,
     settingsOpen,
     settingsFocus,
+    clearSettingsFocus,
     cheatSheetOpen,
     paletteOpen,
     setPaletteOpen,
@@ -920,6 +941,7 @@ export function useInboxController({
     closeReader,
     snoozeSelected,
     unsnoozeSelected,
+    cancelFollowUpSelected,
     toggleLabel,
     switchView,
     switchSplit,

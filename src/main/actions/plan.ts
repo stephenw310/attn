@@ -9,6 +9,8 @@ export interface ThreadActionPlan {
 
 export function planAction(action: TriageAction): ThreadActionPlan {
   switch (action.kind) {
+    case 'cancelFollowUp':
+      throw new Error('Follow-up cancellation is handled without a label plan')
     case 'archive':
       return { add: [], remove: ['INBOX'], queueKind: 'modifyLabels' }
     case 'restoreInbox':
@@ -48,6 +50,8 @@ export function planAction(action: TriageAction): ThreadActionPlan {
 export function actionLabel(action: TriageAction, count = action.threadIds.length): string {
   const plural = (one: string, many: string): string => (count === 1 ? one : `${count} ${many}`)
   switch (action.kind) {
+    case 'cancelFollowUp':
+      return 'Follow-up canceled'
     case 'archive':
       return plural('Marked done', 'marked done')
     case 'restoreInbox':
@@ -77,6 +81,8 @@ export function inverseForThread(
   threadId: string
 ): TriageAction {
   switch (action.kind) {
+    case 'cancelFollowUp':
+      throw new Error('Follow-up cancellation is handled without a label plan')
     // The INBOX verbs are offered outside the inbox too (search, All Mail), so
     // their inverses read the pre-state exactly like the move branch below: an
     // archive of a thread that never carried INBOX undoes to nothing rather

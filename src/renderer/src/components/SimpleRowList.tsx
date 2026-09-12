@@ -26,6 +26,7 @@ interface SimpleRowListProps<T> {
   rowData: (row: T) => Record<string, string | undefined>
   recipients: (row: T) => string
   subject: (row: T) => string
+  preview?: (row: T) => React.ReactNode
   /** Whatever the list shows after the subject: a state chip, an error. */
   trailing: (row: T) => React.ReactNode
   selectedIndex: number
@@ -54,6 +55,7 @@ export function SimpleRowList<T>({
   rowData,
   recipients,
   subject,
+  preview,
   trailing,
   selectedIndex,
   selectionVisible = true,
@@ -82,13 +84,20 @@ export function SimpleRowList<T>({
         data-testid={rowTestId}
         {...rowData(row)}
         data-selected={selectionShown || undefined}
-        className={`flex cursor-default select-none items-center gap-4 border-l-[3px] py-3 pr-7 pl-5 ${
-          selectionShown ? 'border-l-accent bg-accent/[0.07]' : 'border-l-transparent'
+        className={`flex min-h-[54px] cursor-default select-none items-center gap-4 rounded-md py-2 px-3 ${
+          selectionShown ? 'bg-active' : 'hover:bg-active/50'
         }`}
         onClick={() => onOpen(index)}
       >
-        <span className="w-52 flex-none truncate text-sm text-ink-dim">{recipients(row)}</span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{subject(row)}</span>
+        <span className="w-[22%] max-w-52 flex-none truncate text-xs text-ink">{recipients(row)}</span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs text-ink">{subject(row)}</div>
+          {preview && (
+            <div className="mt-1 flex items-center gap-1.5 truncate text-[11px] text-ink-dim">
+              {preview(row)}
+            </div>
+          )}
+        </div>
         {trailing(row)}
       </div>
     )

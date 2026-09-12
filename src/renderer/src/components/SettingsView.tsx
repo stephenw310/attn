@@ -24,6 +24,7 @@ import { AboutSection } from './AboutSection'
 import { AccountHealthLine } from './AccountHealthLine'
 import { AiSettingsSection } from './AiSettingsSection'
 import { Kbd } from './Kbd'
+import { PalettePicker } from './PalettePicker'
 import { SnippetManager } from './SnippetManager'
 import { ACTION_BUTTON, NOTE, ROW, SECTION_TITLE, SELECT } from './settingsStyles'
 
@@ -40,6 +41,35 @@ export type SettingsControl =
   | 'unreadBadge'
   | 'launchAtLogin'
   | 'menuBarIcon'
+
+const SETTINGS_PAGES = [
+  { id: 'appearance', title: 'Appearance', scope: 'app' },
+  { id: 'triage', title: 'Triage & sending', scope: 'app' },
+  { id: 'notifications', title: 'Notifications', scope: 'app' },
+  { id: 'security', title: 'Privacy', scope: 'app' },
+  { id: 'background', title: 'Background', scope: 'app' },
+  { id: 'ai', title: 'AI writing', scope: 'app' },
+  { id: 'snippets', title: 'Snippets', scope: 'app' },
+  { id: 'about', title: 'About', scope: 'app' },
+  { id: 'sync', title: 'Sync & storage', scope: 'account' },
+  { id: 'compose', title: 'Signature', scope: 'account' },
+  { id: 'accounts', title: 'Accounts', scope: 'connections' }
+] as const
+
+type SettingsPage = (typeof SETTINGS_PAGES)[number]['id']
+const CONTROL_PAGE: Record<SettingsControl, SettingsPage> = {
+  accounts: 'accounts',
+  syncLimit: 'sync',
+  undoSendDelay: 'triage',
+  autoAdvance: 'triage',
+  attnFooter: 'compose',
+  snippets: 'snippets',
+  aiWriting: 'ai',
+  remoteImages: 'security',
+  unreadBadge: 'notifications',
+  launchAtLogin: 'background',
+  menuBarIcon: 'background'
+}
 
 type SyncLimitMode = 'default' | 'custom' | 'all'
 
@@ -62,7 +92,9 @@ interface SettingsViewProps {
   onAddAccount: () => void
   onReconnect: () => void
   onSignOut: () => void
+  onOpenSplits?: () => void
   onClose: () => void
+  onNavigate: () => void
   focusControl: SettingsControl | null
 }
 
@@ -89,9 +121,16 @@ export function SettingsView({
   onAddAccount,
   onReconnect,
   onSignOut,
+  onOpenSplits,
   onClose,
-  focusControl
+  focusControl,
+  onNavigate
 }: SettingsViewProps): React.JSX.Element {
+  const [page, setPage] = useState<SettingsPage>(focusControl ? CONTROL_PAGE[focusControl] : 'appearance')
+  const selectedPage = SETTINGS_PAGES.find((item) => item.id === page) ?? SETTINGS_PAGES[0]
+  useEffect(() => {
+    if (focusControl) setPage(CONTROL_PAGE[focusControl])
+  }, [focusControl])
   const onToast = useShowToast()
   const { preference, setPreference } = useTheme()
   const [reorderPending, setReorderPending] = useState(false)
@@ -101,11 +140,11 @@ export function SettingsView({
   const { healthFor } = useAccountHealth(accountStatuses, true)
 
   useEffect(() => {
-    if (!focusControl) return
+    if (!focusControl || CONTROL_PAGE[focusControl] !== page) return
     const target = rootRef.current?.querySelector<HTMLElement>(`[data-settings-control="${focusControl}"]`)
     target?.scrollIntoView({ block: 'center' })
     target?.focus({ preventScroll: true })
-  }, [focusControl])
+  }, [focusControl, page])
 
   const moveAccount = useCallback(
     (index: number, delta: -1 | 1) => {
@@ -177,9 +216,13 @@ export function SettingsView({
   }
 
   return (
-    <div ref={rootRef} data-testid="settings-view" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex h-[44px] flex-none items-center gap-3 border-b border-edge pr-7 pl-[53px]">
-        <h1 className="text-base font-semibold text-ink">Settings</h1>
+    <div
+      ref={rootRef}
+      data-testid="settings-view"
+      className="app-settings mx-auto flex min-h-0 w-full max-w-[1060px] flex-1 flex-col px-5"
+    >
+      <div className="flex h-24 flex-none items-center gap-3">
+        <h1 className="text-[21px] font-medium tracking-[-0.5px] text-ink">Settings</h1>
         <button
           type="button"
           data-testid="settings-back"
@@ -188,17 +231,49 @@ export function SettingsView({
           onClick={onClose}
           className="ml-auto cursor-pointer rounded-md px-2 py-1 text-xs text-ink-faint hover:bg-active hover:text-ink"
         >
-          <Kbd>Esc</Kbd>
+          Back to mail <Kbd>Esc</Kbd>
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[840px] flex-col gap-8 px-7 py-7">
-          <section data-testid="settings-accounts" aria-label="Accounts">
-            <h2 className="text-lg font-semibold text-ink">Accounts</h2>
+      <div className="flex min-h-0 flex-1 gap-[66px] pb-8 max-md:gap-5">
+        <nav aria-label="Settings sections" className="w-[190px] shrink-0 overflow-y-auto max-md:w-36">
+          {(['app', 'account', 'connections'] as const).map((scope) => (
+            <div key={scope} className="mb-8">
+              <p className="mb-3 px-2.5 text-[10px] font-medium text-ink-dim">
+                {scope === 'app'
+                  ? 'All accounts'
+                  : scope === 'account'
+                    ? 'Current account'
+                    : 'Connected accounts'}
+                {scope === 'account' && (
+                  <span className="mt-1 block truncate" title={activeEmail ?? undefined}>
+                    {activeEmail}
+                  </span>
+                )}
+              </p>
+              {SETTINGS_PAGES.filter((item) => item.scope === scope).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-testid={`settings-nav-${item.id}`}
+                  aria-current={page === item.id ? 'page' : undefined}
+                  onClick={() => {
+                    onNavigate()
+                    setPage(item.id)
+                  }}
+                  className={`mb-1 block w-full rounded-md px-2.5 py-2.5 text-left text-xs ${page === item.id ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/50'}`}
+                >
+                  {item.title}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1">
+          <section hidden={page !== 'accounts'} data-testid="settings-accounts" aria-label="Accounts">
+            <h2 className={SECTION_TITLE}>Accounts</h2>
             <p className={`mt-1.5 ${NOTE}`}>
-              The order below is the switcher order — {modKeyLabel()}1…9 follow it, and so does the account
-              menu.
+              The order here sets the account switcher order and {modKeyLabel()}1–9 shortcuts.
             </p>
             <div className="mt-2 flex flex-col">
               {status.accounts.map((account, index) => {
@@ -213,22 +288,30 @@ export function SettingsView({
                     data-active={active ? 'true' : 'false'}
                     className={`${ROW} border-b border-edge/60 last:border-b-0`}
                   >
-                    <span className="flex min-w-0 flex-col">
-                      <span className="flex items-center gap-2 truncate text-sm text-ink">
-                        {account.email}
-                        {active && (
-                          <span aria-hidden className="text-accent">
-                            ✓
-                          </span>
+                    <span className="flex min-w-0 items-center gap-[13px]">
+                      <span
+                        aria-hidden="true"
+                        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-active text-xs text-ink-dim"
+                      >
+                        {account.email.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="flex items-center gap-2 truncate text-sm text-ink">
+                          {account.email}
+                          {active && (
+                            <span aria-hidden className="text-accent">
+                              ✓
+                            </span>
+                          )}
+                        </span>
+                        {health && (
+                          <AccountHealthLine
+                            health={health}
+                            attention={attention}
+                            testId="settings-account-status"
+                          />
                         )}
                       </span>
-                      {health && (
-                        <AccountHealthLine
-                          health={health}
-                          attention={attention}
-                          testId="settings-account-status"
-                        />
-                      )}
                     </span>
                     <span className="flex flex-none items-center gap-1.5">
                       {attention && (
@@ -292,26 +375,28 @@ export function SettingsView({
           </section>
 
           <section
+            hidden={selectedPage.scope !== 'account'}
             data-testid="settings-account-scope"
             aria-label={`Settings for ${activeEmail ?? 'this account'}`}
-            className="rounded-xl border border-edge bg-ground/45 p-4"
+            className="min-w-0"
           >
-            <div className="mb-6">
+            <div className="sr-only">
               <h2 className="text-lg font-semibold text-ink">This account</h2>
               <p className={`mt-1 ${NOTE}`}>
                 These settings apply only to {activeEmail ?? 'the active account'}.
               </p>
             </div>
             <div className="flex flex-col gap-7">
-              <section data-testid="settings-sync" aria-label="Sync and storage">
+              <section hidden={page !== 'sync'} data-testid="settings-sync" aria-label="Sync and storage">
                 <SectionTitle>Sync &amp; storage</SectionTitle>
+                <p className="mb-5 text-xs leading-[1.65] text-ink-dim">
+                  These controls apply only to {activeEmail}. Your other accounts keep their own sync limits.
+                </p>
                 <div className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">Stored email history</span>
                     <span data-testid="settings-sync-description" className={NOTE}>
-                      Attn stores up to this many email threads for this account. A thread is one conversation
-                      and can contain several individual messages. Inbox sync, new mail, Gmail search, and
-                      threads you open can still add mail; lowering this limit does not delete stored mail.
+                      Maximum email threads to store for this account.
                     </span>
                   </span>
                   <select
@@ -395,21 +480,23 @@ export function SettingsView({
                     </div>
                   </div>
                 )}
+                <p className="mt-[21px] text-[11px] leading-[1.6] text-ink-dim">
+                  Changing the limit does not delete mail already stored. Inbox sync, new mail, Gmail search,
+                  and threads you open can still add mail beyond this limit.
+                </p>
               </section>
 
-              <section data-testid="settings-compose" aria-label="Compose">
-                <SectionTitle>Compose</SectionTitle>
+              <section hidden={page !== 'compose'} data-testid="settings-compose" aria-label="Compose">
+                <SectionTitle>Signature</SectionTitle>
                 <label className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">Include “{ATTN_SIGNATURE_LINE}”</span>
                     <span className={NOTE}>
-                      Adds the line{' '}
+                      Append{' '}
                       <span data-testid="settings-attn-signature-preview" className="text-ink-dim">
                         {ATTN_SIGNATURE_LINE}
                       </span>{' '}
-                      after your Gmail signature in new drafts only. “Attn:” links to the project on GitHub.
-                      The line stays editable and removable, and changing this never touches open, saved, or
-                      queued drafts.
+                      after this account’s Gmail signature in new drafts.
                     </span>
                   </span>
                   <input
@@ -420,29 +507,33 @@ export function SettingsView({
                     disabled={!accountSettings}
                     checked={accountSettings?.attnSignatureEnabled ?? true}
                     onChange={(event) => onUpdateAccountSetting('attnSignatureEnabled', event.target.checked)}
-                    className="size-4 cursor-pointer accent-accent"
+                    className="app-pref-toggle"
                   />
                 </label>
+                <p className="mt-[21px] text-[11px] leading-[1.6] text-ink-dim">
+                  Saved drafts, open composers, and queued messages keep their existing content.
+                </p>
               </section>
             </div>
           </section>
 
           <section
+            hidden={selectedPage.scope !== 'app'}
             data-testid="settings-all-accounts-scope"
             aria-label="Settings for all accounts"
-            className="rounded-xl border border-edge bg-ground/45 p-4"
+            className="min-w-0"
           >
-            <div className="mb-6">
+            <div className="sr-only">
               <h2 className="text-lg font-semibold text-ink">All accounts</h2>
               <p className={`mt-1 ${NOTE}`}>These settings apply to every signed-in account and mailbox.</p>
             </div>
             <div className="flex flex-col gap-7">
-              <section data-testid="settings-triage" aria-label="Triage">
-                <SectionTitle>Triage</SectionTitle>
+              <section hidden={page !== 'triage'} data-testid="settings-triage" aria-label="Triage">
+                <SectionTitle>Triage &amp; sending</SectionTitle>
                 <label className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">Undo send delay</span>
-                    <span className={NOTE}>How long a sent message can still be pulled back.</span>
+                    <span className={NOTE}>Time to cancel a message before it is sent.</span>
                   </span>
                   <select
                     data-testid="settings-undo-send-delay"
@@ -467,7 +558,7 @@ export function SettingsView({
                 <label className={ROW}>
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">After done, snooze, or trash</span>
-                    <span className={NOTE}>Where the selection (and open reader) lands (auto-advance).</span>
+                    <span className={NOTE}>Where selection and the open reader move.</span>
                   </span>
                   <select
                     data-testid="settings-auto-advance"
@@ -491,27 +582,31 @@ export function SettingsView({
                 </label>
               </section>
 
-              <section data-testid="settings-ai" aria-label="AI writing">
+              <section hidden={page !== 'ai'} data-testid="settings-ai" aria-label="AI writing">
                 <SectionTitle>AI writing</SectionTitle>
                 <AiSettingsSection />
               </section>
 
-              <section data-testid="settings-snippets" aria-label="Snippets">
+              <section hidden={page !== 'snippets'} data-testid="settings-snippets" aria-label="Snippets">
                 <SectionTitle>Snippets</SectionTitle>
-                <div className="mt-2">
-                  <SnippetManager />
+                <p className="mb-5 text-xs leading-[1.65] text-ink-dim">
+                  One set of reusable snippets is available in every account.
+                </p>
+                <div className="mt-5">
+                  <SnippetManager active={page === 'snippets'} />
                 </div>
               </section>
 
-              <section data-testid="settings-notifications" aria-label="Notifications">
+              <section
+                hidden={page !== 'notifications'}
+                data-testid="settings-notifications"
+                aria-label="Notifications"
+              >
                 <SectionTitle>Notifications</SectionTitle>
                 <label className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
-                    <span className="text-sm text-ink">Unread app badge</span>
-                    <span className={NOTE}>
-                      Shows the unread count on the macOS Dock or Windows taskbar. This does not change
-                      notification delivery.
-                    </span>
+                    <span className="text-sm text-ink">Unread badge</span>
+                    <span className={NOTE}>Show unread mail on the Dock or taskbar icon.</span>
                   </span>
                   <input
                     type="checkbox"
@@ -521,15 +616,19 @@ export function SettingsView({
                     disabled={!settings}
                     checked={settings?.unreadBadgeEnabled ?? true}
                     onChange={(event) => onUpdateSetting('unreadBadgeEnabled', event.target.checked)}
-                    className="size-4 cursor-pointer accent-accent"
+                    className="app-pref-toggle"
                   />
                 </label>
                 <div className={ROW}>
                   <span className="flex min-w-0 flex-col">
                     <span data-testid="settings-pause-state" className="text-sm text-ink">
-                      {paused ? `Paused until ${formatSnoozeDate(pausedUntil)}` : 'Notifications are on'}
+                      Pause notifications
                     </span>
-                    <span className={NOTE}>The pause covers every signed-in account.</span>
+                    <span className={NOTE}>
+                      {paused
+                        ? `Paused until ${formatSnoozeDate(pausedUntil)} across every account.`
+                        : 'Notifications are active across every account.'}
+                    </span>
                   </span>
                   <span className="flex flex-none items-center gap-1.5">
                     <button
@@ -562,17 +661,24 @@ export function SettingsView({
                     )}
                   </span>
                 </div>
+                <h4 className="mb-2 mt-[29px] text-[15px] font-medium text-ink">Notification sources</h4>
+                <p className="mb-3 text-xs leading-[1.65] text-ink-dim">
+                  Each account chooses which Inbox splits send notifications.
+                </p>
+                {onOpenSplits && (
+                  <button type="button" onClick={onOpenSplits} className="py-2 text-xs text-accent">
+                    Split rules for {activeEmail} ↗
+                  </button>
+                )}
               </section>
 
-              <section data-testid="settings-security" aria-label="Security">
-                <SectionTitle>Security</SectionTitle>
+              <section hidden={page !== 'security'} data-testid="settings-security" aria-label="Security">
+                <SectionTitle>Privacy</SectionTitle>
                 <label className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">Block remote images</span>
                     <span data-testid="settings-remote-images-description" className={NOTE}>
-                      Applies to every mailbox and signed-in account. Remote images can reveal your address
-                      and read time to a sender. Blocking hides them in messages and quoted replies; each
-                      message offers Load once or a per-sender exception.
+                      Block sender-hosted images in mail from every account.
                     </span>
                   </span>
                   <input
@@ -583,12 +689,19 @@ export function SettingsView({
                     disabled={!settings}
                     checked={settings?.remoteImagesBlocked ?? false}
                     onChange={(event) => onUpdateSetting('remoteImagesBlocked', event.target.checked)}
-                    className="size-4 cursor-pointer accent-accent"
+                    className="app-pref-toggle"
                   />
                 </label>
-                {remoteOverrides !== null && remoteOverrides.length > 0 && (
+                {remoteOverrides !== null && (
                   <div className="mt-1 flex flex-col">
-                    <p className={`px-3 ${NOTE}`}>Senders whose images always load:</p>
+                    <h4 className="mb-2 mt-[29px] text-[15px] font-medium text-ink">Always-load senders</h4>
+                    <p className="mb-3 text-xs leading-[1.65] text-ink-dim">
+                      Sender permissions are shared across accounts. You can allow a sender while reading
+                      their message.
+                    </p>
+                    {remoteOverrides.length === 0 && (
+                      <div className={`${ROW} mt-6 text-[11px] text-ink-dim`}>No sender exceptions.</div>
+                    )}
                     {remoteOverrides.map((address) => (
                       <div
                         key={address}
@@ -611,15 +724,16 @@ export function SettingsView({
                 )}
               </section>
 
-              <section data-testid="settings-background" aria-label="Background">
+              <section
+                hidden={page !== 'background'}
+                data-testid="settings-background"
+                aria-label="Background"
+              >
                 <SectionTitle>Background</SectionTitle>
                 <label className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
                     <span className="text-sm text-ink">Launch at login</span>
-                    <span className={NOTE}>
-                      Starts Attn in the background so snoozes, polling, and notifications keep working. An
-                      OS-side disable is respected until you change this again.
-                    </span>
+                    <span className={NOTE}>Start Attn when you sign in to your computer.</span>
                   </span>
                   <input
                     type="checkbox"
@@ -629,13 +743,13 @@ export function SettingsView({
                     disabled={!settings}
                     checked={settings?.launchAtLogin ?? true}
                     onChange={(event) => onUpdateSetting('launchAtLogin', event.target.checked)}
-                    className="size-4 cursor-pointer accent-accent"
+                    className="app-pref-toggle"
                   />
                 </label>
                 {isMacPlatform() && (
                   <label className={ROW}>
                     <span className="flex min-w-0 flex-col">
-                      <span className="text-sm text-ink">Menu-bar icon</span>
+                      <span className="text-sm text-ink">Menu bar icon</span>
                       <span className={NOTE}>
                         Keep the icon visible while the window is open. It always appears when you close the
                         window.
@@ -649,18 +763,26 @@ export function SettingsView({
                       disabled={!settings}
                       checked={settings?.menuBarIcon ?? false}
                       onChange={(event) => onUpdateSetting('menuBarIcon', event.target.checked)}
-                      className="size-4 cursor-pointer accent-accent"
+                      className="app-pref-toggle"
                     />
                   </label>
                 )}
               </section>
 
-              <section data-testid="settings-appearance" aria-label="Appearance">
+              <section
+                hidden={page !== 'appearance'}
+                data-testid="settings-appearance"
+                aria-label="Appearance"
+              >
                 <SectionTitle>Appearance</SectionTitle>
+                <p className="mb-5 text-xs leading-[1.65] text-ink-dim">
+                  Choose a palette, then follow your system or choose a light or dark appearance.
+                </p>
+                <PalettePicker />
                 <label className={`mt-2 ${ROW}`}>
                   <span className="flex min-w-0 flex-col">
-                    <span className="text-sm text-ink">Theme</span>
-                    <span className={NOTE}>System follows the OS; a named palette pins it.</span>
+                    <span className="text-sm text-ink">Appearance</span>
+                    <span className={NOTE}>System follows your device’s appearance.</span>
                   </span>
                   <select
                     data-testid="settings-theme"
@@ -678,7 +800,7 @@ export function SettingsView({
                 </label>
               </section>
 
-              <section data-testid="settings-about" aria-label="About">
+              <section hidden={page !== 'about'} data-testid="settings-about" aria-label="About">
                 <SectionTitle>About</SectionTitle>
                 <AboutSection />
               </section>
