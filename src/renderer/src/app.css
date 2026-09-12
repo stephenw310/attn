@@ -55,7 +55,7 @@
     --attn-on-danger: #ffffff;
     --attn-status-live: var(--attn-accent);
     --attn-status-offline: #737985;
-    --attn-overlay: rgb(8 9 11 / 72%);
+    --attn-overlay: rgb(0 0 0 / 42%);
     --attn-mail-link: #60a5fa;
     --attn-shadow-status: 0 6px 20px rgb(0 0 0 / 20%);
     --attn-shadow-menu: 0 12px 32px rgb(0 0 0 / 50%);
@@ -103,7 +103,7 @@
     --attn-on-danger: #ffffff;
     --attn-status-live: var(--attn-accent);
     --attn-status-offline: #68707d;
-    --attn-overlay: rgb(45 40 32 / 38%);
+    --attn-overlay: rgb(15 25 20 / 20%);
     --attn-mail-link: #1a5fb4;
     --attn-shadow-status: 0 6px 20px rgb(0 0 0 / 5%);
     --attn-shadow-menu: 0 12px 32px rgb(55 45 30 / 18%);

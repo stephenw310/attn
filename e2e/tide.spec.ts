@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 import { runPaletteCommand } from './nav'
+import { setSyncState } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
@@ -134,4 +135,50 @@ test.describe('Tide split shell', () => {
     await write.click()
     await expect(page.getByTestId('composer')).toBeVisible()
   })
+})
+
+test('Tide bulk toolbar and inline sync error expose the existing actions', async ({ page, app }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.keyboard.press('x')
+  await page.keyboard.press('j')
+  await page.keyboard.press('x')
+  await expect(page.getByTestId('bulk-actions')).toBeVisible()
+  await expect(page.getByTestId('selection-count')).toHaveText('2 selected')
+  await page.getByTestId('bulk-label').click()
+  await expect(page.getByTestId('label-picker')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByTestId('bulk-snooze').click()
+  await expect(page.getByTestId('snooze-picker')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByTestId('bulk-clear').click()
+  await expect(page.getByTestId('bulk-actions')).toHaveCount(0)
+  await page.keyboard.press('x')
+  await page.getByTestId('bulk-archive').click()
+  await expect(page.getByTestId('thread-row')).toHaveCount(7)
+  await setSyncState(app, { phase: 'error', message: 'Visual audit retry fixture' })
+  await expect(page.getByTestId('mailbox-sync-error')).toBeVisible()
+  await page.getByTestId('mailbox-sync-details').click()
+  await expect(page.getByTestId('status-error-message')).toHaveText('Visual audit retry fixture')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('status-error-details')).toHaveCount(0)
+  await page.getByTestId('mailbox-sync-retry').click()
+  await expect(page.getByTestId('mailbox-sync-error')).toHaveCount(0)
+})
+
+test('Tide reader keeps its status and action hints without duplicate metadata', async ({ page }) => {
+  await runPaletteCommand(page, 'Go to All Mail')
+  await page.getByTestId('thread-row').filter({ hasText: 'Starred reference' }).click()
+  await expect(page.getByTestId('conversation-done')).toContainText('Done')
+  await expect(page.getByTestId('conversation-position')).toHaveCount(0)
+  await expect(page.getByTestId('conversation-summary')).not.toContainText('Nora Field')
+  await expect(page.getByTestId('footer-shortcut-done')).toContainText('Mark done')
+  await expect(page.getByTestId('footer-shortcut-snooze')).toContainText('Snooze')
+  await page.keyboard.press('Escape')
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  const body = page.getByTestId('composer-body-area')
+  const bounds = await body.boundingBox()
+  if (!bounds) throw new Error('Composer body is not visible')
+  await page.mouse.click(bounds.x + 20, bounds.y + bounds.height - 10)
+  await expect(composer.editor).toBeFocused()
 })

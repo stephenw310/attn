@@ -77,6 +77,12 @@ The top bar shows account controls and pending mail activity without an unread-p
 Reader and new-message headers use one clickable `Esc` close control. Settings uses one Back to mail control with an `Esc` keycap.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
+The mailbox hint bar shows Navigate, Open, Mark done, Write, Go to, Undo, and Command palette when applicable. Inbox zero reduces it to Write and Search. Reader hints retain message navigation and expand/collapse, and show Reply, Mark done, Snooze or Change snooze, and Back. At narrow widths, reader hints prioritize Reply, Mark done, Snooze, and Back. Message-navigation shortcuts remain available through All shortcuts. Settings, split rules, and full-window compose omit the global hint bar. Bulk selection shows its count and Mark done, Snooze, Label, and Clear actions above the list.
+
+A sync error shows an inline mailbox notice with Retry and Details. Details opens the same popover as the top-right status. The status retains retry and error-copy controls. Sync details use a state-specific heading with Close below the detail text. Follow-up picker presets align left. Sync popover headings use 16px medium text; detail copy uses 11px text with 1.65 line height.
+
+The reader header stays compact without an action toolbar or separate message-actions dialog. It omits participant names and mailbox-position counters. Snooze timing appears in the actionable banner, not again below the subject. Conversations outside Inbox, Spam, Trash, Drafts, and pending reminders show Done and their All Mail location. Trashed-message and blocked-image notices use filled panels. Message details use an unbordered grid. Search rows place sender and subject together without date-group headings. Search timestamps include the year for mail outside the current calendar year; the search header and submission controls keep their existing positions.
+
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
 
 ## 4. Feature specifications
@@ -324,7 +330,7 @@ The Done action confirmation says `Marked done`.
   state and due time.
 - Marking a thread important or not important updates `IMPORTANT` through Gmail. Moving into or out of Spam
   and Trash updates `SPAM` or `TRASH` through Gmail. The optimistic row membership matches the chosen action.
-- The reader summary shows a clock and the snooze deadline in every mailbox, label, and search view. A banner offers Change snooze and Return to Inbox now. Snoozed list items also show the clock, and their footer identifies H as Change snooze.
+- The reader banner shows the snooze deadline in every mailbox, label, and search view. It offers Change snooze and Return to Inbox now. Snoozed list items also show the clock, and their footer identifies H as Change snooze.
 - A snoozed thread returns within 60s of its due time while the app runs, or immediately on next launch if it was closed; a reply during snooze surfaces it immediately.
 - Snoozed threads are findable in the local "Snoozed" view (`G` then `H`) while the Attn profile exists. Reinstall durability and cross-device visibility are not v1 promises (decision #6).
 
@@ -346,11 +352,10 @@ Label, move, and snooze pickers share a title, Close/Esc control, and boxed navi
 
 The shortcut footer is a context-aware guide. A persistent top-bar control, `Mod+Shift+B`, and the command palette show or hide
 the keyboard hints. The hint bar is visible by default. It sits below the right-hand content pane. The sidebar extends to the bottom of the window. Sync status stays visible beside the account menu when hints are hidden. The saved choice applies across mail views and survives
-relaunch. Its default state is a single,
-non-wrapping line of only the commands relevant to the active view. Footer hints are explicit command
+relaunch. It shows commands relevant to the active view and wraps at narrow widths. Footer hints are explicit command
 metadata, not automatic ranking. They favor frequent or view-defining actions, appear only while that
-command is registered, and group equivalent keys under one label. The main list orders `J/K` Navigate,
-`Enter` Open, `E` Done, `C` Compose, `Z` Undo, `H` Snooze, `V` Move, and `Mod+K` Command palette.
+command is registered, and group equivalent keys under one label. The main list shows `J/K` Navigate, `Enter` Open, `E` Mark done, `C` Write, `Z` Undo,
+`Mod+K` Command palette, and `G` Go to. Snoozed also shows `H` Snooze or Change snooze.
 Pressing a chord prefix such as `G` temporarily replaces that line with the visible completions from the
 same command registry. The guide shows only the completion keys and labels, without repeating the prefix.
 Fixed mailboxes use
@@ -391,8 +396,8 @@ the conversation. Loading or refreshing the conversation never remounts the comp
 New incoming messages do not move the message cursor away from what the user is reading.
 Inline drafts align with the source message body and use horizontal boundaries without a surrounding card. A Reply draft or Forward draft heading, Not sent marker, and live save state identify unsent content. The message cursor is a short accent line beside the source avatar.
 Full-screen compose hides the sidebar and hint-bar toggles while keeping sync status visible.
-The reminder control uses a bell icon. Its popup renders above the composer without clipping.
-Dedicated and inline composers share recipient chips, flat envelope rows, and a Send-first footer with Aa, attachment, and reminder controls. The dedicated composer has no enclosing card or shadow. Save state appears beside its footer actions; inline drafts keep it in their header. Attachment mutations show progress and retain a retryable error beside the attachment chips. Draft rows include body previews and saved timestamps. Outbox rows show send state, errors, and an explicit reopen action; reviewing an uncertain send never sends it automatically.
+The reminder control uses a bell icon. Its popup shows the heading Remind me if no reply and left-aligned presets. It renders above the composer without clipping.
+Dedicated and inline composers share recipient chips, flat envelope rows, and a Send-first footer with Aa, attachment, and reminder controls. The dedicated composer has no enclosing card or shadow. Save state appears beside its footer actions; inline drafts keep it in their header. Attachment chips follow the authored body and signature inside the scrollable editor area. Attachment mutations show progress and retain a retryable error beside the chips. Draft rows include body previews and saved timestamps. Outbox rows show send state, errors, and an explicit reopen action; reviewing an uncertain send never sends it automatically.
 
 Selecting editable body text shows a floating formatting toolbar. Aa and the Show formatting toolbar command expose the same controls without a text selection. Formatting retains the editor selection and undo history. The toolbar excludes collapsed signatures, the Attn footer, and opaque imported content, stays within the visible editor width, and closes independently with Escape. AI drafting shows a centered rounded Drafting reply... pill with a Stop button and Esc keycap, then a refine field. The reply invitation uses quiet inline text. Generation status uses a ground-colored floating pill with a subtle border and shadow at the bottom center of the editor. After 1.2 seconds without editing, a nonempty draft shows Continue draft with AI if no autocomplete suggestion, generation, or refinement is visible. The invitation is a non-clickable placeholder at the collapsed caret in authored text. Hide it when the editor loses focus or the user selects text. Mod+J invokes the existing AI draft command and preserves authored text. AI invitations, drafting status, and refine controls overlay the editor without changing its size or moving the sending controls. Snippet menus share the application menu styling.
 

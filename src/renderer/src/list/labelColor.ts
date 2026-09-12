@@ -31,8 +31,21 @@ const LABEL_PALETTE = [
   }
 ] as const
 
-export function labelColor(labelId: string): (typeof LABEL_PALETTE)[number] {
+function labelPalette(labelId: string): (typeof LABEL_PALETTE)[number] {
   let hash = 0
   for (const character of labelId) hash = (hash * 31 + character.charCodeAt(0)) | 0
   return LABEL_PALETTE[Math.abs(hash) % LABEL_PALETTE.length]
+}
+
+export function labelMarkerColor(labelId: string): string {
+  return labelPalette(labelId).color
+}
+
+export function labelColor(labelId: string): { backgroundColor: string; borderColor: string; color: string } {
+  const palette = labelPalette(labelId)
+  return {
+    backgroundColor: `color-mix(in srgb, ${palette.borderColor} 13%, var(--attn-ground))`,
+    borderColor: `color-mix(in srgb, ${palette.borderColor} 65%, var(--attn-edge))`,
+    color: 'var(--attn-ink)'
+  }
 }

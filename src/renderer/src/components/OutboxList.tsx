@@ -28,10 +28,19 @@ export function OutboxList({
       ref={listRef}
       data-testid="outbox-list"
       aria-label="Outbox"
-      className="min-h-0 flex-1 overflow-y-auto py-2"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2"
     >
-      <p className="px-3 pb-4 text-xs text-ink-dim">Messages waiting to send or needing your attention.</p>
-      {items.length === 0 && <div className="py-12 text-center text-sm text-ink-dim">Outbox is clear</div>}
+      {items.length > 0 && (
+        <p className="px-3 pb-4 text-xs text-ink-dim">Messages waiting to send or needing your attention.</p>
+      )}
+      {items.length === 0 && (
+        <div
+          data-testid="outbox-empty"
+          className="flex flex-1 items-center justify-center text-sm text-ink-dim"
+        >
+          Outbox is clear
+        </div>
+      )}
       {items.map((item, index) => (
         // biome-ignore lint/a11y/useKeyWithClickEvents: Enter uses the outbox command
         // biome-ignore lint/a11y/noStaticElementInteractions: the row action is also a focusable button

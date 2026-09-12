@@ -178,7 +178,7 @@ test('classifies once, navigates locally, and restores each split selection', as
 
   await rows.first().click()
   await expect(page.getByTestId('conversation-view')).toBeVisible()
-  await expect(page.getByTestId('conversation-position')).toHaveText('1 of 2')
+  await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '0')
   await expect(strip).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(strip).toBeVisible()

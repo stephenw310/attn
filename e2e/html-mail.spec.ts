@@ -171,12 +171,15 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
   })
   await expect(iframe).toHaveAttribute('data-stability-marker', 'original')
 
-  const selectedPosition = await page.getByTestId('conversation-position').textContent()
+  const selectedPosition = await page.getByTestId('conversation-view').getAttribute('data-thread-index')
   await page.keyboard.press('ArrowDown')
   await expect
     .poll(() => page.getByTestId('conversation-scroll').evaluate((element) => element.scrollTop))
     .toBeGreaterThanOrEqual(120)
-  await expect(page.getByTestId('conversation-position')).toHaveText(selectedPosition ?? '')
+  await expect(page.getByTestId('conversation-view')).toHaveAttribute(
+    'data-thread-index',
+    selectedPosition ?? ''
+  )
 
   expect(
     await page.evaluate(() => {
@@ -216,7 +219,7 @@ test('sanitizes hostile HTML in a scriptless iframe and preserves plain text mai
     .poll(() => page.getByTestId('conversation-scroll').evaluate((element) => element.scrollTop))
     .toBe(600)
   await page.keyboard.press('k')
-  await expect(page.getByTestId('conversation-position')).toHaveText('7 of 8')
+  await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '6')
   await expect
     .poll(() => page.getByTestId('conversation-scroll').evaluate((element) => element.scrollTop))
     .toBe(0)

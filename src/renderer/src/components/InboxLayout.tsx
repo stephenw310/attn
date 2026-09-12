@@ -1,6 +1,9 @@
+import { useState, useSyncExternalStore } from 'react'
 import type { ThreadListView } from '../../../shared/mail'
+import { getCommandRegistrySnapshot, subscribeCommandRegistry } from '../commands'
 import type { InboxController } from '../hooks/useInboxController'
 import { type MailView, userLabelId } from '../list/mailDisplay'
+import { Button } from './Button'
 import { ConversationView } from './ConversationView'
 import { DraftList } from './DraftList'
 import { InboxOverlays } from './InboxOverlays'
@@ -24,6 +27,7 @@ function threadListKind(view: MailView): ThreadListView | 'label' {
 }
 
 export function InboxLayout({ controller: c }: { controller: InboxController }): React.JSX.Element {
+  const [syncDetailsRequest, setSyncDetailsRequest] = useState(0)
   return (
     <div className="flex h-full flex-col">
       <MailHeader
@@ -31,13 +35,14 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
         outboxCount={c.realOutbox.length}
-        selectionCount={c.searchOpen || (c.view !== 'drafts' && c.view !== 'outbox') ? c.selectedIds.size : 0}
+        selectionCount={c.readerOpen || (!c.searchOpen && c.view === 'drafts') ? c.selectedIds.size : 0}
         composerOpen={c.fullWindowComposerDraft !== null}
         sidebarCollapsed={c.sidebarCollapsed}
         footerCollapsed={c.footerCollapsed}
         onToggleFooter={c.toggleFooter}
         syncStatus={
           <SyncStatus
+            detailsRequest={syncDetailsRequest}
             sync={c.sync}
             networkOnline={c.networkOnline}
             onRetry={c.retrySync}
@@ -103,11 +108,36 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
             aria-hidden={c.settingsOpen || undefined}
           >
             <MailboxTop controller={c} />
+            {!c.readerOpen && !c.splitRulesOpen && c.sync.phase === 'error' && (
+              <div
+                data-testid="mailbox-sync-error"
+                role="alert"
+                className="mx-3 mb-4 flex flex-wrap items-center gap-4 rounded-md bg-active px-4 py-3 text-xs text-ink-dim"
+              >
+                <span className="min-w-0 flex-1">Sync couldn't finish. Your cached mail is available.</span>
+                <Button data-testid="mailbox-sync-retry" onClick={c.retrySync}>
+                  Retry
+                </Button>
+                <Button
+                  data-testid="mailbox-sync-details"
+                  onClick={() => setSyncDetailsRequest((value) => value + 1)}
+                >
+                  Details
+                </Button>
+              </div>
+            )}
+            {!c.readerOpen &&
+              !c.splitRulesOpen &&
+              c.selectedIds.size > 0 &&
+              (c.searchOpen || !['drafts', 'outbox'].includes(c.view)) && (
+                <BulkActions count={c.selectedIds.size} onClear={c.clearSelection} />
+              )}
             <SearchStatus controller={c} />
             <MailboxBody controller={c} />
           </div>
           {!c.fullWindowComposerDraft && !c.footerCollapsed && !c.settingsOpen && !c.splitRulesOpen && (
             <MailFooter
+              empty={c.showInboxZero}
               snoozed={c.view === 'snoozed' && !c.searchOpen}
               selectedSnoozed={c.selected?.snoozed}
               onOpenShortcuts={c.openCheatSheet}
@@ -321,6 +351,36 @@ function SearchStatus({ controller: c }: { controller: InboxController }): React
             ? searchCoverageText(c.search.local.response.coverage, c.search.local.response.partial)
             : 'Searching cached mail…'}
       </div>
+    </div>
+  )
+}
+
+function BulkActions({ count, onClear }: { count: number; onClear: () => void }): React.JSX.Element {
+  const commands = useSyncExternalStore(subscribeCommandRegistry, getCommandRegistrySnapshot)
+  return (
+    <div
+      data-testid="bulk-actions"
+      className="mx-3 mb-3 flex flex-wrap items-center gap-4 rounded-md bg-active px-4 py-3 text-xs text-ink-dim"
+    >
+      <span data-testid="selection-count" className="mr-auto">
+        {count} selected
+      </span>
+      {(['triage.archive', 'triage.snooze', 'triage.label'] as const).map((id) => {
+        const command = commands.find((item) => item.id === id)
+        return (
+          <Button
+            key={id}
+            data-testid={`bulk-${id.split('.')[1]}`}
+            disabled={!command}
+            onClick={() => command?.run()}
+          >
+            {id === 'triage.archive' ? 'Mark done' : id === 'triage.snooze' ? 'Snooze' : 'Label'}
+          </Button>
+        )
+      })}
+      <Button data-testid="bulk-clear" onClick={onClear}>
+        Clear
+      </Button>
     </div>
   )
 }

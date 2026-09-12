@@ -3,7 +3,7 @@ import type { MailLabel } from '../../shared/mail'
 import { type MoveDestination, moveLabelDelta } from '../../shared/move'
 import { PickerDialog } from './components/PickerDialog'
 import { useHighlightedOption } from './hooks/useHighlightedOption'
-import { labelColor } from './list/labelColor'
+import { labelMarkerColor } from './list/labelColor'
 
 export interface MoveTarget {
   id: string
@@ -204,7 +204,7 @@ export function MovePicker({
                 {option.labelId ? (
                   <span
                     className="size-2 rounded-full"
-                    style={{ backgroundColor: labelColor(option.labelId).color }}
+                    style={{ backgroundColor: labelMarkerColor(option.labelId) }}
                   />
                 ) : (
                   option.icon

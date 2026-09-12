@@ -240,7 +240,7 @@ for (const appearance of ['Light', 'Dark']) {
     expect(deadline).not.toBe('')
     await snoozedRow.click()
     const marker = page.getByTestId('conversation-snooze')
-    await expect(marker).toHaveText(deadline)
+    await expect(marker).toHaveCount(0)
     await expect(page.getByTestId('conversation-snooze-banner')).toContainText(`Snoozed until ${deadline}.`)
     const dir = join(__dirname, '.artifacts')
     mkdirSync(dir, { recursive: true })

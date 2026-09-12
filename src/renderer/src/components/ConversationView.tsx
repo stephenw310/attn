@@ -262,7 +262,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     setExpandedMessageIds(allExpanded ? new Set() : new Set(readableMessages.map((message) => message.id)))
   }, [allExpanded, readableMessages])
   useLayoutEffect(() => registerCommands([createCommand('message.toggleAll', toggleAll)]), [toggleAll])
-  const participants = [...new Set(conversation.messages.map((message) => message.fromName))].join(', ')
 
   const items = conversation.messages.map((message) => (
     <div
@@ -294,7 +293,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
       {message.trashed && !revealedTrashedIds.has(message.id) ? (
         <div
           data-testid="trashed-message-marker"
-          className="flex items-center gap-2 rounded-lg border border-edge border-dashed px-4 py-2.5 text-xs text-ink-faint"
+          className="my-3 flex flex-wrap items-center justify-between gap-3 rounded-md bg-active px-4 py-4 text-xs text-ink-dim"
         >
           This message was moved to Trash.
           <button
@@ -356,14 +355,6 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         <span className="shrink-0">
           {conversation.messages.length} {conversation.messages.length === 1 ? 'message' : 'messages'}
         </span>
-        <span aria-hidden>·</span>
-        <span className="max-w-64 min-w-0 truncate">{participants}</span>
-        {selected.snoozed && (
-          <span data-testid="conversation-snooze" className="inline-flex items-center gap-1.5 text-accent">
-            <MailIcon name="snoozed" />
-            {selected.dueLabel ?? 'Snoozed'}
-          </span>
-        )}
         {(selected.followUpReturned || selected.followUpDueLabel) && (
           <span data-testid="conversation-follow-up" className="inline-flex items-center gap-1.5 text-accent">
             ↩ Follow up{!selected.followUpReturned && ` ${selected.followUpDueLabel}`}
@@ -389,6 +380,15 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           </Button>
         )}
       </div>
+      {!selected.labelIds.some((id) => ['INBOX', 'TRASH', 'SPAM', 'DRAFT'].includes(id)) &&
+        !selected.snoozed &&
+        !selected.followUpDueLabel &&
+        !selected.followUpReturned && (
+          <div data-testid="conversation-done" className="mb-5 flex items-center gap-3 text-xs text-ink-dim">
+            <span className="text-accent">✓ Done</span>
+            <span>Available in All Mail and its labels.</span>
+          </div>
+        )}
       {selected.snoozed && (
         <div
           data-testid="conversation-snooze-banner"
@@ -467,9 +467,6 @@ export const ConversationView = memo(function ConversationView(
 ): React.JSX.Element {
   const {
     selected,
-    selectedIndex,
-    threadCount,
-    threadCountExact,
     mailboxTitle,
     conversation,
     account,
@@ -569,7 +566,11 @@ export const ConversationView = memo(function ConversationView(
   }, [inlineComposer, scrollRef])
 
   return (
-    <section data-testid="conversation-view" className="flex min-w-0 flex-1 flex-col bg-ground">
+    <section
+      data-testid="conversation-view"
+      data-thread-index={props.selectedIndex}
+      className="flex min-w-0 flex-1 flex-col bg-ground"
+    >
       <div className="overflow-y-hidden px-6 [scrollbar-gutter:stable]">
         <div className="mx-auto flex w-full max-w-[896px] items-start gap-4 pt-6 pb-3">
           <h1
@@ -589,10 +590,6 @@ export const ConversationView = memo(function ConversationView(
             </span>
           </h1>
           <span className="flex flex-none items-center gap-2 text-xs text-ink-faint">
-            <span data-testid="conversation-position" className="tabular-nums">
-              {selectedIndex + 1} of {threadCount}
-              {threadCountExact ? '' : '+'}
-            </span>{' '}
             {!inlineComposer && (
               <Button
                 data-testid="conversation-back"

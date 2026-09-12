@@ -62,7 +62,7 @@ it('skips the reader tree when only footer sync progress changes above it', asyn
     await act(async () => root.render(createElement(ConversationView, props)))
     const readsAfterFirstRender = subjectReads
     expect(readsAfterFirstRender).toBeGreaterThan(0)
-    expect(container.querySelector('[data-testid="conversation-position"]')?.textContent).toBe('1 of 100+')
+    expect(container.querySelector('[data-testid="conversation-position"]')).toBeNull()
 
     await act(async () => root.render(createElement(ConversationView, props)))
     expect(subjectReads).toBe(readsAfterFirstRender)

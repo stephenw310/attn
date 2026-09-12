@@ -82,7 +82,7 @@ function RecipientLine({
       {open && (
         <div
           data-testid="recipient-details"
-          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-l border-edge py-2 pl-3 text-xs text-ink-dim"
+          className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 py-2 text-xs text-ink-dim"
         >
           {groups
             .filter((group) => group.addresses.length > 0)

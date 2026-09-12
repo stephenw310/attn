@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { MailLabel } from '../../shared/mail'
 import { PickerDialog } from './components/PickerDialog'
 import { useHighlightedOption } from './hooks/useHighlightedOption'
-import { labelColor } from './list/labelColor'
+import { labelMarkerColor } from './list/labelColor'
 
 export type LabelCheckState = 'all' | 'some' | 'off'
 
@@ -87,7 +87,7 @@ export function LabelPicker({ labels, targets, onClose, onToggle }: LabelPickerP
               <span
                 aria-hidden
                 className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: labelColor(label.id).color }}
+                style={{ backgroundColor: labelMarkerColor(label.id) }}
               />
               <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{label.name}</span>
               {state === 'some' && (

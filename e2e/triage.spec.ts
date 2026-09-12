@@ -446,8 +446,8 @@ test('extends the selection with Shift+Arrow in the list and in the reader', asy
   await expect(count).toHaveText('2 selected')
 
   // A bare arrow in the reader scrolls the conversation instead of navigating.
-  const position = page.getByTestId('conversation-position')
-  const before = await position.textContent()
+  const position = page.getByTestId('conversation-view')
+  const before = await position.getAttribute('data-thread-index')
   await page.keyboard.press('ArrowDown')
-  await expect(position).toHaveText(before ?? '')
+  await expect(position).toHaveAttribute('data-thread-index', before ?? '')
 })

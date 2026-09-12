@@ -864,6 +864,7 @@ export function useInboxController({
   }, [accountSwitchPendingRef])
 
   return {
+    clearSelection,
     openSnooze,
     undoFromToast,
     status,

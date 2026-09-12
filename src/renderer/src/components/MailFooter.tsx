@@ -25,7 +25,7 @@ function FooterShortcut({
   return (
     <span
       data-testid={`footer-shortcut-${id}`}
-      className="flex flex-none items-center gap-1.5 whitespace-nowrap text-ink-dim"
+      className={`${id === 'message-navigation' || id === 'message-toggle' ? 'hidden min-[1100px]:flex' : 'flex'} flex-none items-center gap-1.5 whitespace-nowrap text-ink-dim`}
     >
       <span className="flex items-center gap-1.5">
         {shortcuts.map((shortcut) => (
@@ -65,6 +65,7 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
 }
 
 interface MailFooterProps {
+  empty?: boolean
   snoozed?: boolean
   selectedSnoozed?: boolean
   onOpenShortcuts?: () => void
@@ -77,8 +78,10 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
   useSyncExternalStore(subscribeCommandRegistry, getCommandRegistrySnapshot)
   const hints = listFooterHints(context).filter((hint) =>
     context === 'reader'
-      ? ['message-navigation', 'message-toggle', 'reply', 'reply-all', 'forward'].includes(hint.id)
-      : !(context === 'composer' && hint.id === 'back')
+      ? ['message-navigation', 'message-toggle', 'reply', 'done', 'snooze', 'back'].includes(hint.id)
+      : props.empty && context === 'list'
+        ? hint.id === 'compose'
+        : !(context === 'composer' && hint.id === 'back')
   )
   return (
     <footer
@@ -89,35 +92,40 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
       <div
         key={`${context}:${pendingChord ?? 'default'}`}
         data-testid="footer-shortcuts"
-        className="flex min-w-0 flex-1 items-center gap-x-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2"
       >
         {pendingChord ? (
           <ChordGuide prefix={pendingChord} context={context} />
         ) : (
           <>
+            {props.empty && context === 'list' && (
+              <FooterShortcut id="search" shortcuts={['/']} label="Search" />
+            )}
             {hints
               .filter(
                 (hint) =>
-                  !props.snoozed || context !== 'list' || !['undo', 'palette', 'move'].includes(hint.id)
+                  context !== 'list' || (hint.id !== 'move' && (hint.id !== 'snooze' || props.snoozed))
               )
               .map((hint) => (
                 <FooterShortcut
                   key={hint.id}
                   {...hint}
                   label={
-                    props.snoozed && context === 'list'
-                      ? ({
-                          snooze: props.selectedSnoozed ? 'Change snooze' : 'Snooze',
-                          compose: 'Write',
-                          done: 'Mark done',
-                          open: 'Open',
-                          navigate: 'Navigate'
-                        }[hint.id] ?? hint.label)
-                      : hint.label
+                    {
+                      snooze: props.selectedSnoozed ? 'Change snooze' : 'Snooze',
+                      compose: 'Write',
+                      done: 'Mark done',
+                      open: 'Open',
+                      navigate: 'Navigate',
+                      undo: 'Undo',
+                      palette: 'Command palette',
+                      back: 'Back',
+                      'message-navigation': 'Next / previous message'
+                    }[hint.id] ?? hint.label
                   }
                 />
               ))}
-            {props.snoozed && context === 'list' && (
+            {!props.empty && context === 'list' && (
               <FooterShortcut id="go-to" shortcuts={['G']} label="Go to" />
             )}
           </>

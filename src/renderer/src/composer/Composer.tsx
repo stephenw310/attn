@@ -19,7 +19,7 @@ import { AiDraftPlugin } from './AiDraftPlugin'
 import { BodyEditingShortcutsPlugin, ComposerCommandPlugin } from './bodyEditing'
 import { ComposerBodyHintPlugin } from './ComposerBodyHintPlugin'
 import { ComposerEnvelope, ComposerHeader, composerTitle } from './ComposerChrome'
-import { ComposerFooter } from './ComposerFooter'
+import { ComposerAttachments, ComposerFooter } from './ComposerFooter'
 import { DraftContentIdContext, DraftSourceMessageIdContext } from './DraftContentContext'
 import { editorConfig } from './editorConfig'
 import { InitialHtmlPlugin } from './InitialHtmlPlugin'
@@ -220,6 +220,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           <DraftSourceMessageIdContext.Provider value={draft.sourceMessageId}>
             <LexicalComposer initialConfig={editorConfig}>
               <div
+                data-testid="composer-body-area"
+                onPointerDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    event.preventDefault()
+                    event.currentTarget.querySelector<HTMLElement>('[data-testid="composer-editor"]')?.focus()
+                  }
+                }}
                 className={`relative min-h-48 flex-1 ${
                   mode === 'inline' ? '' : 'overflow-y-auto [scrollbar-gutter:stable]'
                 }`}
@@ -227,7 +234,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 <RichTextPlugin
                   contentEditable={
                     <ContentEditable
-                      className="min-h-full px-0 pt-5 pb-14 text-[13px] leading-6 text-ink outline-none"
+                      className="px-0 pt-5 pb-4 text-[13px] leading-6 text-ink outline-none"
                       data-testid="composer-editor"
                       aria-label="Message body"
                     />
@@ -294,6 +301,15 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     onToast={onToast}
                   />
                 )}
+                <ComposerAttachments
+                  attachmentError={attachmentError}
+                  retryAttachment={retryAttachment}
+                  dismissAttachmentError={dismissAttachmentError}
+                  visibleAttachments={visibleAttachments}
+                  attaching={attaching}
+                  closing={closing}
+                  removeAttachment={removeAttachment}
+                />
                 <InlineQuote
                   draftId={draft.id}
                   html={draft.quoteHtml}

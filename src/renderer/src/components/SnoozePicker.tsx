@@ -87,7 +87,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
         }}
       >
         <PickerHeading title="Snooze" onClose={onCancel} />
-        <div className="min-h-0 overflow-y-auto px-3 pb-6">
+        <div className="min-h-0 overflow-y-auto px-3 pb-4">
           <div className="px-3 pb-4">
             <p data-testid="snooze-subtitle" className="mt-0.5 text-xs text-ink-faint">
               {targetCount > 1
@@ -132,7 +132,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
               </button>
             </div>
           )}
-          <div className="mt-5 px-3 pt-3 pb-1">
+          <div className="mt-4 px-3">
             <label htmlFor="snooze-custom" className="text-xs font-medium text-ink-dim">
               Custom time
             </label>
@@ -178,6 +178,7 @@ export function SnoozePicker(props: SnoozePickerProps): React.JSX.Element {
               data-testid="snooze-resolved"
               className="mt-1.5 min-h-4 text-xs text-ink-faint"
             >
+              {!custom.trim() && !expired && 'Try “thu 2pm” or “in 3 days”.'}
               {expired && 'Choose a future time. This time has already passed.'}
               {!expired &&
                 parsedCustom !== null &&

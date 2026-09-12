@@ -148,7 +148,7 @@ function virtualLayout(
     // chip on the row still marks them everywhere.
     const group = dateGroup(view === 'inbox' ? thread : { lastMsgAt: thread.lastMsgAt })
     // Snoozed sorts by due time, so relative-date groups would mislead there.
-    const showGroup = view !== 'snoozed' && group !== previousGroup
+    const showGroup = view !== 'snoozed' && view !== 'search' && group !== previousGroup
     if (showGroup) {
       const occurrence = groupOccurrences.get(group) ?? 0
       activeGroupKey = `${group}\0${occurrence}`
@@ -387,14 +387,21 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         >
           ★
         </span>
-        <span
-          data-testid="thread-sender"
-          className="app-thread-sender flex-none overflow-hidden text-ellipsis whitespace-nowrap"
-        >
-          {thread.from}
-        </span>
+        {view !== 'search' && (
+          <span
+            data-testid="thread-sender"
+            className="app-thread-sender flex-none overflow-hidden text-ellipsis whitespace-nowrap"
+          >
+            {thread.from}
+          </span>
+        )}
         <span className="app-thread-copy">
           <span className="app-thread-subject-line">
+            {view === 'search' && (
+              <span data-testid="thread-sender" className="max-w-[30%] truncate font-medium">
+                {thread.from}
+              </span>
+            )}
             <span data-testid="thread-subject" className="app-thread-subject">
               {thread.subject.trim() || '(no subject)'}
             </span>
@@ -415,7 +422,15 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <span className="flex flex-none items-center gap-2 text-[10px] text-ink-dim">
           {thread.hasAttachment && <MailIcon name="attachment" />}
           <span data-testid="thread-time" className="app-thread-time min-w-[62px] text-right tabular-nums">
-            {thread.at}
+            {view === 'search' &&
+            thread.lastMsgAt > 0 &&
+            new Date(thread.lastMsgAt).getFullYear() !== new Date().getFullYear()
+              ? new Date(thread.lastMsgAt).toLocaleDateString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric'
+                })
+              : thread.at}
           </span>
           {view === 'allMail' && (
             <span className="flex size-4 flex-none items-center justify-center">

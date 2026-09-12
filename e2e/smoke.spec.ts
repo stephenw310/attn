@@ -127,18 +127,17 @@ test.describe('seeded inbox smoke coverage', () => {
     ])
     await expect(page.getByTestId('queue-readout')).toHaveCount(0)
     await expect(page.getByTestId('pending-count')).toHaveCount(0)
-    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('JKnavigate')
-    await expect(page.getByTestId('footer-shortcut-open')).toContainText('Enteropen')
+    await expect(page.getByTestId('footer-shortcut-navigate')).toContainText('JKNavigate')
+    await expect(page.getByTestId('footer-shortcut-open')).toContainText('EnterOpen')
     for (const [id, text] of [
-      ['done', 'Edone'],
-      ['compose', 'Ccompose'],
-      ['undo', 'Zundo'],
-      ['snooze', 'Hsnooze'],
-      ['move', 'Vmove']
+      ['done', 'EMark done'],
+      ['compose', 'CWrite'],
+      ['undo', 'ZUndo'],
+      ['go-to', 'GGo to']
     ]) {
       await expect(page.getByTestId(`footer-shortcut-${id}`)).toContainText(text)
     }
-    await expect(page.getByTestId('footer-shortcut-palette')).toContainText('command palette')
+    await expect(page.getByTestId('footer-shortcut-palette')).toContainText('Command palette')
     await expect
       .poll(() =>
         page
@@ -149,7 +148,7 @@ test.describe('seeded inbox smoke coverage', () => {
             )
           )
       )
-      .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'snooze', 'move', 'palette'])
+      .toEqual(['navigate', 'open', 'done', 'compose', 'undo', 'palette', 'go-to'])
 
     const dir = join(__dirname, '.artifacts')
     mkdirSync(dir, { recursive: true })
@@ -184,10 +183,12 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect(page.getByTestId('thread-list')).toBeHidden()
     await expect(page.getByTestId('conversation-back')).toHaveText('Back to Inbox Esc')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Q3 roadmap review')
-    await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
+    await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '0')
     await expect(page.getByTestId('footer-shortcut-reply')).toContainText('RReply')
-    await expect(page.getByTestId('footer-shortcut-message-navigation')).toContainText('NPMessages')
-    await expect(page.getByTestId('footer-shortcut-back')).toHaveCount(0)
+    await expect(page.getByTestId('footer-shortcut-message-navigation')).toContainText(
+      'NPNext / previous message'
+    )
+    await expect(page.getByTestId('footer-shortcut-back')).toContainText('Back')
     // Pin the whole reader hint set rather than the absence of named hints: this
     // fails on a stray hint too, and cannot go vacuous when an id is renamed.
     await expect
@@ -200,7 +201,7 @@ test.describe('seeded inbox smoke coverage', () => {
             )
           )
       )
-      .toEqual(['message-navigation', 'message-toggle', 'reply', 'reply-all', 'forward'])
+      .toEqual(['message-navigation', 'message-toggle', 'reply', 'done', 'snooze', 'back'])
     await expect(page.getByTestId('message-card')).toHaveCount(2)
     await expect(page.getByTestId('message-card').first()).toContainText('Maya Lin')
     await expect(rows.first()).not.toHaveAttribute('data-unread', 'true')
@@ -220,7 +221,7 @@ test.describe('seeded inbox smoke coverage', () => {
     const afterSpace = await scroll.evaluate((element) => element.scrollTop)
     await page.keyboard.press('PageDown')
     await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(afterSpace)
-    await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
+    await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '0')
     await scroll.evaluate((element) => element.scrollTo({ top: 0, behavior: 'instant' }))
     await page
       .getByTestId('conversation-content')
@@ -234,16 +235,16 @@ test.describe('seeded inbox smoke coverage', () => {
     await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(initialUnread - 1)
     await page.keyboard.press('j')
     await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
-    await expect(page.getByTestId('conversation-position')).toHaveText(`3 of ${seedThreadCount}`)
+    await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '2')
     await expect.poll(() => selectedIndex(page)).toBe(2)
     await expect(rows.nth(2)).not.toHaveAttribute('data-unread', 'true')
     await expect.poll(() => page.evaluate(() => window.attn.mail.getUnreadCount())).toBe(initialUnread - 2)
 
     await page.keyboard.press('ArrowUp')
-    await expect(page.getByTestId('conversation-position')).toHaveText(`3 of ${seedThreadCount}`)
+    await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '2')
     await page.keyboard.press('k')
     await page.keyboard.press('k')
-    await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
+    await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '0')
     await page.keyboard.press('k')
     await expect(page.getByTestId('conversation-view')).toHaveCount(0)
     await expect(page.getByTestId('thread-list')).toBeVisible()
@@ -297,7 +298,7 @@ test.describe('seeded inbox smoke coverage', () => {
     await page.keyboard.press('Enter')
     await expect(page.getByTestId('conversation-view')).toBeVisible()
     for (let index = selectedBefore; index > 0; index--) await page.keyboard.press('k')
-    await expect(page.getByTestId('conversation-position')).toHaveText(`1 of ${seedThreadCount}`)
+    await expect(page.getByTestId('conversation-view')).toHaveAttribute('data-thread-index', '0')
     await page.keyboard.press('Escape')
 
     await expect(list).toBeVisible()

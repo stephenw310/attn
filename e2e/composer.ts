@@ -50,7 +50,7 @@ export class ComposerPage {
   }
 
   get attachments(): Locator {
-    return this.page.getByTestId('composer-attachments')
+    return this.page.getByTestId('composer-attachment-count')
   }
 
   get attachmentChips(): Locator {

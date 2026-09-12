@@ -23,6 +23,7 @@ function lifetimeEta(etaMs: number | undefined): string {
 }
 
 interface SyncStatusProps {
+  detailsRequest?: number
   sync: SyncState
   networkOnline: boolean
   onRetry: () => void
@@ -32,6 +33,9 @@ interface SyncStatusProps {
 export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
   const { sync, networkOnline, onRetry, onCopyError } = props
   const [detailsOpen, setDetailsOpen] = useState(false)
+  useEffect(() => {
+    if (props.detailsRequest) setDetailsOpen(true)
+  }, [props.detailsRequest])
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const displayState =
     sync.phase === 'error'
@@ -212,13 +216,23 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           data-testid="status-details"
           className="absolute right-0 top-full z-50 mt-2 w-[min(360px,90vw)] rounded-[10px] border border-edge bg-raised p-3.5 text-xs text-ink-dim shadow-menu"
         >
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <h2 className="text-sm font-medium text-ink">Sync status</h2>
-            <button type="button" onClick={closeDetails} className="flex items-center gap-2 text-[11px]">
-              Close <Kbd>Esc</Kbd>
-            </button>
-          </div>
-          <p className="break-words leading-relaxed">{title}</p>
+          <h2 className="mb-2.5 text-base font-medium tracking-[-0.2px] text-ink">
+            {displayState === 'indexing'
+              ? 'Indexing mail history'
+              : displayState === 'syncing'
+                ? 'Syncing mail'
+                : displayState === 'offline'
+                  ? 'Offline'
+                  : 'All changes synced'}
+          </h2>
+          <p className="break-words text-[11px] leading-[1.65]">{title}</p>
+          <button
+            type="button"
+            onClick={closeDetails}
+            className="mt-4 flex items-center gap-2 text-xs hover:text-ink"
+          >
+            Close <Kbd>Esc</Kbd>
+          </button>
         </div>
       )}
       {detailsOpen && sync.phase === 'error' && (
@@ -229,7 +243,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           aria-label="Sync error details"
           className="absolute right-0 top-full z-50 mt-2 w-[min(360px,90vw)] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
         >
-          <div className="flex items-center gap-2 text-sm font-medium text-ink">
+          <div className="flex items-center gap-2 text-base font-medium tracking-[-0.2px] text-ink">
             <span className="text-danger" aria-hidden>
               ●
             </span>
@@ -260,6 +274,13 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
               onClick={() => onCopyError(sync.message)}
             >
               Copy details
+            </button>
+            <button
+              type="button"
+              onClick={closeDetails}
+              className="ml-auto flex items-center gap-2 px-2 text-xs text-ink-dim hover:text-ink"
+            >
+              Close <Kbd>Esc</Kbd>
             </button>
           </div>
         </div>
