@@ -25,6 +25,9 @@ export interface ComposerAttachments {
   visibleAttachments: Draft['attachments']
   /** A pick, drop or removal is in flight; send and close must wait for it. */
   attaching: boolean
+  attachmentError: string | null
+  retryAttachment: () => void
+  dismissAttachmentError: () => void
   /** True while a mutation is in flight, read synchronously by send/close. */
   isMutating: () => boolean
   addAttachment: (attachment: Draft['attachments'][number]) => void
@@ -56,6 +59,11 @@ export function useComposerAttachments({
   const [attachments, setAttachments] = useState(initial)
   const [attaching, setAttaching] = useState(false)
   const mutatingRef = useRef(false)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  const retryRequestRef = useRef<{
+    request: () => Promise<{ attachments: Draft['attachments']; changed?: boolean }>
+    failure: (error: unknown) => string
+  } | null>(null)
 
   const replaceAttachments = useCallback(
     (next: Draft['attachments']) => {
@@ -88,11 +96,18 @@ export function useComposerAttachments({
       }
       mutatingRef.current = true
       setAttaching(true)
+      setAttachmentError(null)
+      retryRequestRef.current = null
       void request()
         .then((result) => {
           if (result.changed !== false) replaceAttachments(result.attachments)
         })
-        .catch((error: unknown) => onToast(failure(error)))
+        .catch((error: unknown) => {
+          const message = failure(error)
+          setAttachmentError(message)
+          retryRequestRef.current = { request, failure }
+          onToast(message)
+        })
         .finally(() => {
           mutatingRef.current = false
           setAttaching(false)
@@ -100,6 +115,15 @@ export function useComposerAttachments({
     },
     [closing, onToast, replaceAttachments]
   )
+
+  const retryAttachment = useCallback(() => {
+    const retry = retryRequestRef.current
+    if (retry) mutate(retry.request, retry.failure)
+  }, [mutate])
+  const dismissAttachmentError = useCallback(() => {
+    setAttachmentError(null)
+    retryRequestRef.current = null
+  }, [])
 
   const pickAttachments = useCallback(() => {
     const bridge = window.attn
@@ -153,6 +177,9 @@ export function useComposerAttachments({
     attachments,
     visibleAttachments,
     attaching,
+    attachmentError,
+    retryAttachment,
+    dismissAttachmentError,
     isMutating,
     addAttachment,
     pickAttachments,

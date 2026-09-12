@@ -39,10 +39,22 @@ export function DraftList({
         )
       }
       subject={(draft) => draft.subject || '(no subject)'}
+      preview={(draft) => (
+        <>
+          <span className="flex-none text-accent">Draft</span>
+          <span className="truncate">{draft.bodyText.replace(/\s+/g, ' ').trim() || 'No message yet'}</span>
+        </>
+      )}
       trailing={(draft) => (
-        <span className="text-xs capitalize text-ink-faint">
-          {draft.kind === 'replyAll' ? 'reply all' : draft.kind}
-        </span>
+        <time
+          className="flex-none text-[10px] text-ink-dim"
+          dateTime={new Date(draft.updatedAt).toISOString()}
+          title={new Date(draft.updatedAt).toLocaleString()}
+        >
+          {new Date(draft.updatedAt).toLocaleDateString() === new Date().toLocaleDateString()
+            ? new Date(draft.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+            : new Date(draft.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+        </time>
       )}
       selectedIndex={selectedIndex}
       selectionVisible={selectionVisible}

@@ -12,6 +12,7 @@ const paths = {
   outbox: 'M4 14v7h16v-7 M12 16V3 M7 8l5-5 5 5',
   write: 'm4 16 12-12 4 4L8 20l-5 1Z M14 6l4 4',
   attachment: 'm8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9 M6 15l8-8',
+  link: 'm10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M13 17a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-1 1',
   keyboard: 'M3 5h18v14H3z M7 9h.1 M11 9h.1 M15 9h.1 M18 9h.1 M7 12h.1 M11 12h.1 M15 12h.1 M7 16h10'
 } as const
 

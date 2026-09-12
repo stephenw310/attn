@@ -1,5 +1,7 @@
-import type { OutboxItem } from '../../../shared/outbox'
-import { recipientLabel, SimpleRowList } from './SimpleRowList'
+import { useLayoutEffect, useRef } from 'react'
+import { NEEDS_REVIEW_EXPLANATION, type OutboxItem } from '../../../shared/outbox'
+import { Button } from './Button'
+import { recipientLabel } from './SimpleRowList'
 
 interface OutboxListProps {
   items: readonly OutboxItem[]
@@ -9,11 +11,6 @@ interface OutboxListProps {
   onOpen: (index: number) => void
 }
 
-function stateLabel(state: OutboxItem['state']): string {
-  if (state === 'needs-review') return 'needs review'
-  return state
-}
-
 export function OutboxList({
   items,
   selectedIndex,
@@ -21,49 +18,79 @@ export function OutboxList({
   listRef,
   onOpen
 }: OutboxListProps): React.JSX.Element {
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: move the selected row into view when navigation changes
+  useLayoutEffect(() => {
+    rowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIndex])
   return (
-    <SimpleRowList
-      testId="outbox-list"
-      ariaLabel="Outbox"
-      listRef={listRef}
-      containerClassName="min-h-0 flex-1 overflow-y-auto"
-      rowsClassName="py-2"
-      emptyLabel="Outbox is clear"
-      rows={items}
-      rowKey={(item) => item.id}
-      rowTestId="outbox-row"
-      rowData={(item) => ({
-        'data-outbox-id': item.id,
-        'data-outbox-state': item.state,
-        'data-send-at': item.sendAt === null ? undefined : String(item.sendAt)
-      })}
-      recipients={(item) => recipientLabel([item.to, item.cc, item.bcc])}
-      subject={(item) => item.subject || '(no subject)'}
-      trailing={(item) => (
-        <>
-          {/* Reading why a send failed must not require opening the row,
-              because opening it moves the message back to composing. */}
-          {item.lastError ? (
-            <span
-              data-testid="outbox-error"
-              className="min-w-0 max-w-72 flex-none truncate text-xs text-ink-dim"
-              title={item.lastError}
+    <main
+      ref={listRef}
+      data-testid="outbox-list"
+      aria-label="Outbox"
+      className="min-h-0 flex-1 overflow-y-auto py-2"
+    >
+      <p className="px-3 pb-4 text-xs text-ink-dim">Messages waiting to send or needing your attention.</p>
+      {items.length === 0 && <div className="py-12 text-center text-sm text-ink-dim">Outbox is clear</div>}
+      {items.map((item, index) => (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: Enter uses the outbox command
+        // biome-ignore lint/a11y/noStaticElementInteractions: the row action is also a focusable button
+        <div
+          key={item.id}
+          onClick={() => onOpen(index)}
+          ref={(element) => {
+            if (index === selectedIndex) {
+              rowRef.current = element
+              selectedRowRef.current = element
+            }
+          }}
+          data-testid="outbox-row"
+          data-outbox-id={item.id}
+          data-outbox-state={item.state}
+          data-send-at={item.sendAt ?? undefined}
+          data-selected={index === selectedIndex || undefined}
+          className={`flex items-start gap-4 border-b border-edge px-3 py-4 ${index === selectedIndex ? 'bg-active/60' : 'hover:bg-active/30'}`}
+        >
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-ink">{item.subject || '(no subject)'}</div>
+            <div className="mt-1 truncate text-xs text-ink-dim">
+              To {recipientLabel([item.to, item.cc, item.bcc])}
+            </div>
+            <div
+              className={`mt-1 text-xs ${item.state === 'failed' || item.state === 'needs-review' ? 'text-danger' : 'text-ink-dim'}`}
             >
-              {item.lastError}
-            </span>
-          ) : null}
-          <span
-            className={`text-xs capitalize ${
-              item.state === 'failed' || item.state === 'needs-review' ? 'text-danger' : 'text-ink-faint'
-            }`}
+              {item.state === 'needs-review'
+                ? 'Needs review · Sending outcome is uncertain'
+                : item.state === 'failed'
+                  ? 'Send failed · Message was not sent'
+                  : item.state === 'sending'
+                    ? 'Sending…'
+                    : 'Queued · Waiting to send'}
+            </div>
+            {(item.lastError || item.state === 'needs-review') && (
+              <p data-testid="outbox-error" className="mt-1 max-w-xl text-xs text-ink-dim">
+                {item.lastError || NEEDS_REVIEW_EXPLANATION}
+              </p>
+            )}
+          </div>
+          <Button
+            data-testid="outbox-open"
+            disabled={item.state === 'sending'}
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpen(index)
+            }}
           >
-            {stateLabel(item.state)}
-          </span>
-        </>
-      )}
-      selectedIndex={selectedIndex}
-      selectedRowRef={selectedRowRef}
-      onOpen={onOpen}
-    />
+            {item.state === 'needs-review'
+              ? 'Review'
+              : item.state === 'failed'
+                ? 'Edit & retry'
+                : item.state === 'sending'
+                  ? 'Sending'
+                  : 'Undo send'}
+          </Button>
+        </div>
+      ))}
+    </main>
   )
 }

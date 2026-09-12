@@ -346,7 +346,11 @@ export const COMMAND_SPECS = {
   },
   'composer.attach': { title: 'Attach files', shortcut: 'Mod+Shift+A', context: 'composer' },
   'composer.removeAttachment': { title: 'Remove last attachment', context: 'composer' },
-  'composer.bold': { title: 'Bold', shortcut: 'Mod+B', context: 'composer' },
+  'composer.bold': {
+    title: 'Bold',
+    shortcut: 'Mod+B',
+    context: 'composer'
+  },
   'composer.italic': { title: 'Italic', shortcut: 'Mod+I', context: 'composer' },
   'composer.underline': { title: 'Underline', shortcut: 'Mod+U', context: 'composer' },
   'composer.strikethrough': { title: 'Strikethrough', context: 'composer' },
@@ -357,8 +361,18 @@ export const COMMAND_SPECS = {
   'composer.alignLeft': { title: 'Align left', context: 'composer' },
   'composer.alignCenter': { title: 'Align center', context: 'composer' },
   'composer.alignRight': { title: 'Align right', context: 'composer' },
-  'composer.bullets': { title: 'Bulleted list', context: 'composer' },
-  'composer.numbering': { title: 'Numbered list', context: 'composer' },
+  'composer.bullets': {
+    title: 'Bulleted list',
+    shortcut: 'Mod+Shift+8',
+    shortcutAliases: ['Mod+Shift+*'],
+    context: 'composer'
+  },
+  'composer.numbering': {
+    title: 'Numbered list',
+    shortcut: 'Mod+Shift+7',
+    shortcutAliases: ['Mod+Shift+&'],
+    context: 'composer'
+  },
   'composer.quote': { title: 'Block quote', context: 'composer' },
   'composer.link': { title: 'Add link', shortcut: 'Mod+Shift+K', context: 'composer' },
   // F17: works from the reader (opening the inline reply first) and inside a
@@ -370,6 +384,7 @@ export const COMMAND_SPECS = {
     context: 'global',
     allowInComposer: true
   },
+  'composer.format': { title: 'Show formatting toolbar', shortcut: 'Mod+Shift+F', context: 'composer' },
   'composer.aiRefine': { title: 'Refine AI draft…', context: 'composer' },
   'composer.snippets': { title: 'Insert snippet…', shortcut: 'Mod+;', context: 'composer' },
   'composer.followUp': {

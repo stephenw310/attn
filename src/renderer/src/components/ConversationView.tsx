@@ -511,7 +511,7 @@ export const ConversationView = memo(function ConversationView(
             data-testid="conversation-subject"
             className="min-w-0 flex-1 break-words text-xl font-semibold tracking-tight"
           >
-            {conversation?.subject ?? selected.subject}
+            {(conversation?.subject ?? selected.subject).trim() || '(no subject)'}
             <span
               data-testid="conversation-star"
               data-starred={selected.starred}
