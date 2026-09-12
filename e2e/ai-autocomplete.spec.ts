@@ -73,6 +73,10 @@ test('an AI-ready reply shows its shortcut tip, then completes the recipient nam
   const tip = page.getByTestId('composer-ai-tip')
   await expect(tip).toContainText('Draft a reply with AI')
   await expect(tip).toHaveCSS('pointer-events', 'none')
+  await page.getByTestId('composer-recipient-summary').click()
+  await expect(tip).toHaveCount(0)
+  await editor(page).locator('p').first().click()
+  await expect(tip).toContainText('Draft a reply with AI')
   await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Hi')
 

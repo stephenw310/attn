@@ -38,7 +38,7 @@ export function DraftList({
           draft.kind === 'forward' ? 'Forward' : 'No recipients'
         )
       }
-      subject={(draft) => draft.subject || '(no subject)'}
+      subject={(draft) => (draft.subject.trim() ? draft.subject : '(no subject)')}
       preview={(draft) => (
         <>
           <span className="flex-none text-accent">Draft</span>

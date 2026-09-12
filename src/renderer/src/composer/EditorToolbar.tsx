@@ -162,6 +162,30 @@ export function EditorToolbar(): React.JSX.Element {
     }
   }, [position])
 
+  useEffect(() => {
+    if (!position || linkOpen || moreOpen) return
+    const dismissFromEditor = (event: KeyboardEvent): void => {
+      if (
+        event.defaultPrevented ||
+        event.key !== 'Escape' ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      )
+        return
+      const root = editor.getRootElement()
+      if (!root?.contains(event.target as Node)) return
+      event.preventDefault()
+      event.stopPropagation()
+      suppressed.current = true
+      setPosition(null)
+      setFallbackOpen(false)
+    }
+    document.addEventListener('keydown', dismissFromEditor, true)
+    return () => document.removeEventListener('keydown', dismissFromEditor, true)
+  }, [editor, position, linkOpen, moreOpen])
+
   const format = useCallback(
     (value: TextFormatType): void => {
       withSelection(() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, value))

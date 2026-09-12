@@ -126,17 +126,13 @@ export function ComposerBodyHintPlugin({
     }
   }, [editor])
 
-  if (!showAiTip || suppressed || !idle || (!empty && !position)) return null
+  if (!showAiTip || suppressed || !idle || !position) return null
 
   return (
     <span
       data-testid="composer-ai-tip"
       aria-hidden="true"
-      style={
-        position
-          ? { left: position.left, top: position.top, maxWidth: `calc(100% - ${position.left}px)` }
-          : { left: 0, top: 20 }
-      }
+      style={{ left: position.left, top: position.top, maxWidth: `calc(100% - ${position.left}px)` }}
       className="pointer-events-none absolute inline-flex items-center gap-2 overflow-hidden whitespace-nowrap text-xs leading-6 text-ink-faint select-none"
     >
       {empty ? 'Draft a reply with AI' : 'Continue draft with AI'} <Kbd>{modKeyLabel()} J</Kbd>

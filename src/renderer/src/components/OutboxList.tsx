@@ -52,7 +52,9 @@ export function OutboxList({
           className={`flex items-start gap-4 border-b border-edge px-3 py-4 ${index === selectedIndex ? 'bg-active/60' : 'hover:bg-active/30'}`}
         >
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-ink">{item.subject || '(no subject)'}</div>
+            <div className="truncate text-sm font-medium text-ink">
+              {item.subject.trim() ? item.subject : '(no subject)'}
+            </div>
             <div className="mt-1 truncate text-xs text-ink-dim">
               To {recipientLabel([item.to, item.cc, item.bcc])}
             </div>
