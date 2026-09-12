@@ -1191,6 +1191,30 @@ test('discards a draft with Mod+Shift+D from the composer and Drafts list', asyn
   await expect(rows.first()).toHaveAttribute('data-selected', 'true')
 })
 
+test('keeps pending inline recipients when collapsing the envelope', async ({ page }) => {
+  await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await page.getByTestId('composer-show-copies').click()
+  const summary = page.getByTestId('composer-recipient-summary')
+  for (const field of ['to', 'cc', 'bcc']) {
+    const input = page.getByTestId(`composer-${field}`).locator('input')
+    await input.fill('unfinished@')
+    await summary.click()
+    await expect(summary).toHaveAttribute('aria-expanded', 'true')
+    await expect(input).toHaveValue('unfinished@')
+    await expect(input).toHaveAttribute('aria-invalid', 'true')
+    await input.fill(`${field}@example.com`)
+    await summary.click()
+    await expect(summary).toHaveAttribute('aria-expanded', 'false')
+    await summary.click()
+    await expect(page.getByTestId(`composer-${field}`).getByTestId('recipient-chip')).toContainText([
+      `${field}@example.com`
+    ])
+    await expect(input).toHaveValue('')
+  }
+})
+
 test('opens reply, reply-all, and forward drafts from the reader and reuses the reply draft', async ({
   page
 }, testInfo) => {

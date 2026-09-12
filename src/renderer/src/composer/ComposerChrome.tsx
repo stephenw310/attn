@@ -129,7 +129,14 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
       <button
         type="button"
         className="min-w-0 flex-1 truncate text-left hover:text-ink"
-        onClick={() => setEditingRecipients(!editingRecipients)}
+        onClick={() => {
+          if (editingRecipients) {
+            const fields = [props.toFieldRef, props.ccFieldRef, props.bccFieldRef]
+            const committed = fields.map((field) => field.current?.commitPending() ?? true)
+            if (committed.some((valid) => !valid)) return
+          }
+          setEditingRecipients(!editingRecipients)
+        }}
         aria-expanded={editingRecipients}
         data-testid="composer-recipient-summary"
       >
