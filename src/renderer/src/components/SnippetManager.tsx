@@ -8,7 +8,7 @@ import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin'
 import { ListPlugin } from '@lexical/react/LexicalListPlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import { $createParagraphNode, $getRoot, type LexicalEditor } from 'lexical'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { errorMessage } from '../../../shared/error'
 import { normalizeSnippetTrigger, type Snippet } from '../../../shared/snippets'
 import { editorConfig } from '../composer/editorConfig'
@@ -183,20 +183,21 @@ export function SnippetManager(): React.JSX.Element {
     [onToast]
   )
 
-  const visibleSnippets = (snippets ?? [])
-    .map((snippet) => ({
-      ...snippet,
-      preview:
-        new DOMParser()
-          .parseFromString(prepareHtmlForEditor(snippet.bodyHtml).html, 'text/html')
-          .body.textContent?.replace(/\s+/g, ' ')
-          .trim() ?? ''
-    }))
-    .filter((snippet) =>
-      `${snippet.name} ${snippet.trigger ?? ''} ${snippet.preview}`
-        .toLowerCase()
-        .includes(query.toLowerCase())
-    )
+  const snippetPreviews = useMemo(
+    () =>
+      (snippets ?? []).map((snippet) => ({
+        ...snippet,
+        preview:
+          new DOMParser()
+            .parseFromString(prepareHtmlForEditor(snippet.bodyHtml).html, 'text/html')
+            .body.textContent?.replace(/\s+/g, ' ')
+            .trim() ?? ''
+      })),
+    [snippets]
+  )
+  const visibleSnippets = snippetPreviews.filter((snippet) =>
+    `${snippet.name} ${snippet.trigger ?? ''} ${snippet.preview}`.toLowerCase().includes(query.toLowerCase())
+  )
 
   return (
     <div className="flex flex-col gap-2">

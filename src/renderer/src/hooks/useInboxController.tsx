@@ -421,6 +421,7 @@ export function useInboxController({
         showToast('Save and close the draft before opening Settings')
         return
       }
+      setSplitRulesOpen(false)
       settingsOpenRef.current = true
       setSettingsFocus(control)
       setSettingsOpen(true)

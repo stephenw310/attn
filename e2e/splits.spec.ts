@@ -273,6 +273,17 @@ test('changes Gmail importance without presenting splits as move destinations', 
   await expect(boardMemo).toBeVisible()
 })
 
+test('opening Settings from split rules closes the manager', async ({ page }) => {
+  await openSplitRules(page)
+  await page.getByTestId('account-menu').getByRole('button').first().click()
+  await page.getByTestId('account-settings').click()
+  await expect(page.getByTestId('split-rules')).toHaveCount(0)
+  await expect(page.getByTestId('settings-view')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-view')).toHaveCount(0)
+  await expect(page.getByTestId('split-strip')).toBeVisible()
+})
+
 test('manager selects the first rule, keeps account controls, and closes with one Escape', async ({
   page
 }) => {

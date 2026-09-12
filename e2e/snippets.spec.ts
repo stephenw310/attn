@@ -52,6 +52,30 @@ async function waitForSnippetsLoaded(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId('snippet-picker')).toHaveCount(0)
 }
 
+test('snippet search reuses previews while typing', async ({ page }) => {
+  await createSnippet(page, { name: 'Welcome', body: 'A searchable greeting.' })
+  await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-snippets').click()
+  await expect(snippetRow(page, 'Welcome')).toBeVisible()
+
+  await page.evaluate(() => {
+    const original = DOMParser.prototype.parseFromString
+    DOMParser.prototype.parseFromString = (() => {
+      throw new Error('Snippet search must not parse HTML again')
+    }) as typeof original
+  })
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  const search = page.getByTestId('settings-snippet-search')
+  await search.pressSequentially('greeting')
+  await expect(snippetRow(page, 'Welcome')).toBeVisible()
+  await search.fill('missing')
+  await expect(page.getByTestId('settings-snippet-row')).toHaveCount(0)
+  await search.fill('')
+  await expect(snippetRow(page, 'Welcome')).toBeVisible()
+  expect(errors).toEqual([])
+})
+
 test('Escape inside the snippet body cancels nothing and keeps Settings open (B9)', async ({ page }) => {
   // The window-level Settings Escape listener once fired for any Escape,
   // including one aimed at a Lexical field, unmounting Settings and taking the
