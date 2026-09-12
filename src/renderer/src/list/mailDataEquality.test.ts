@@ -24,6 +24,7 @@ describe('mail data identity reuse', () => {
     const equivalent = [row({ labelIds: ['INBOX'] })]
 
     expect(reuseThreadRows(current, equivalent)).toBe(current)
+    expect(reuseThreadRows(current, [row({ followUpDueAt: 123000 })])).not.toBe(current)
     expect(reuseThreadRows(current, [row({ unread: true })])).not.toBe(current)
   })
 
@@ -45,6 +46,8 @@ describe('mail data identity reuse', () => {
   })
 
   it('includes snooze deadlines and labels in the equality check', () => {
+    const current = [row({ snoozed: true, snoozeDueAt: 10 })]
+    expect(reuseThreadRows(current, [row({ snoozed: true, snoozeDueAt: 11 })])).not.toBe(current)
     const currentSnoozed: SnoozedThreadRow[] = [{ ...row(), dueAt: 10 }]
     expect(reuseSnoozedRows(currentSnoozed, [{ ...row(), dueAt: 10 }])).toBe(currentSnoozed)
     expect(reuseSnoozedRows(currentSnoozed, [{ ...row(), dueAt: 11 }])).not.toBe(currentSnoozed)

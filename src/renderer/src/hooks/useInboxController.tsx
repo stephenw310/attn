@@ -4,6 +4,7 @@ import type { UpdateState } from '../../../shared/distribution'
 import type { Draft } from '../../../shared/drafts'
 import type { MailLabel, ThreadListView } from '../../../shared/mail'
 import { readAccountView } from '../accountViewMemory'
+import { getCommandRegistrySnapshot } from '../commands'
 import type { MessageReplyTarget } from '../components/ConversationView'
 import type { SettingsControl } from '../components/SettingsView'
 import type { ComposerHandle } from '../composer/Composer'
@@ -847,7 +848,16 @@ export function useInboxController({
     clearOutboxFailure()
   }, [clearOutboxFailure, outboxFailure, showToast])
 
+  const undoFromToast = useCallback(() => {
+    if (composerOpenRef.current || composerOpeningRef.current || accountSwitchPendingRef.current) return
+    getCommandRegistrySnapshot()
+      .find((command) => command.id === 'triage.undo')
+      ?.run()
+  }, [accountSwitchPendingRef])
+
   return {
+    openSnooze,
+    undoFromToast,
     status,
     onReorderAccounts,
     view,
@@ -921,6 +931,9 @@ export function useInboxController({
     closeReader,
     snoozeSelected,
     unsnoozeSelected,
+    cancelFollowUpSelected: () => {
+      if (selected) triage({ kind: 'cancelFollowUp', threadIds: [selected.id] })
+    },
     toggleLabel,
     switchView,
     switchSplit,

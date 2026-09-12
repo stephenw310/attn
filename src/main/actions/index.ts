@@ -583,6 +583,33 @@ export function performTriage(
   action: TriageAction,
   recordUndo = true
 ): TriageResult {
+  if (action.kind === 'cancelFollowUp') {
+    const undo: FollowUpRestoreAction[] = []
+    db.transaction(() => {
+      for (const threadId of new Set(action.threadIds)) {
+        const before = followUpReminderSnapshot(db, accountId, threadId)
+        if (before?.state !== 'pending') continue
+        db.prepare(`UPDATE reminders SET state = 'canceled'
+          WHERE account_id = ? AND thread_id = ? AND kind = 'follow_up' AND state = 'pending'`).run(
+          accountId,
+          threadId
+        )
+        undo.push({
+          kind: 'followUpRestore',
+          threadIds: [threadId],
+          before,
+          after: { ...before, state: 'canceled' }
+        })
+      }
+    })()
+    const label = 'Follow-up canceled'
+    if (recordUndo && undo.length) {
+      const stack = undoStackFor(accountId)
+      stack.push({ kind: 'triage', label, labelFor: () => label, undo, refs: [] })
+      if (stack.length > 50) stack.shift()
+    }
+    return { label: undo.length ? label : 'No pending follow-up' }
+  }
   if (action.kind === 'move') validateMoveLabels(db, accountId, action)
   const { undo, refs, changed } = apply(db, accountId, action)
   const label = actionLabel(action, changed)
@@ -682,6 +709,7 @@ export function isTriageAction(value: unknown): value is TriageAction {
     case 'spam':
     case 'restoreInbox':
     case 'unsnooze':
+    case 'cancelFollowUp':
       return true
     case 'star':
     case 'markUnread':
@@ -747,6 +775,8 @@ function recoveryReminderForAction(
 
 function noticeKindForAction(action: TriageAction): RevertedActionKind {
   switch (action.kind) {
+    case 'cancelFollowUp':
+      throw new Error('Follow-up cancellation is local only')
     case 'restoreInbox':
     case 'unsnooze':
     case 'archive':

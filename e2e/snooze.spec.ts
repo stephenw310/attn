@@ -1,5 +1,8 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { runPaletteCommand } from './nav'
 import { expireReminders } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
@@ -45,6 +48,9 @@ test('snoozes from the picker, navigates to Snoozed, and undoes', async ({ page 
   await expect(page.getByTestId('thread-date-group')).toHaveCount(0)
   await expect(rows.first()).toContainText('Maya Lin')
   await expect(rows.first().getByTestId('chip-snooze-due')).toBeVisible()
+  await expect(rows.first().getByTestId('chip-snooze-due').locator('svg')).toBeVisible()
+  await expect(page.getByTestId('footer-shortcut-snooze')).toContainText('Change snooze')
+  await expect(page.getByTestId('footer-shortcut-go-to')).toContainText('Go to')
 
   await page.keyboard.press('Shift+G')
   await page.keyboard.press('i')
@@ -217,4 +223,57 @@ test('catches up a snooze that became due while the app was closed', async ({ ap
   const returned = page.getByTestId('thread-row').filter({ hasText: 'Maya Lin' })
   await expect(returned).toHaveCount(1)
   await expect(returned.getByTestId('chip-returned')).toBeVisible()
+})
+
+for (const appearance of ['Light', 'Dark']) {
+  test(`shows the snooze deadline in readers outside Snoozed in ${appearance}`, async ({ page }) => {
+    await runPaletteCommand(page, `Use ${appearance} theme`)
+    await expect(page.getByTestId('thread-row')).toHaveCount(8)
+    await page.keyboard.press('h')
+    await page.getByTestId('snooze-preset-tomorrow').click()
+    await expect(page.getByTestId('thread-row')).toHaveCount(7)
+    await runPaletteCommand(page, 'Go to All Mail')
+    const snoozedRow = page
+      .getByTestId('thread-row')
+      .filter({ has: page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }) })
+    const deadline = await snoozedRow.getByTestId('chip-snooze-due').innerText()
+    expect(deadline).not.toBe('')
+    await snoozedRow.click()
+    const marker = page.getByTestId('conversation-snooze')
+    await expect(marker).toHaveText(deadline)
+    await expect(page.getByTestId('conversation-snooze-banner')).toContainText(`Snoozed until ${deadline}.`)
+    const dir = join(__dirname, '.artifacts')
+    mkdirSync(dir, { recursive: true })
+    await page.mouse.move(0, 0)
+    await page.screenshot({ path: join(dir, `reader-snoozed-${appearance.toLowerCase()}.png`) })
+    await page.getByRole('button', { name: 'Change snooze H', exact: true }).click()
+    await expect(page.getByTestId('snooze-unsnooze')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await page.getByTestId('conversation-unsnooze').click()
+    await expect(marker).toHaveCount(0)
+  })
+}
+
+test('rejects past snooze deadlines at the service boundary', async ({ page }) => {
+  const error = await page.evaluate(async () => {
+    try {
+      await window.attn.mail.snooze(['t-roadmap'], Date.now() - 1000)
+      return ''
+    } catch (error) {
+      return String(error)
+    }
+  })
+  expect(error).toContain('Choose a future snooze time')
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+})
+
+test('rejects a preset that expires while the picker stays open', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.keyboard.press('h')
+  await expect(page.getByTestId('snooze-picker')).toBeVisible()
+  await page.clock.setFixedTime(new Date(Date.now() + 8 * 24 * 60 * 60 * 1000))
+  await page.getByTestId('snooze-preset-tomorrow').click()
+  await expect(page.getByTestId('snooze-resolved')).toContainText('This time has already passed')
+  await expect(page.getByTestId('snooze-picker')).toBeVisible()
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
 })

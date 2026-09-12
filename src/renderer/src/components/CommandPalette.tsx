@@ -19,6 +19,7 @@ import {
 import { wrappedIndex } from '../hooks/useHighlightedOption'
 import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
+import { PickerHeading, PickerLegend } from './PickerChrome'
 
 interface CommandPaletteProps {
   account: string | null
@@ -123,7 +124,13 @@ export function CommandPalette({
       if (event.key === 'Tab') {
         event.preventDefault()
         event.stopPropagation()
-        inputRef.current?.focus({ preventScroll: true })
+        const controls = paletteRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([tabindex="-1"]), input'
+        )
+        if (controls?.length) {
+          const current = Array.from(controls).indexOf(document.activeElement as HTMLElement)
+          controls[(current + (event.shiftKey ? -1 : 1) + controls.length) % controls.length]?.focus()
+        }
         return
       }
       const target = event.target instanceof Node ? event.target : null
@@ -215,10 +222,11 @@ export function CommandPalette({
         aria-label="Command palette"
         data-testid="command-palette"
         data-usage-loaded={usageLoaded ? 'true' : 'false'}
-        className="fixed top-[15vh] left-1/2 z-[90] flex max-h-[70vh] w-[min(640px,92vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-[12vh] left-1/2 z-[90] flex max-h-[80vh] w-[min(540px,92vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
         onKeyDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b border-edge px-4 py-3">
+        <PickerHeading title="Command palette" onClose={closePalette} />
+        <div className="mx-6 flex items-center gap-3 border-b border-edge py-3 mb-2">
           <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-ink-faint">
             <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
             <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
@@ -254,7 +262,6 @@ export function CommandPalette({
               }
             }}
           />
-          <Kbd>Esc</Kbd>
         </div>
         <div
           ref={resultsRef}
@@ -262,7 +269,7 @@ export function CommandPalette({
           role="listbox"
           data-testid="command-palette-results"
           data-palette-query={query}
-          className="min-h-0 overflow-y-auto p-2"
+          className="min-h-0 overflow-y-auto px-2.5 pb-3"
         >
           {results.length === 0 ? (
             <p data-testid="command-palette-empty" className="px-3 py-8 text-center text-sm text-ink-faint">
@@ -280,7 +287,7 @@ export function CommandPalette({
                 data-testid="command-palette-result"
                 data-command-id={result.command.id}
                 data-active={index === activeIndex || undefined}
-                className={`flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${
+                className={`flex w-full cursor-pointer items-center gap-3 rounded-md px-3 py-3 text-left text-[13px] ${
                   index === activeIndex
                     ? 'bg-active text-ink'
                     : 'text-ink-dim hover:bg-active/60 hover:text-ink'
@@ -295,6 +302,7 @@ export function CommandPalette({
             ))
           )}
         </div>
+        <PickerLegend />
       </section>
     </>
   )

@@ -402,6 +402,7 @@ export const COMMAND_SPECS = {
     }
   },
   'triage.notDone': { title: 'Mark not done', shortcut: 'Shift+E', context: 'mail' },
+  'triage.cancelFollowUp': { title: 'Cancel follow-up', context: 'mail' },
   'triage.snooze': {
     title: 'Snooze / remind me later',
     shortcut: 'h',
@@ -514,6 +515,15 @@ export function createCommand(
   > = {}
 ): Command {
   return { id, ...COMMAND_SPECS[id], ...overrides, run }
+}
+
+/** All defined shortcuts, including views that are not currently mounted. */
+export function shortcutReferenceCommands(registered: readonly Command[]): Command[] {
+  const reference = new Map<string, Command>(
+    (Object.keys(COMMAND_SPECS) as StaticCommandId[]).map((id) => [id, createCommand(id, () => {})])
+  )
+  for (const command of registered) reference.set(command.id, command)
+  return [...reference.values()].filter((command) => command.shortcut)
 }
 
 export function createDynamicSplitCommand(splitId: string, title: string, run: () => void): Command {

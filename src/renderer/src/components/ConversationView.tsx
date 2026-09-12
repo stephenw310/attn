@@ -18,6 +18,10 @@ export interface MessageReplyTarget {
 }
 
 interface ConversationMessagesProps {
+  selected: DisplayThread
+  onChangeSnooze?: () => void
+  onUnsnooze?: () => void
+  onCancelFollowUp?: () => void
   conversation: DisplayConversation
   labels: readonly MailLabel[]
   labelIds: readonly string[]
@@ -42,6 +46,7 @@ function newestReadableIndex(messages: readonly DisplayConversation['messages'][
 function ConversationMessages(props: ConversationMessagesProps): React.JSX.Element {
   const {
     conversation,
+    selected,
     labels,
     labelIds,
     onOpenLabel,
@@ -353,6 +358,18 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         </span>
         <span aria-hidden>·</span>
         <span className="max-w-64 min-w-0 truncate">{participants}</span>
+        {selected.snoozed && (
+          <span data-testid="conversation-snooze" className="inline-flex items-center gap-1.5 text-accent">
+            <MailIcon name="snoozed" />
+            {selected.dueLabel ?? 'Snoozed'}
+          </span>
+        )}
+        {(selected.followUpReturned || selected.followUpDueLabel) && (
+          <span data-testid="conversation-follow-up" className="inline-flex items-center gap-1.5 text-accent">
+            ↩ Follow up{!selected.followUpReturned && ` ${selected.followUpDueLabel}`}
+          </span>
+        )}
+        {selected.returned && !selected.followUpReturned && <span className="text-accent">↩ Returned</span>}
         {labels
           .filter((label) => labelIds.includes(label.id))
           .map((label) => (
@@ -372,6 +389,51 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
           </Button>
         )}
       </div>
+      {selected.snoozed && (
+        <div
+          data-testid="conversation-snooze-banner"
+          className="mb-5 flex flex-wrap items-center gap-3 rounded-[5px] bg-active px-3.5 py-3 text-xs text-ink-dim"
+        >
+          <span className="min-w-0 flex-1">
+            Snoozed{selected.dueLabel ? ` until ${selected.dueLabel}` : ''}.
+          </span>
+          <button
+            type="button"
+            onClick={props.onChangeSnooze}
+            className="cursor-pointer rounded px-2 py-1 hover:text-ink"
+          >
+            Change snooze <Kbd>H</Kbd>
+          </button>
+          <button
+            type="button"
+            data-testid="conversation-unsnooze"
+            onClick={props.onUnsnooze}
+            className="cursor-pointer rounded px-2 py-1 hover:text-ink"
+          >
+            Return to Inbox now
+          </button>
+        </div>
+      )}
+      {(selected.followUpReturned || selected.followUpDueLabel) && (
+        <div
+          data-testid="conversation-follow-up-banner"
+          className="mb-5 rounded-[5px] bg-active px-3.5 py-3 text-xs text-ink-dim"
+        >
+          {selected.followUpReturned
+            ? 'No reply yet. This conversation returned for follow-up.'
+            : `Follow up ${selected.followUpDueLabel} if no one replies.`}
+          {!selected.followUpReturned && (
+            <button
+              type="button"
+              data-testid="conversation-cancel-follow-up"
+              className="ml-4 cursor-pointer rounded px-2 py-1 hover:text-ink"
+              onClick={props.onCancelFollowUp}
+            >
+              Cancel follow-up
+            </button>
+          )}
+        </div>
+      )}
       {items}
     </>
   )
@@ -379,6 +441,9 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
 
 interface ConversationViewProps {
   selected: DisplayThread
+  onChangeSnooze?: () => void
+  onUnsnooze?: () => void
+  onCancelFollowUp?: () => void
   selectedIndex: number
   threadCount: number
   threadCountExact: boolean
@@ -560,6 +625,10 @@ export const ConversationView = memo(function ConversationView(
                   bodyHydrationFailed: false
                 }
               }
+              selected={selected}
+              onChangeSnooze={props.onChangeSnooze}
+              onUnsnooze={props.onUnsnooze}
+              onCancelFollowUp={props.onCancelFollowUp}
               labels={props.labels}
               labelIds={selected.labelIds}
               onOpenLabel={props.onOpenLabel}

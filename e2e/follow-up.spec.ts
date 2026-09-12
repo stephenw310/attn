@@ -1,9 +1,10 @@
+import { mkdirSync } from 'node:fs'
 import type { Page } from '@playwright/test'
 import type { GmailThread } from '../src/main/gmail/parse'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { ComposerPage } from './composer'
 import { expect, test } from './electron'
-import { threadRow } from './nav'
+import { runPaletteCommand, threadRow } from './nav'
 import { armSending, emitSeam, expireReminders } from './seams'
 
 // T35 (F9): follow-up reminders end to end — the composer deadline, the
@@ -48,6 +49,13 @@ async function expectReminderListed(page: Page): Promise<void> {
     threadRow(page, 'Design notes').getByTestId('chip-follow-up-due'),
     'the pending follow-up lists in the Reminders view'
   ).toBeVisible()
+  await threadRow(page, 'Design notes').click()
+  await expect(page.getByTestId('conversation-follow-up')).toContainText('Follow up')
+  await expect(page.getByTestId('conversation-follow-up-banner')).toContainText('if no one replies')
+  await expect(page.getByTestId('conversation-snooze-banner')).toHaveCount(0)
+  mkdirSync('e2e/.artifacts', { recursive: true })
+  await page.screenshot({ path: 'e2e/.artifacts/reader-follow-up-pending.png' })
+  await page.keyboard.press('Escape')
   await page.keyboard.press('g')
   await page.keyboard.press('i')
 }
@@ -92,6 +100,11 @@ test('a due follow-up resurfaces above normal mail with its chip, and archive co
   // Opening it does not clear the chip — reading is not answering.
   await returned.click()
   await expect(page.getByTestId('conversation-subject')).toHaveText('Design notes')
+  await expect(page.getByTestId('conversation-follow-up-banner')).toHaveText(
+    'No reply yet. This conversation returned for follow-up.'
+  )
+  mkdirSync('e2e/.artifacts', { recursive: true })
+  await page.screenshot({ path: 'e2e/.artifacts/reader-follow-up-returned.png' })
   await page.keyboard.press('Escape')
   await expect(threadRow(page, 'Design notes').getByTestId('chip-follow-up')).toBeVisible()
 
@@ -239,4 +252,18 @@ test('coexisting snooze and follow-up produce one stable return across relaunch'
   await relaunched.keyboard.press('g')
   await relaunched.keyboard.press('i')
   await expect(returned.getByTestId('chip-follow-up')).toBeVisible()
+})
+
+test('cancels a follow-up from the reader and palette, with undo', async ({ app, page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await armSending(app)
+  await sendReplyWithFollowUp(page, 'in 2 hours')
+  await expectReminderListed(page)
+  await threadRow(page, 'Design notes').click()
+  await page.getByTestId('conversation-cancel-follow-up').click()
+  await expect(page.getByTestId('conversation-follow-up-banner')).toHaveCount(0)
+  await page.keyboard.press('z')
+  await expect(page.getByTestId('conversation-cancel-follow-up')).toBeVisible()
+  await runPaletteCommand(page, 'Cancel follow-up')
+  await expect(page.getByTestId('conversation-follow-up-banner')).toHaveCount(0)
 })

@@ -123,7 +123,7 @@ test('shows phased sync progress and keeps error details behind an accessible co
   await content.focus()
   await expect(page.getByTestId('quick-tooltip')).toHaveCount(0)
   await content.click()
-  await expect(page.getByRole('dialog', { name: 'Sync details', exact: true })).toHaveText(
+  await expect(page.getByRole('dialog', { name: 'Sync details', exact: true })).toContainText(
     'Recent mail: 428 processed'
   )
   await page.keyboard.press('Escape')

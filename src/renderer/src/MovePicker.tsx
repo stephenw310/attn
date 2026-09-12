@@ -3,6 +3,7 @@ import type { MailLabel } from '../../shared/mail'
 import { type MoveDestination, moveLabelDelta } from '../../shared/move'
 import { PickerDialog } from './components/PickerDialog'
 import { useHighlightedOption } from './hooks/useHighlightedOption'
+import { labelColor } from './list/labelColor'
 
 export interface MoveTarget {
   id: string
@@ -152,10 +153,10 @@ export function MovePicker({
     <PickerDialog
       testId="move-picker"
       ariaLabel="Move or mark conversations"
+      title={targets.length > 1 ? `Move ${targets.length} conversations` : 'Move conversation'}
       searchTestId="move-search"
       searchPlaceholder="Search…"
       optionsTestId="move-options"
-      footer="↑↓ navigate · Enter choose · Esc close"
       query={query}
       onQuery={setQuery}
       highlight={highlight}
@@ -169,12 +170,12 @@ export function MovePicker({
             {startsGroup && (
               <div
                 data-testid={`move-section-${option.group}`}
-                className={`px-3 pb-1 text-[10px] font-semibold tracking-[0.14em] text-ink-faint uppercase ${
-                  index === 0 ? 'pt-1' : 'mt-1 border-t border-edge pt-2.5'
+                className={`px-3 pb-1 text-xs font-medium text-ink-dim ${
+                  index === 0 ? 'pt-1' : 'mt-1 border-t border-dialog-edge pt-2.5'
                 }`}
               >
                 {option.group === 'destinations'
-                  ? 'Move to'
+                  ? 'Destinations'
                   : option.group === 'importance'
                     ? 'Importance'
                     : 'Labels'}
@@ -190,7 +191,7 @@ export function MovePicker({
               disabled={option.disabled}
               onMouseEnter={() => highlight.setIndex(index)}
               onClick={() => onMove(option.destination)}
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`flex w-full items-center gap-3 rounded-md px-3 py-3 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-40 ${
                 index === highlight.index ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/60'
               }`}
             >
@@ -200,7 +201,14 @@ export function MovePicker({
                 }`}
                 aria-hidden
               >
-                {option.icon}
+                {option.labelId ? (
+                  <span
+                    className="size-2 rounded-full"
+                    style={{ backgroundColor: labelColor(option.labelId).color }}
+                  />
+                ) : (
+                  option.icon
+                )}
               </span>
               <span className="min-w-0 flex-1 overflow-hidden text-ellipsis">{option.label}</span>
             </button>

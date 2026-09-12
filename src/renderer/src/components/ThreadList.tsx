@@ -54,6 +54,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
       )}
       {thread.dueAt !== undefined && (
         <span data-testid="chip-snooze-due" title={thread.dueLabel} className="app-thread-status">
+          <MailIcon name="snoozed" />
           {thread.dueLabel}
         </span>
       )}
@@ -64,7 +65,7 @@ function ThreadStatusChips({ thread }: { thread: DisplayThread }): React.JSX.Ele
           title={`Follow up if no reply — ${thread.followUpDueLabel}`}
           className="app-thread-status"
         >
-          {`Follow up ${thread.followUpDueLabel}`}
+          {`↩ Follow up ${thread.followUpDueLabel}`}
           {thread.followUpAwaiting === 'origin'
             ? ' · reply check pending'
             : thread.followUpAwaiting === 'snooze'

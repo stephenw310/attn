@@ -15,6 +15,8 @@ function sameThread(left: ThreadRow, right: ThreadRow): boolean {
     left.starred === right.starred &&
     left.hasAttachment === right.hasAttachment &&
     left.snoozed === right.snoozed &&
+    left.snoozeDueAt === right.snoozeDueAt &&
+    left.followUpDueAt === right.followUpDueAt &&
     left.returned === right.returned &&
     // A follow-up firing can change ONLY these fields; missing them here made
     // the refresh reuse the stale rows, hiding the chip and heading until a

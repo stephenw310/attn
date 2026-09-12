@@ -65,6 +65,8 @@ function ChordGuide({ prefix, context }: { prefix: string; context: FooterContex
 }
 
 interface MailFooterProps {
+  snoozed?: boolean
+  selectedSnoozed?: boolean
   onOpenShortcuts?: () => void
   context: FooterContext
   pendingChord: string | null
@@ -92,7 +94,33 @@ export function MailFooter(props: MailFooterProps): React.JSX.Element {
         {pendingChord ? (
           <ChordGuide prefix={pendingChord} context={context} />
         ) : (
-          hints.map((hint) => <FooterShortcut key={hint.id} {...hint} />)
+          <>
+            {hints
+              .filter(
+                (hint) =>
+                  !props.snoozed || context !== 'list' || !['undo', 'palette', 'move'].includes(hint.id)
+              )
+              .map((hint) => (
+                <FooterShortcut
+                  key={hint.id}
+                  {...hint}
+                  label={
+                    props.snoozed && context === 'list'
+                      ? ({
+                          snooze: props.selectedSnoozed ? 'Change snooze' : 'Snooze',
+                          compose: 'Write',
+                          done: 'Mark done',
+                          open: 'Open',
+                          navigate: 'Navigate'
+                        }[hint.id] ?? hint.label)
+                      : hint.label
+                  }
+                />
+              ))}
+            {props.snoozed && context === 'list' && (
+              <FooterShortcut id="go-to" shortcuts={['G']} label="Go to" />
+            )}
+          </>
         )}
       </div>
       {!pendingChord && (

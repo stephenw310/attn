@@ -107,6 +107,8 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
           </div>
           {!c.fullWindowComposerDraft && !c.footerCollapsed && !c.settingsOpen && !c.splitRulesOpen && (
             <MailFooter
+              snoozed={c.view === 'snoozed' && !c.searchOpen}
+              selectedSnoozed={c.selected?.snoozed}
               onOpenShortcuts={c.openCheatSheet}
               context={
                 c.inlineComposerDraft
@@ -262,6 +264,9 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
       {c.readerOpen && c.selected && (
         <ConversationView
           selected={c.selected}
+          onChangeSnooze={c.openSnooze}
+          onUnsnooze={c.unsnoozeSelected}
+          onCancelFollowUp={c.cancelFollowUpSelected}
           selectedIndex={c.conversationSelectedIndex}
           threadCount={c.conversationThreadCount}
           threadCountExact={c.conversationThreadCountExact}

@@ -1107,6 +1107,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.mailSnooze, (_event, input) => {
     if (!isSnoozeRequest(input)) throw new Error('invalid snooze request')
+    if (input.dueAt <= Date.now()) throw new Error('Choose a future snooze time')
     const result = snoozeThreads(context.db, requireAccount(context), input.threadIds, input.dueAt)
     context.activeSession()?.snoozeScheduler?.refresh()
     context.broadcastMailChanged()
