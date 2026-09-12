@@ -27,6 +27,7 @@ import { historyEvents, type NewMail } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
 import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE } from '../sync/tuning'
 import { SyncController } from '../syncController'
+import { type SchedulerTime, systemTime } from '../time'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
 import { candidatesFor } from './notificationQueries'
 import type {
@@ -170,15 +171,20 @@ export class ServiceRuntime {
     })
   }
 
-  static async create(input: ServiceInitialize, emit: ServiceEventSink): Promise<ServiceRuntime> {
-    const runtime = new ServiceRuntime(input, emit)
+  static async create(
+    input: ServiceInitialize,
+    emit: ServiceEventSink,
+    time: SchedulerTime = systemTime
+  ): Promise<ServiceRuntime> {
+    const runtime = new ServiceRuntime(input, emit, time)
     await runtime.start()
     return runtime
   }
 
   private constructor(
     private readonly input: ServiceInitialize,
-    private readonly emit: ServiceEventSink
+    private readonly emit: ServiceEventSink,
+    private readonly time: SchedulerTime
   ) {
     this.config = input.accounts.config
     this.focused = input.focused
@@ -220,6 +226,7 @@ export class ServiceRuntime {
       : null
 
     this.handlers = createServiceHandlers({
+      time: this.time,
       db: this.db,
       currentAccountId: () => this.activeAccountId,
       accountStatuses: () => this.accountStatuses(),
@@ -466,7 +473,8 @@ export class ServiceRuntime {
       this.db,
       () => (this.sessions.get(id) ? id : null),
       () => this.broadcastMailChanged(id),
-      () => void actionExecutor.trigger()
+      () => void actionExecutor.trigger(),
+      this.time
     )
     const syncController = new SyncController({
       db: this.db,

@@ -848,6 +848,11 @@ export function useInboxController({
     clearOutboxFailure()
   }, [clearOutboxFailure, outboxFailure, showToast])
 
+  const cancelFollowUpSelected = useCallback(() => {
+    const current = selectedRef.current
+    if (current) triage({ kind: 'cancelFollowUp', threadIds: [current.id] })
+  }, [triage])
+
   const undoFromToast = useCallback(() => {
     if (composerOpenRef.current || composerOpeningRef.current || accountSwitchPendingRef.current) return
     getCommandRegistrySnapshot()
@@ -931,9 +936,7 @@ export function useInboxController({
     closeReader,
     snoozeSelected,
     unsnoozeSelected,
-    cancelFollowUpSelected: () => {
-      if (selected) triage({ kind: 'cancelFollowUp', threadIds: [selected.id] })
-    },
+    cancelFollowUpSelected,
     toggleLabel,
     switchView,
     switchSplit,

@@ -114,6 +114,7 @@ import { inboxBackfillReady } from '../sync/inboxReady'
 import { applyLifetimeCapChange } from '../sync/lifetimeCap'
 import { OnDemandBodyHydrator } from '../sync/onDemandBodies'
 import { type ServerSearchProvider, searchAllGmail, serverSearchFailure } from '../sync/serverSearch'
+import type { SchedulerTime } from '../time'
 import type { ServiceSession } from './session'
 import type { TestHooks } from './testOperations'
 
@@ -132,6 +133,7 @@ type Handler<K extends InvokeChannel> = (
 type SnoozeRequest = InvokeChannels[typeof IPC_CHANNELS.mailSnooze]['args'][0]
 
 export interface ServiceHandlerContext {
+  time: SchedulerTime
   db: Db
   currentAccountId: () => string | null
   /** Per-account one-line health readouts for the account menu (F18). */
@@ -1107,7 +1109,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   })
   handle(IPC_CHANNELS.mailSnooze, (_event, input) => {
     if (!isSnoozeRequest(input)) throw new Error('invalid snooze request')
-    if (input.dueAt <= Date.now()) throw new Error('Choose a future snooze time')
+    if (input.dueAt <= context.time.now()) throw new Error('Choose a future snooze time')
     const result = snoozeThreads(context.db, requireAccount(context), input.threadIds, input.dueAt)
     context.activeSession()?.snoozeScheduler?.refresh()
     context.broadcastMailChanged()
