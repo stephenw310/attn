@@ -340,6 +340,7 @@ test('account removal blocks shortcuts and composer opens until the response set
   await expect(page.getByTestId('account-remove')).toHaveText('Sign out')
   await page.getByTestId('account-remove').click()
   await expect(page.getByTestId('remove-account-dialog')).toBeVisible()
+  await expect(page.getByTestId('remove-account-cancel')).toBeFocused()
   await page.keyboard.press('ControlOrMeta+2')
   await page.keyboard.press('c')
   await expect(page.getByTestId('account-menu')).toContainText(PRIMARY)

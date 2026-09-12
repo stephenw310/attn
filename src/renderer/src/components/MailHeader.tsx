@@ -9,7 +9,6 @@ import { Button } from './Button'
 import { blurActive } from './blurActive'
 import { Kbd } from './Kbd'
 import { MailIcon } from './MailIcon'
-import { PalettePicker } from './PalettePicker'
 
 const CHIP_CLASS = 'app-no-drag app-button max-w-56 truncate'
 
@@ -193,9 +192,6 @@ function AccountMenu({
             Add account…
           </button>
           <hr className="my-1.5 border-edge" />
-          <div className="px-2.5">
-            <PalettePicker />
-          </div>
           <label className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-[13px] text-ink-dim">
             <span>Appearance</span>
             <select
@@ -264,6 +260,7 @@ function AccountMenu({
 }
 
 interface MailHeaderProps {
+  preferencesOpen?: boolean
   syncStatus: React.ReactNode
   pendingActionCount: number
   pausedActionCount: number
@@ -290,6 +287,7 @@ interface MailHeaderProps {
 
 export function MailHeader(props: MailHeaderProps): React.JSX.Element {
   const {
+    preferencesOpen = false,
     pendingActionCount,
     pausedActionCount,
     outboxCount,
@@ -319,7 +317,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
       data-testid="mail-header"
       className="app-mail-header app-drag app-titlebar-safe-area flex flex-none items-center"
     >
-      {!composerOpen && (
+      {!composerOpen && !preferencesOpen && (
         <>
           <button
             type="button"
@@ -357,18 +355,20 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         </>
       )}
       {composerOpen && <span aria-hidden className="w-16 flex-none" />}
-      <Button
-        data-testid="write-button"
-        className="app-no-drag app-write"
-        onClick={onWrite}
-        disabled={writeDisabled}
-        data-tooltip="Write (C)"
-      >
-        <MailIcon name="write" />
-        Write
-      </Button>
+      {!preferencesOpen && (
+        <Button
+          data-testid="write-button"
+          className="app-no-drag app-write"
+          onClick={onWrite}
+          disabled={writeDisabled}
+          data-tooltip="Write (C)"
+        >
+          <MailIcon name="write" />
+          Write
+        </Button>
+      )}
       <div className="app-no-drag ml-auto flex items-center gap-4">
-        {!composerOpen && selectionCount > 0 && (
+        {!composerOpen && !preferencesOpen && selectionCount > 0 && (
           <span
             data-testid="selection-count"
             className="rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent tabular-nums"

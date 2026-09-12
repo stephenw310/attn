@@ -101,6 +101,7 @@ test.describe('background draft', () => {
       await page.keyboard.press('Escape')
       await expect(composer.root).toHaveCount(0)
       await page.keyboard.press('ControlOrMeta+,')
+      await page.getByTestId('settings-nav-background').click()
       await expect(page.getByTestId('settings-view')).toBeVisible()
       const icon = page.getByTestId('settings-menu-bar-icon')
       await expect(icon).not.toBeChecked()

@@ -22,6 +22,7 @@ async function createSnippet(page: Page, input: SnippetInput): Promise<void> {
   // rendering is the same readiness signal the settings suite keys on.
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-snippets').click()
   await expect(page.getByTestId('settings-view')).toBeVisible()
   await page.getByTestId('settings-snippet-new').click()
   await page.getByTestId('settings-snippet-name').fill(input.name)
@@ -57,6 +58,7 @@ test('Escape inside the snippet body cancels nothing and keeps Settings open (B9
   // in-progress edit with it.
   await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-snippets').click()
   await expect(page.getByTestId('settings-view')).toBeVisible()
   await page.getByTestId('settings-snippet-new').click()
   await page.getByTestId('settings-snippet-name').fill('Draft in progress')
@@ -89,7 +91,8 @@ test('the manager creates, edits, and deletes snippets, and the set survives rel
 
   // Rename through the editor; the row reflects the update in place.
   await page.keyboard.press('ControlOrMeta+,')
-  await snippetRow(page, 'Intr').getByTestId('settings-snippet-edit').click()
+  await page.getByTestId('settings-nav-snippets').click()
+  await snippetRow(page, 'Intr').click()
   await page.getByTestId('settings-snippet-name').fill('Intro')
   await page.getByTestId('settings-snippet-save').click()
   await expect(snippetRow(page, 'Intro')).toBeVisible()
@@ -109,12 +112,14 @@ test('the manager creates, edits, and deletes snippets, and the set survives rel
   await expect(page.getByTestId('settings-snippet-error')).toContainText('already uses that trigger')
   await page.getByTestId('settings-snippet-cancel').click()
 
-  await snippetRow(page, 'Temp').getByTestId('settings-snippet-delete').click()
+  await snippetRow(page, 'Temp').click()
+  await page.getByTestId('settings-snippet-delete').click()
   await expect(snippetRow(page, 'Temp')).toHaveCount(0)
 
   const { page: relaunched } = await boot.relaunch()
   await expect(relaunched.getByTestId('thread-row')).toHaveCount(8)
   await relaunched.keyboard.press('ControlOrMeta+,')
+  await relaunched.getByTestId('settings-nav-snippets').click()
   await expect(snippetRow(relaunched, 'Intro')).toBeVisible()
   await expect(snippetRow(relaunched, 'Temp')).toHaveCount(0)
   await relaunched.keyboard.press('Escape')

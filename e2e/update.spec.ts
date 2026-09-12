@@ -78,6 +78,7 @@ test('About shows the running version and build kind, and a ready update offers 
   expect(version).toMatch(/^\d+\.\d+\.\d+/)
 
   await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-about').click()
   const about = page.getByTestId('settings-view').getByTestId('settings-about')
   await expect(about).toBeVisible()
   await expect(about.getByTestId('settings-app-version')).toHaveText(`Attn v${version}`)
@@ -101,6 +102,7 @@ test('About shows the running version and build kind, and a ready update offers 
     lastCheck: { at: Date.now(), outcome: 'available', version: '9.9.11' }
   })
   await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-about').click()
   await expect(about.getByTestId('settings-update-status')).toContainText('Version 9.9.11 is downloaded')
   await about.evaluate((section) => section.scrollIntoView({ block: 'end' }))
   mkdirSync(artifactDirectory, { recursive: true })

@@ -30,6 +30,14 @@ export class AiKeyStore {
     return this.load() !== null
   }
 
+  /** Safe display identifier. Short keys remain completely masked. */
+  preview(): string | null {
+    const key = this.load()
+    if (!key) return null
+    if (key.length <= 12) return '••••••••'
+    return `${key.slice(0, 4)}••••••••${key.slice(-4)}`
+  }
+
   /** The stored key, or null when absent or unreadable (never a throw). */
   load(): string | null {
     const path = this.path()

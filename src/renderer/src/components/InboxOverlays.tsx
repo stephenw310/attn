@@ -45,6 +45,7 @@ export function InboxOverlays({ controller: c }: { controller: InboxController }
       )}
       {!c.composerDraft && c.splitRulesOpen && c.splits.state && (
         <SplitRuleManager
+          accountEmail={c.activeAccount ?? undefined}
           state={c.splits.state}
           onSave={c.splits.save}
           onNotify={c.splits.setNotify}

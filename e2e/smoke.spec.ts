@@ -64,9 +64,8 @@ test('prevents a file drop from navigating the sandboxed renderer', async ({ app
 
 test('shows onboarding without mounting the mail keyboard loop', async ({ page }, testInfo) => {
   await expect(page.getByTestId('login-screen')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Make space for what matters.' })).toBeVisible()
-  await expect(page.getByText('Your inbox, in focus')).toBeVisible()
-  await expect(page.getByTestId('login-google')).toContainText('Continue with Google')
+  await expect(page.getByRole('heading', { name: 'Your mail, at your pace.' })).toBeVisible()
+  await expect(page.getByTestId('login-google')).toContainText('Sign in with Google')
   await expect(page.getByTestId('login-google')).toBeDisabled()
   await expect(page.getByTestId('login-setup-message')).toContainText('Google OAuth client')
   await expect(page.getByTestId('thread-row')).toHaveCount(0)
