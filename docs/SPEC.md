@@ -83,6 +83,8 @@ A sync error shows an inline mailbox notice with Retry and Details. Details open
 
 The reader header stays compact without an action toolbar or separate message-actions dialog. It omits participant names and mailbox-position counters. Snooze timing appears in the actionable banner, not again below the subject. Conversations outside Inbox, Spam, Trash, Drafts, and pending reminders show Done and their All Mail location. Trashed-message and blocked-image notices use filled panels. Message details use an unbordered grid. Search rows place sender and subject together without date-group headings. Search timestamps include the year for mail outside the current calendar year; the search header and submission controls keep their existing positions.
 
+The signed-in window initially focuses the mail view without highlighting a toolbar button or showing its hint. Toolbar controls retain keyboard focus hints.
+
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
 
 ## 4. Feature specifications
