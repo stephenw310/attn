@@ -35,7 +35,7 @@ interface PreviewPlacement {
 
 function previewTextWidth(container: HTMLElement, text: string): number {
   const probe = document.createElement('span')
-  probe.className = 'pointer-events-none absolute invisible whitespace-pre text-[13px] leading-5'
+  probe.className = 'pointer-events-none absolute invisible whitespace-pre text-[13px] leading-6'
   probe.textContent = text
   container.append(probe)
   const width = probe.getBoundingClientRect().width
@@ -90,14 +90,20 @@ function previewPlacement(editor: LexicalEditor, text: string): PreviewPlacement
 export function AiAutocompletePlugin({
   subject,
   recipientName,
-  getThreadContext
+  getThreadContext,
+  onPreviewChange
 }: {
+  onPreviewChange?: (visible: boolean) => void
   subject: string
   recipientName: string | null
   getThreadContext?: () => AiThreadMessage[] | null
 }): React.JSX.Element | null {
   const [editor] = useLexicalComposerContext()
   const [preview, setPreview] = useState<PreviewPlacement | null>(null)
+  const previewVisible = preview !== null
+  useEffect(() => {
+    onPreviewChange?.(previewVisible)
+  }, [onPreviewChange, previewVisible])
   const typedRef = useRef(false)
   const subjectRef = useRef(subject)
   const recipientNameRef = useRef(recipientName)
@@ -271,7 +277,7 @@ export function AiAutocompletePlugin({
       <span
         data-testid="ai-autocomplete-preview"
         aria-hidden
-        className="pointer-events-none absolute z-10 whitespace-pre-wrap text-[13px] leading-5 text-ink-faint select-none"
+        className="pointer-events-none absolute z-10 whitespace-pre-wrap text-[13px] leading-6 text-ink-faint select-none"
         style={{ left: preview.left, top: preview.top, maxWidth: preview.maxWidth }}
       >
         {preview.text}

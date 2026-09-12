@@ -9,3 +9,6 @@ export const DEFAULT_TOAST_DURATION_MS = 4_000
 export const INBOX_ZERO_CLOCK_INTERVAL_MS = 30_000
 
 export const TOOLTIP_DELAY_MS = 120
+
+/** Reshow AI draft discovery after the user pauses editing. */
+export const AI_DRAFT_HINT_IDLE_MS = 1_200

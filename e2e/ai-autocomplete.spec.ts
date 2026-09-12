@@ -71,7 +71,12 @@ test('an AI-ready reply shows its shortcut tip, then completes the recipient nam
   await openDesignReply(page)
 
   const tip = page.getByTestId('composer-ai-tip')
-  await expect(tip).toContainText(/Tip: Hit (⌘|Ctrl)J for AI/)
+  await expect(tip).toContainText('Draft a reply with AI')
+  await expect(tip).toHaveCSS('pointer-events', 'none')
+  await page.getByTestId('composer-recipient-summary').click()
+  await expect(tip).toHaveCount(0)
+  await editor(page).locator('p').first().click()
+  await expect(tip).toContainText('Draft a reply with AI')
   await editor(page).click({ position: { x: 24, y: 24 } })
   await page.keyboard.type('Hi')
 
@@ -84,6 +89,12 @@ test('an AI-ready reply shows its shortcut tip, then completes the recipient nam
   await page.keyboard.press('ControlOrMeta+z')
   await expect(editor(page)).toContainText('Hi')
   await expect(editor(page)).not.toContainText('Theo')
+
+  await expect(tip).toContainText('Continue draft with AI')
+  const caretHint = await tip.boundingBox()
+  const bodyBox = await editor(page).boundingBox()
+  if (!caretHint || !bodyBox) throw new Error('AI hint or editor is not visible')
+  expect(caretHint.y).toBeLessThan(bodyBox.y + 60)
 
   // Accepting the local greeting must not poison later provider completion.
   // Rebuild the greeting after proving its one-step undo, then pause after a

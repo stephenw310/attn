@@ -395,7 +395,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
         <span className="app-thread-copy">
           <span className="app-thread-subject-line">
             <span data-testid="thread-subject" className="app-thread-subject">
-              {thread.subject}
+              {thread.subject.trim() || '(no subject)'}
             </span>
             <ThreadStatusChips thread={thread} />
           </span>

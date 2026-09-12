@@ -25,6 +25,7 @@ function fromContact(contact: ContactSearchResult): MailAddress | null {
 
 export interface RecipientFieldHandle {
   commitPending: (reportInvalid?: boolean) => boolean
+  hasRecipients: () => boolean
 }
 
 export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldProps>(function RecipientField(
@@ -77,23 +78,35 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
     [add, query]
   )
 
-  useImperativeHandle(ref, () => ({ commitPending: commit }), [commit])
+  useImperativeHandle(
+    ref,
+    () => ({
+      commitPending: commit,
+      hasRecipients: () => recipients.length > 0 || parseRecipientInput(query).recipients.length > 0
+    }),
+    [commit, recipients, query]
+  )
 
   return (
     <div
-      className="relative flex min-h-11 items-start px-4 after:pointer-events-none after:absolute after:inset-x-4 after:bottom-0 after:border-b after:border-edge focus-within:after:border-accent"
+      className="relative flex min-h-11 items-start px-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-edge focus-within:after:border-accent"
       data-testid={`composer-${field}`}
     >
-      <span className="w-14 shrink-0 pt-2.5 text-sm font-medium text-ink-faint">{label}</span>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-1.5">
+      <span className="w-12 shrink-0 pt-3 text-xs font-normal text-ink-dim">{label}</span>
+      <div
+        className={`flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-1.5 ${field === 'to' ? 'pr-16' : ''}`}
+      >
         {recipients.map((recipient) => (
           <span
             key={recipient.email}
-            className="inline-flex max-w-full items-center gap-1 rounded-md border border-edge bg-active px-2 py-1 text-xs text-ink"
+            className="inline-flex max-w-full items-center gap-1 rounded bg-active px-2 py-1 text-xs text-ink"
             data-email={recipient.email}
             data-testid="recipient-chip"
           >
             <span className="truncate">{recipient.name || recipient.email}</span>
+            {recipient.name && (
+              <span className="max-w-40 truncate text-[10px] text-ink-dim">&lt;{recipient.email}&gt;</span>
+            )}
             <button
               type="button"
               className="text-ink-faint hover:text-ink"
@@ -156,7 +169,7 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
       )}
 
       {suggestions.length > 0 && query.trim() && !invalid && (
-        <div className="absolute left-12 right-4 top-full z-10 mt-1 overflow-hidden rounded-lg border border-edge bg-raised shadow-2xl">
+        <div className="absolute left-12 right-0 top-full z-10 mt-1 overflow-hidden rounded-md border border-edge bg-raised shadow-menu">
           {suggestions.map((suggestion, index) => (
             <button
               key={suggestion.email}

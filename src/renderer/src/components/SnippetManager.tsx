@@ -167,14 +167,14 @@ export function SnippetManager(): React.JSX.Element {
       {(snippets ?? []).map((snippet) => (
         <div
           key={snippet.id}
-          className="flex items-center justify-between gap-4 rounded-md border border-edge px-3 py-2"
+          className="flex items-center justify-between gap-4 border-b border-edge px-1 py-3"
           data-testid="settings-snippet-row"
           data-snippet-name={snippet.name}
         >
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm text-ink">{snippet.name}</span>
             {snippet.trigger && (
-              <span className="shrink-0 rounded bg-active px-1.5 py-0.5 font-mono text-[11px] text-ink-dim">
+              <span className="shrink-0 rounded border border-edge px-1.5 py-0.5 text-[11px] text-ink-dim">
                 ;{snippet.trigger}
               </span>
             )}
@@ -211,7 +211,7 @@ export function SnippetManager(): React.JSX.Element {
       )}
       {editing ? (
         <div
-          className="flex flex-col gap-2 rounded-md border border-edge p-3"
+          className="flex flex-col gap-3 rounded-md border border-edge bg-ground p-4"
           data-testid="settings-snippet-editor"
         >
           <div className="grid grid-cols-[1fr_140px] gap-2">

@@ -383,8 +383,16 @@ selecting and expanding that message. If the source is no longer available, the 
 the conversation. Loading or refreshing the conversation never remounts the composer or loses unsaved edits.
 New incoming messages do not move the message cursor away from what the user is reading.
 Inline drafts align with the source message body and use horizontal boundaries without a surrounding card. A Reply draft or Forward draft heading, Not sent marker, and live save state identify unsent content. The message cursor is a short accent line beside the source avatar.
-New-message drafts have a rounded card with space above and below it. Recipient and Subject fields use inset bottom rules and persistent labels. From stays unruled. The action toolbar has no divider. Full-screen compose hides the sidebar and hint-bar toggles while keeping sync status visible.
+Full-screen compose hides the sidebar and hint-bar toggles while keeping sync status visible.
 The reminder control uses a bell icon. Its popup renders above the composer without clipping.
+Dedicated and inline composers share recipient chips, flat envelope rows, and a Send-first footer with Aa, attachment, and reminder controls. The dedicated composer has no enclosing card or shadow. Save state appears beside its footer actions; inline drafts keep it in their header. Attachment mutations show progress and retain a retryable error beside the attachment chips. Draft rows include body previews and saved timestamps. Outbox rows show send state, errors, and an explicit reopen action; reviewing an uncertain send never sends it automatically.
+
+Selecting editable body text shows a floating formatting toolbar. Aa and the Show formatting toolbar command expose the same controls without a text selection. Formatting retains the editor selection and undo history. The toolbar excludes collapsed signatures, the Attn footer, and opaque imported content, stays within the visible editor width, and closes independently with Escape. AI drafting shows a centered rounded Drafting reply... pill with a Stop button and Esc keycap, then a refine field. The reply invitation uses quiet inline text. Generation status uses a ground-colored floating pill with a subtle border and shadow at the bottom center of the editor. After 1.2 seconds without editing, a nonempty draft shows Continue draft with AI if no autocomplete suggestion, generation, or refinement is visible. The invitation is a non-clickable placeholder at the collapsed caret in authored text. Hide it when the editor loses focus or the user selects text. Mod+J invokes the existing AI draft command and preserves authored text. AI invitations, drafting status, and refine controls overlay the editor without changing its size or moving the sending controls. Snippet menus share the application menu styling.
+
+Recipient chips display names followed by email addresses in angle brackets. Empty subjects display as `(no subject)` in lists and readers, without modifying the stored subject. Sending a blank or whitespace-only subject requires a Send without subject confirmation for both the button and keyboard command. Keep editing and Escape cancel the send. Mod+Enter confirms Send without subject. Both actions display keycaps. Envelope errors and informational notices appear above the subject.
+
+Inline replies initially show a compact recipient summary. Clicking it exposes recipient editing; Cc/Bcc also exposes the copy fields. The inline envelope and footer have no internal dividers. Formatting opens with `Mod+Shift+F`; bulleted and numbered lists use `Mod+Shift+8` and `Mod+Shift+7`. Individual Bold hints do not appear in the composer footer.
+
 The inline composer's Save & close button and `Esc` save and close the draft, then restore focus to the reader at its source message. Back to the originating list is hidden while replying. A second `Esc` returns to that list. Attachment mutations, invalid recipients, and save errors still prevent closing. The inline close control shows the sole visible Escape keycap. Thread-bound drafts opened from Drafts
 return to this same inline context whenever the parent conversation is locally available. A full-window composer hides the global mail shortcut footer. An inline draft keeps that footer with composer hints, while its own action footer remains inside the draft.
 
@@ -635,9 +643,9 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 **Reply drafting:**
 
 - **Draft reply** (`Mod+J`, also a palette command): generates the whole reply body for the open thread, streamed into the composer as a fully editable draft. When the authored reply region already contains text, that text accompanies the request as an immutable prefix and the generated continuation appends after it. Available from the reader or a reply/reply-all composer; full-message generation for new mail and forwards is outside v1.
-- An empty inline reply or reply-all composer shows `Tip: Hit Mod+J for AI` only when AI writing is enabled
+- An empty inline reply or reply-all composer shows `Draft a reply with AI` with a `Mod+J` keycap only when AI writing is enabled
   and its configured provider has the required key. The hint is transient UI outside the saved draft and
-  disappears as soon as the authored body contains content. New-mail and forward composers do not advertise
+  hides while typing. After a pause, a continuation hint appears at the caret when no autocomplete is visible. New-mail and forward composers do not advertise
   the reply-only command.
   Generation, refinement, and undo affect the authored reply region above the signature. Preserve the
   Gmail signature and optional Attn footer, including user edits or removal (F6).

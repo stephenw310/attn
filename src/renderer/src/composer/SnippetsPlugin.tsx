@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { matchInlineSnippetTrigger, SNIPPET_CURSOR_MARKER, type Snippet } from '../../../shared/snippets'
 import { createCommand, createSnippetInsertCommand, registerCommands } from '../commands'
+import { Kbd } from '../components/Kbd'
 import { prepareHtmlForEditor } from './preserve'
 import { preserveBlankLineBlocks } from './rootNodes'
 
@@ -200,12 +201,18 @@ export function SnippetsPlugin({ onInserted }: SnippetsPluginProps): React.JSX.E
         }
       }}
     >
-      <div className="w-full max-w-md overflow-hidden rounded-lg border border-edge bg-raised shadow-2xl">
+      <div className="w-full max-w-md overflow-hidden rounded-md border border-edge bg-raised shadow-menu">
+        <div className="flex items-center justify-between px-4 pt-4 pb-2">
+          <h2 className="text-sm font-semibold text-ink">Insert snippet</h2>
+          <button type="button" className="app-button" onClick={closePicker}>
+            Close <Kbd>Esc</Kbd>
+          </button>
+        </div>
         <input
           className="h-9 w-full border-b border-edge bg-transparent px-3 text-sm text-ink outline-none placeholder:text-ink-faint"
           data-testid="snippet-picker-input"
           aria-label="Insert snippet"
-          placeholder="Insert snippet…"
+          placeholder="Search snippets…"
           // biome-ignore lint/a11y/noAutofocus: the picker is a keyboard-invoked transient; focusing its filter is the point
           autoFocus
           value={query}
@@ -219,12 +226,12 @@ export function SnippetsPlugin({ onInserted }: SnippetsPluginProps): React.JSX.E
             {snippets.length === 0 ? 'No snippets yet — create them in Settings' : 'No matching snippets'}
           </div>
         ) : (
-          <ul className="max-h-64 overflow-y-auto py-1">
+          <ul className="max-h-64 overflow-x-hidden overflow-y-auto p-1">
             {visible.map((snippet, index) => (
               <li key={snippet.id}>
                 <button
                   type="button"
-                  className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                  className={`flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-3 py-2 text-left text-xs ${
                     index === highlightedIndex ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active'
                   }`}
                   data-testid="snippet-picker-item"

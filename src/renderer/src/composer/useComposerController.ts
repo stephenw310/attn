@@ -111,6 +111,8 @@ export function useComposerController({
   )
   const notePendingRecipientChange = useCallback(() => updateFields({}), [updateFields])
   const noteAiContentSettled = useCallback(() => updateFields({}), [updateFields])
+  const recipientsRef = useRef({ to, cc, bcc })
+  recipientsRef.current = { to, cc, bcc }
   const subjectRef = useRef(subject)
   subjectRef.current = subject
   const handleSnippetInserted = useCallback(
@@ -128,6 +130,9 @@ export function useComposerController({
   )
   const {
     attaching,
+    attachmentError,
+    retryAttachment,
+    dismissAttachmentError,
     isMutating,
     addAttachment,
     pickAttachments,
@@ -180,6 +185,7 @@ export function useComposerController({
   )
   const runComposerKey = useCallback(
     (event: KeyboardEvent): boolean => {
+      if (event.target instanceof Element && event.target.closest('dialog[open]')) return false
       const command = matchComposerKey(event)
       if (command) {
         command.run()
@@ -195,33 +201,57 @@ export function useComposerController({
   )
   useImperativeHandle(ref, () => ({ exitConversation: closeAndExit }), [closeAndExit])
 
-  const send = useCallback(() => {
-    if (closing || !window.attn) return
-    setSendError(null)
-    if (isMutating()) {
-      setSendError('Wait for attachments to finish')
-      return
-    }
-    if (!commitPendingRecipients()) {
-      setSendError('Enter a valid recipient before sending')
-      return
-    }
-    setClosing(true)
-    void saveNow()
-      .then(() => window.attn.outbox.send(draft.id))
-      .then((result) => {
-        onClose()
-        onToast('Sent — Undo (Z)', { expiresAt: result.sendAt, countdown: true })
-      })
-      .catch((error: unknown) => {
-        setClosing(false)
-        setSendError(
-          errorMessage(error).includes('at least one recipient')
-            ? 'Add at least one recipient'
-            : 'Message could not be queued — your draft is still here'
-        )
-      })
-  }, [closing, commitPendingRecipients, draft.id, isMutating, onClose, onToast, saveNow])
+  const [confirmNoSubject, setConfirmNoSubject] = useState(false)
+  const queueSend = useCallback(
+    (allowEmptySubject: boolean) => {
+      if (closing || !window.attn) return
+      setSendError(null)
+      if (isMutating()) {
+        setSendError('Wait for attachments to finish')
+        return
+      }
+      if (!commitPendingRecipients()) {
+        setSendError('Enter a valid recipient before sending')
+        return
+      }
+      const fields = [toFieldRef, ccFieldRef, bccFieldRef]
+      const currentRecipients = [
+        recipientsRef.current.to,
+        recipientsRef.current.cc,
+        recipientsRef.current.bcc
+      ]
+      if (
+        !fields.some((field, index) => field.current?.hasRecipients() ?? currentRecipients[index].length > 0)
+      ) {
+        setSendError('Add at least one recipient')
+        return
+      }
+      if (!allowEmptySubject && !subjectRef.current.trim()) {
+        setConfirmNoSubject(true)
+        return
+      }
+      setConfirmNoSubject(false)
+      setClosing(true)
+      void saveNow()
+        .then(() => window.attn.outbox.send(draft.id))
+        .then((result) => {
+          onClose()
+          onToast('Sent — Undo (Z)', { expiresAt: result.sendAt, countdown: true })
+        })
+        .catch((error: unknown) => {
+          setClosing(false)
+          setSendError(
+            errorMessage(error).includes('at least one recipient')
+              ? 'Add at least one recipient'
+              : 'Message could not be queued — your draft is still here'
+          )
+        })
+    },
+    [closing, commitPendingRecipients, draft.id, isMutating, onClose, onToast, saveNow]
+  )
+  const send = useCallback(() => queueSend(false), [queueSend])
+  const sendWithoutSubject = useCallback(() => queueSend(true), [queueSend])
+  const cancelNoSubject = useCallback(() => setConfirmNoSubject(false), [])
   const discard = useCallback((): void => {
     if (closing || !window.attn) return
     if (isMutating()) {
@@ -290,6 +320,9 @@ export function useComposerController({
     noteAiContentSettled,
     handleSnippetInserted,
     attaching,
+    attachmentError,
+    retryAttachment,
+    dismissAttachmentError,
     addAttachment,
     pickAttachments,
     addDroppedFiles,
@@ -300,6 +333,9 @@ export function useComposerController({
     closeAndExit,
     runComposerKey,
     send,
+    confirmNoSubject,
+    sendWithoutSubject,
+    cancelNoSubject,
     discard
   }
 }
