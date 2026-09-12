@@ -14,6 +14,10 @@ export interface ThreadRow {
   hasAttachment: boolean
   /** The thread has a pending local snooze reminder, even when another view exposes it. */
   snoozed: boolean
+  /** Pending snooze deadline, including mail opened through labels or search. */
+  snoozeDueAt?: number | null
+  /** Pending follow-up deadline, also available in Sent and search. */
+  followUpDueAt?: number | null
   returned: boolean
   /** A follow-up reminder fired: Follow up chip + above-normal sort (T35/F9). */
   followUpReturned?: boolean
@@ -30,8 +34,6 @@ export interface ThreadRow {
 export interface SnoozedThreadRow extends ThreadRow {
   /** The earliest pending deadline of either kind — the view's sort key. */
   dueAt: number
-  snoozeDueAt?: number | null
-  followUpDueAt?: number | null
   /** Why a due follow-up has not fired: snooze return or origin check pending. */
   followUpAwaiting?: 'snooze' | 'origin' | null
 }

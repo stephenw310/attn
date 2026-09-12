@@ -588,6 +588,24 @@ test('validates recipients before queueing a send', async ({ page }) => {
   await composer.expectPending(0)
 })
 
+test('undo feedback cannot replace another open draft', async ({ page, app }) => {
+  await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 20), TEST_CHANNELS.setUndoSendDelay)
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.addRecipient('undo@example.com')
+  await composer.subject.fill('Queued message')
+  await composer.typeBody('Keep this queued while another draft is open.')
+  await composer.triggerSend()
+  await expect(page.getByTestId('toast-undo')).toBeVisible()
+  await composer.openNew()
+  await composer.subject.fill('Different draft')
+  await expect(page.getByTestId('toast-undo')).toHaveCount(0)
+  await expect(composer.subject).toHaveValue('Different draft')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('toast')).toHaveText('Draft saved')
+  await composer.expectPending(1)
+})
+
 test('queues durably and undo send reopens the intact composer', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
@@ -599,7 +617,7 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
 
   await expect(composer.root).toHaveCount(0)
   const toast = page.getByTestId('toast')
-  await expect(toast).toHaveText('Sent — Undo (Z)')
+  await expect(toast).toHaveText(/Sending in \d+ secondsUndo Z/)
   await expect(page.getByTestId('toast-countdown')).toBeVisible()
   const timing = await toast.evaluate((element) => {
     const durationMs = Number(element.getAttribute('data-toast-duration-ms'))
@@ -623,7 +641,7 @@ test('queues durably and undo send reopens the intact composer', async ({ page }
   expect(Math.abs(timing.countdownDurationMs - timing.durationMs)).toBeLessThan(50)
   expect(timing.countdownAnimation).toBe('toast-countdown')
   await composer.expectPending(1)
-  await page.keyboard.press('z')
+  await page.getByTestId('toast-undo').click()
 
   await expect(composer.root).toBeVisible()
   await composer.expectRecipients(['undo@example.com'])

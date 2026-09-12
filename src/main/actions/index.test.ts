@@ -631,6 +631,27 @@ describe('follow-up triage matrix (T35/F9)', () => {
     )?.state
   }
 
+  it('cancels only the selected account follow-up and undoes without changing snooze or mail', () => {
+    const db = followUpDb('pending', Date.now() + 100000)
+    db.prepare(`INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+      VALUES (?, 't-f', 'snooze', 9999999999999, 'pending')`).run(ACCOUNT)
+    db.prepare(`INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+      VALUES ('other', 't-f', 'follow_up', 9999999999999, 'pending')`).run()
+    performTriage(db, ACCOUNT, { kind: 'cancelFollowUp', threadIds: ['t-f'] })
+    expect(followUpState(db)).toBe('canceled')
+    expect(db.prepare(`SELECT state FROM reminders WHERE account_id = 'other'`).get()).toEqual({
+      state: 'pending'
+    })
+    expect(db.prepare(`SELECT state FROM reminders WHERE kind = 'snooze'`).get()).toEqual({
+      state: 'pending'
+    })
+    expect(pendingActionCount(db, ACCOUNT)).toBe(0)
+    expect(db.prepare('SELECT label_id FROM thread_labels').all()).toEqual([{ label_id: 'INBOX' }])
+    undoLast(db, ACCOUNT)
+    expect(followUpState(db)).toBe('pending')
+    db.close()
+  })
+
   it('archive completes a returned follow-up', () => {
     const db = followUpDb('returned', 1)
     performTriage(db, ACCOUNT, { kind: 'archive', threadIds: ['t-f'] }, false)

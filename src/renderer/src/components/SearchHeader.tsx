@@ -24,7 +24,10 @@ export function SearchHeader({
   const [queryFocused, setQueryFocused] = useState(false)
 
   return (
-    <div data-testid="mail-view-header" className="flex min-h-[76px] flex-none items-center gap-3">
+    <div
+      data-testid="mail-view-header"
+      className="flex min-h-[76px] flex-none items-center gap-3 border-b border-edge/50"
+    >
       <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 flex-none fill-none stroke-ink-faint">
         <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
         <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
@@ -53,7 +56,7 @@ export function SearchHeader({
             onSubmit()
           }
         }}
-        className="app-no-drag min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
+        className="app-no-drag min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-faint"
       />
       {pending && (
         <span data-testid="search-pending" role="status" className="text-xs text-ink-faint">

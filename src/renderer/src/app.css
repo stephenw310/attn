@@ -9,6 +9,7 @@
   --color-raised: var(--attn-raised);
   --color-active: var(--attn-active);
   --color-edge: var(--attn-edge);
+  --color-dialog-edge: var(--attn-dialog-edge);
   --color-ink: var(--attn-ink);
   --color-ink-dim: var(--attn-ink-dim);
   --color-ink-faint: var(--attn-ink-faint);
@@ -44,6 +45,7 @@
     --attn-raised: #303c35;
     --attn-active: #35483c;
     --attn-edge: #4d6255;
+    --attn-dialog-edge: #3b4b40;
     --attn-ink: #e4ece5;
     --attn-ink-dim: #b3c5b9;
     --attn-ink-faint: #b3c5b9;
@@ -91,6 +93,7 @@
     --attn-raised: #edf2eb;
     --attn-active: #e5ede3;
     --attn-edge: #b9c9ba;
+    --attn-dialog-edge: #dbe3da;
     --attn-ink: #2d3b34;
     --attn-ink-dim: #53695c;
     --attn-ink-faint: #53695c;
@@ -137,6 +140,7 @@
     --attn-raised: #313e47;
     --attn-active: #384b57;
     --attn-edge: #566c7b;
+    --attn-dialog-edge: #414b57;
     --attn-ink: #e6edf2;
     --attn-ink-dim: #b7c8d4;
     --attn-ink-faint: #b7c8d4;
@@ -149,6 +153,7 @@
     --attn-raised: #eaf0f4;
     --attn-active: #e1eaf0;
     --attn-edge: #b4c5d0;
+    --attn-dialog-edge: #dbe2e8;
     --attn-ink: #2c3a44;
     --attn-ink-dim: #526b7b;
     --attn-ink-faint: #526b7b;
@@ -161,6 +166,7 @@
     --attn-raised: #403a30;
     --attn-active: #4a4135;
     --attn-edge: #726450;
+    --attn-dialog-edge: #494238;
     --attn-ink: #f1eadf;
     --attn-ink-dim: #d0c3af;
     --attn-ink-faint: #d0c3af;
@@ -173,6 +179,7 @@
     --attn-raised: #f1ece2;
     --attn-active: #ece5d9;
     --attn-edge: #cfc1a9;
+    --attn-dialog-edge: #e2ddd1;
     --attn-ink: #403a30;
     --attn-ink-dim: #71624e;
     --attn-ink-faint: #71624e;
@@ -185,6 +192,7 @@
     --attn-raised: #403542;
     --attn-active: #4a3e4c;
     --attn-edge: #725d76;
+    --attn-dialog-edge: #4b404c;
     --attn-ink: #efe6f0;
     --attn-ink-dim: #cebdcf;
     --attn-ink-faint: #cebdcf;
@@ -197,6 +205,7 @@
     --attn-raised: #f0eaf1;
     --attn-active: #ebe3ed;
     --attn-edge: #ccbbce;
+    --attn-dialog-edge: #e4dce3;
     --attn-ink: #403543;
     --attn-ink-dim: #746078;
     --attn-ink-faint: #746078;

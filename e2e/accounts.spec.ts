@@ -685,7 +685,7 @@ test('an undo-send window survives a switch with its toast hidden and Z inert el
   await composer.typeBody('Body')
   await page.keyboard.press('ControlOrMeta+Enter')
   await expect(composer.root).toHaveCount(0)
-  await expect(page.getByTestId('toast')).toHaveText('Sent — Undo (Z)')
+  await expect(page.getByTestId('toast')).toHaveText(/Sending in \d+ secondsUndo Z/)
 
   // The toast belongs to the sending account's context: hidden after the
   // switch, while the durable deadline keeps counting (F18/F6).

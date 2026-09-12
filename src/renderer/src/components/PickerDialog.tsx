@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { HighlightedOption } from '../hooks/useHighlightedOption'
+import { PickerHeading, PickerLegend } from './PickerChrome'
 
 interface PickerDialogProps {
   testId: string
@@ -7,8 +8,9 @@ interface PickerDialogProps {
   searchTestId: string
   searchPlaceholder: string
   optionsTestId: string
-  /** The keystroke legend along the bottom edge. */
-  footer: string
+  /** Enter toggles labels but chooses a move destination. */
+  actionLabel?: 'Toggle' | 'Choose'
+  title?: string
   query: string
   onQuery: (query: string) => void
   highlight: HighlightedOption
@@ -29,7 +31,8 @@ export function PickerDialog({
   searchTestId,
   searchPlaceholder,
   optionsTestId,
-  footer,
+  actionLabel = 'Choose',
+  title,
   query,
   onQuery,
   highlight,
@@ -57,15 +60,35 @@ export function PickerDialog({
         role="dialog"
         aria-label={ariaLabel}
         aria-modal="true"
-        className="fixed top-[18vh] left-1/2 z-[70] flex w-[min(460px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-[12vh] left-1/2 z-[70] flex max-h-[80vh] w-[min(540px,92vw)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-dialog-edge bg-raised shadow-dialog"
         onKeyDownCapture={(event) => {
+          if (event.key === 'Tab') {
+            const controls = Array.from(
+              event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input')
+            )
+            const next =
+              controls[
+                (controls.indexOf(document.activeElement as HTMLElement) +
+                  (event.shiftKey ? -1 : 1) +
+                  controls.length) %
+                  controls.length
+              ]
+            event.preventDefault()
+            next?.focus()
+            return
+          }
           if (event.key !== 'Escape') return
           event.preventDefault()
           event.stopPropagation()
           onClose()
         }}
       >
-        <div className="border-b border-edge p-3">
+        <PickerHeading title={title ?? ariaLabel} onClose={onClose} />
+        <div className="mx-6 mb-2 flex items-center gap-3 border-b border-dialog-edge py-3">
+          <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 shrink-0 fill-none stroke-ink-dim">
+            <circle cx="10.5" cy="10.5" r="6.5" strokeWidth="1.8" />
+            <path d="m15.5 15.5 4 4" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
           <input
             ref={inputRef}
             data-testid={searchTestId}
@@ -88,13 +111,13 @@ export function PickerDialog({
               }
             }}
             placeholder={searchPlaceholder}
-            className="w-full rounded-lg border border-edge bg-ground px-3 py-2.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+            className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-dim"
           />
         </div>
-        <div data-testid={optionsTestId} className="max-h-[320px] overflow-y-auto p-1.5">
+        <div data-testid={optionsTestId} className="min-h-0 max-h-[360px] overflow-y-auto px-2.5 pb-3">
           {children}
         </div>
-        <div className="border-t border-edge px-4 py-2 text-xs text-ink-faint">{footer}</div>
+        <PickerLegend action={actionLabel} />
       </section>
     </>
   )

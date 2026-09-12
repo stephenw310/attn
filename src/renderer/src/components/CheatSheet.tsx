@@ -4,10 +4,12 @@ import {
   type Command,
   commandTitle,
   getCommandRegistrySnapshot,
+  shortcutReferenceCommands,
   subscribeCommandRegistry
 } from '../commands'
 import { formatShortcut } from '../platform'
 import { Kbd } from './Kbd'
+import { PickerHeading } from './PickerChrome'
 
 interface CheatSheetProps {
   open: boolean
@@ -86,7 +88,12 @@ export function CheatSheet({
       // a covered composer must not receive Mod+Enter (PR #101 review).
       // Default behavior stays, so scroll keys still move the focused sheet;
       // only Tab is fully spent, or focus would walk out of the dialog.
-      if (event.key === 'Tab') event.preventDefault()
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        const close = scrollRef.current?.parentElement?.querySelector<HTMLButtonElement>('button')
+        if (document.activeElement === close) scrollRef.current?.focus()
+        else close?.focus()
+      }
       event.stopPropagation()
     }
     window.addEventListener('keydown', onKeyDown, true)
@@ -110,7 +117,10 @@ export function CheatSheet({
     }
   }, [open])
 
-  const groups = useMemo(() => (open ? sheetGroups(registeredCommands) : []), [open, registeredCommands])
+  const groups = useMemo(
+    () => (open ? sheetGroups(shortcutReferenceCommands(registeredCommands)) : []),
+    [open, registeredCommands]
+  )
 
   if (!open) return null
 
@@ -124,30 +134,23 @@ export function CheatSheet({
         aria-modal="true"
         aria-label="Keyboard shortcuts"
         data-testid="cheat-sheet"
-        className="fixed top-1/2 left-1/2 z-[90] flex max-h-[84vh] w-[min(880px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="fixed top-1/2 left-1/2 z-[90] flex max-h-[94vh] w-[min(1180px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
       >
-        <div className="flex flex-none items-center gap-3 border-b border-edge px-5 py-3">
-          <h2 className="text-sm font-semibold text-ink">Keyboard shortcuts</h2>
-          <span className="ml-auto flex items-center gap-1.5 text-[11px] text-ink-faint">
-            <Kbd>Esc</Kbd> closes
-          </span>
-        </div>
-        <div ref={scrollRef} tabIndex={-1} className="min-h-0 overflow-y-auto px-5 py-4 outline-none">
+        <PickerHeading title="Keyboard shortcuts" onClose={onClose} />
+        <div ref={scrollRef} tabIndex={-1} className="min-h-0 overflow-y-auto px-6 pb-6 pt-2 outline-none">
           <div className="columns-1 gap-8 sm:columns-2 lg:columns-3">
             {groups.map((group) => (
               <div key={group.label} data-testid="cheat-sheet-group" className="mb-6 break-inside-avoid">
-                <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
-                  {group.label}
-                </h3>
-                <ul className="mt-2 flex flex-col gap-1">
+                <h3 className="text-xs font-medium text-ink-dim">{group.label}</h3>
+                <ul className="mt-2 flex flex-col gap-2">
                   {group.commands.map((command) => (
                     <li
                       key={command.id}
                       data-testid="cheat-sheet-command"
                       data-command-id={command.id}
-                      className="flex items-center justify-between gap-3 text-[13px] text-ink-dim"
+                      className="flex items-center justify-between gap-3 text-[11px] text-ink-dim"
                     >
-                      <span className="min-w-0 truncate">{commandTitle(command)}</span>
+                      <span className="min-w-0">{commandTitle(command)}</span>
                       {command.shortcut && <Kbd>{formatShortcut(command.shortcut)}</Kbd>}
                     </li>
                   ))}

@@ -41,6 +41,7 @@ export function parseSnoozeText(text: string, nowMs = Date.now()): number | null
 export function formatSnoozeDate(dueAt: number): string {
   return new Date(dueAt).toLocaleString(undefined, {
     weekday: 'short',
+    year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',

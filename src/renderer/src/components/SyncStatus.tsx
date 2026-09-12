@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SyncStage, SyncState } from '../../../shared/mail'
-import { blurActive } from './blurActive'
+import { Kbd } from './Kbd'
 
 function syncStageLabel(stage: SyncStage): string {
   if (stage === 'metadata') return 'Message list'
@@ -83,7 +83,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
 
   const closeDetails = useCallback(() => {
     setDetailsOpen(false)
-    blurActive()
+    wrapRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
   }, [])
 
   useEffect(() => {
@@ -209,9 +209,16 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
         <div
           role="dialog"
           aria-label="Sync details"
-          className="absolute right-0 top-full z-50 mt-2 w-72 rounded-[10px] border border-edge bg-raised p-3.5 text-xs text-ink-dim shadow-menu"
+          data-testid="status-details"
+          className="absolute right-0 top-full z-50 mt-2 w-[min(360px,90vw)] rounded-[10px] border border-edge bg-raised p-3.5 text-xs text-ink-dim shadow-menu"
         >
-          {title}
+          <div className="mb-3 flex items-center justify-between gap-4">
+            <h2 className="text-sm font-medium text-ink">Sync status</h2>
+            <button type="button" onClick={closeDetails} className="flex items-center gap-2 text-[11px]">
+              Close <Kbd>Esc</Kbd>
+            </button>
+          </div>
+          <p className="break-words leading-relaxed">{title}</p>
         </div>
       )}
       {detailsOpen && sync.phase === 'error' && (
@@ -220,9 +227,9 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
           data-testid="status-error-details"
           role="dialog"
           aria-label="Sync error details"
-          className="absolute right-0 top-full z-50 mt-2 w-[330px] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
+          className="absolute right-0 top-full z-50 mt-2 w-[min(360px,90vw)] rounded-[10px] border border-edge bg-raised p-3.5 text-left shadow-menu"
         >
-          <div className="flex items-center gap-2 text-xs font-bold text-ink">
+          <div className="flex items-center gap-2 text-sm font-medium text-ink">
             <span className="text-danger" aria-hidden>
               ●
             </span>
@@ -238,7 +245,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
             <button
               type="button"
               data-testid="status-retry"
-              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              className="cursor-pointer rounded-md px-2.5 py-1.5 text-xs text-ink-dim hover:bg-active hover:text-ink"
               onClick={() => {
                 setDetailsOpen(false)
                 onRetry()
@@ -249,7 +256,7 @@ export function SyncStatus(props: SyncStatusProps): React.JSX.Element {
             <button
               type="button"
               data-testid="status-copy-error"
-              className="cursor-pointer rounded-md border border-edge bg-active px-2.5 py-1.5 text-[10.5px] font-semibold text-ink-dim hover:border-accent hover:text-ink"
+              className="cursor-pointer rounded-md px-2.5 py-1.5 text-xs text-ink-dim hover:bg-active hover:text-ink"
               onClick={() => onCopyError(sync.message)}
             >
               Copy details

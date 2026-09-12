@@ -324,8 +324,11 @@ The Done action confirmation says `Marked done`.
   state and due time.
 - Marking a thread important or not important updates `IMPORTANT` through Gmail. Moving into or out of Spam
   and Trash updates `SPAM` or `TRASH` through Gmail. The optimistic row membership matches the chosen action.
+- The reader summary shows a clock and the snooze deadline in every mailbox, label, and search view. A banner offers Change snooze and Return to Inbox now. Snoozed list items also show the clock, and their footer identifies H as Change snooze.
 - A snoozed thread returns within 60s of its due time while the app runs, or immediately on next launch if it was closed; a reply during snooze surfaces it immediately.
 - Snoozed threads are findable in the local "Snoozed" view (`G` then `H`) while the Attn profile exists. Reinstall durability and cross-device visibility are not v1 promises (decision #6).
+
+Resolved snooze dates include the year. Dates without a year resolve to their next occurrence. Snooze confirmation rejects deadlines that have passed, including while the picker is open. The service validates the deadline before changing mail.
 
 ### F5 — Command palette
 
@@ -333,9 +336,13 @@ The Done action confirmation says `Marked done`.
 
 - Fuzzy-matches every registered command: triage verbs with arguments ("Remind me tomorrow 9am"), navigation ("Go to Sent"), settings ("Switch theme"), snippets ("Snippet: intro").
 - Parameterized commands accept inline arguments with natural-language parsing where applicable (snooze and reminder times).
-- Each result shows its keyboard shortcut — the palette is also how users learn the keys.
+- Each result shows its keyboard shortcut with spaces between keys, without plus separators. macOS uses modifier symbols. The palette has a Close/Esc control and boxed navigation hints. Tab cycles between its search field and Close button.
 - Ranking: exact prefix > fuzzy score, with recently/frequently used commands boosted.
 - **Engineering rule:** every user-facing feature must register a palette command. No feature ships reachable only by mouse.
+
+The keyboard reference uses grouped columns and includes shortcuts from the shared definitions even when their reader, composer, or outbox view is not mounted. Registered commands supply current labels and dynamic additions. The reference scrolls at smaller window sizes.
+
+Label, move, and snooze pickers share a title, Close/Esc control, and boxed navigation hints. Labels retain colors and mixed selection. Invalid snooze input explains the required time format.
 
 The shortcut footer is a context-aware guide. A persistent top-bar control, `Mod+Shift+B`, and the command palette show or hide
 the keyboard hints. The hint bar is visible by default. It sits below the right-hand content pane. The sidebar extends to the bottom of the window. Sync status stays visible beside the account menu when hints are hidden. The saved choice applies across mail views and survives
@@ -446,7 +453,7 @@ return to this same inline context whenever the parent conversation is locally a
 - **A round trip keeps the body and the quoted trail apart:** Gmail stores a draft as one document, so a reply or forward returns with its quote joined to the body. Attn separates them again on reimport by recognizing the trailing quote structurally — never by matching bytes, since Gmail rewrites markup. Reopening therefore shows the same collapsed quote it showed before the round trip, rather than loading quoted mail into the editor as authored content. Attn declines to split when authored or styled content follows the quote, because reassembly always puts the quote last; such a draft stays merged. Blank editor lines may follow a quote, including outside nested wrappers, and remain with the quoted trail. Empty lines before those wrappers remain with the authored body.
 - **A mirrored draft is complete:** attachments mirror with the body, so a draft composed in Attn can be opened and **sent from Gmail web or mobile** with its files intact. Because Gmail replaces a draft wholesale, each checkpoint re-sends every attachment byte; the mirror interval therefore lengthens once a draft carries meaningful payload, while attaching or removing a file still pushes on the normal interval. Bytes stream from the local spool rather than being held in memory, and a file that Gmail echoes back is recognized as the one already held locally rather than stored a second time.
 - **Send:** `Mod+Enter`.
-- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/**5**/8/10/20/30s, default 5). A queued reply or forward closes the composer and appears in its conversation immediately, without waiting for either the send deadline or a sync poll; that newest message is expanded by default. A toast shows "Sent — Undo (Z)", stays visible for the entire window, and counts down the durable send deadline with a progress bar. Undo removes the queued message from the conversation and reopens the composer with everything intact. The API call happens only after the window elapses.
+- **Undo send:** sending holds the message in a local outbox for a configurable delay (0/**5**/8/10/20/30s, default 5). A queued reply or forward closes the composer and appears in its conversation immediately, without waiting for either the send deadline or a sync poll; that newest message is expanded by default. A toast shows the remaining seconds until sending, stays visible for the entire window, and counts down the durable send deadline with a progress bar. Its Undo button invokes the same action as Z. The button is unavailable while another draft or modal owns input. Undo removes the queued message from the conversation and reopens the composer with everything intact. The API call happens only after the window elapses.
 - Outbox state machine (`composing → queued → sending → sent`) guarantees exactly-once send across crashes: on relaunch, `sending`-state items are verified against the server before any retry.
 
 **Acceptance criteria**
@@ -472,7 +479,7 @@ Named, reusable text blocks inserted into the composer via palette ("Snippet: �
 
 ### F9 — Follow-up reminders
 
-When sending, optionally set "remind me if no reply" (composer control or palette: 3 days / 1 week / custom). If no reply arrives by the deadline, the thread resurfaces at the top of the inbox with a **Follow up** chip. Any reply cancels the reminder. Pending follow-ups are listed in the Snoozed/Reminders view.
+When sending, optionally set "remind me if no reply" (composer control or palette: 3 days / 1 week / custom). If no reply arrives by the deadline, the thread resurfaces at the top of the inbox with a **Follow up** chip. Any reply cancels the reminder. Cancel a pending follow-up from its reader banner or the Cancel follow-up command. Undo restores it unless a later reply has answered it. Cancellation preserves mail labels and any snooze. Pending follow-ups are listed in the Snoozed/Reminders view. Their deadline also appears in Sent, other lists, and the reader. The reader explains that a pending follow-up waits for a reply. A returned follow-up displays “No reply yet. This conversation returned for follow-up.”
 
 The sent message that created the reminder does not cancel it. A subsequent reply from any participant,
 including the user, does. The reminder retains its originating message identity and date independently of

@@ -139,6 +139,10 @@ export function displayThread(row: ThreadRow): DisplayThread {
     starred: row.starred,
     hasAttachment: row.hasAttachment,
     snoozed: row.snoozed,
+    ...(row.snoozed && row.snoozeDueAt != null
+      ? { dueAt: row.snoozeDueAt, dueLabel: formatSnoozeDate(row.snoozeDueAt) }
+      : {}),
+    ...(row.followUpDueAt != null ? { followUpDueLabel: formatSnoozeDate(row.followUpDueAt) } : {}),
     returned: row.returned,
     followUpReturned: row.followUpReturned === true,
     hasDraft: row.hasDraft,

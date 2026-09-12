@@ -149,7 +149,7 @@ test.describe('settings surface', () => {
     await composer.triggerSend()
 
     const toast = page.getByTestId('toast')
-    await expect(toast).toHaveText('Sent — Undo (Z)')
+    await expect(toast).toHaveText(/Sending in \d+ secondsUndo Z/)
     const durationMs = Number(await toast.getAttribute('data-toast-duration-ms'))
     expect(durationMs).toBeGreaterThan(15_000)
     expect(durationMs).toBeLessThanOrEqual(20_000)
@@ -271,6 +271,13 @@ test.describe('settings surface', () => {
       'Mark done'
     )
 
+    await expect(sheet.locator('[data-command-id="composer.send"]')).toBeVisible()
+    await expect(
+      sheet
+        .getByTestId('cheat-sheet-group')
+        .filter({ has: page.getByRole('heading', { name: 'Conversation', exact: true }) })
+    ).toContainText('Next message')
+    await expect(sheet.locator('[data-command-id="composer.bold"]')).toContainText('B')
     mkdirSync(artifactDirectory, { recursive: true })
     const path = join(artifactDirectory, 'cheat-sheet.png')
     await page.screenshot({ path })

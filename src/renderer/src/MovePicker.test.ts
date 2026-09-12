@@ -62,7 +62,9 @@ describe('MovePicker', () => {
     expect(document.activeElement).toBe(input)
     expect(container.querySelector('[data-testid="move-done"]')?.textContent).toContain('Done')
     expect(container.querySelector('[data-testid="move-inbox"]')?.textContent).toContain('Inbox')
-    expect(container.querySelector('[data-testid="move-section-destinations"]')?.textContent).toBe('Move to')
+    expect(container.querySelector('[data-testid="move-section-destinations"]')?.textContent).toBe(
+      'Destinations'
+    )
     expect(container.querySelector('[data-testid="move-section-importance"]')?.textContent).toBe('Importance')
     expect(container.querySelector('[data-testid="move-section-labels"]')?.textContent).toBe('Labels')
     expect(container.querySelector('[data-testid="move-mark-important"]')?.textContent).toContain(

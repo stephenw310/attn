@@ -13,7 +13,8 @@ import {
   matchComposerKey,
   matchKey,
   readingScrollDelta,
-  registerCommands
+  registerCommands,
+  shortcutReferenceCommands
 } from './commands'
 
 const cleanups: Array<() => void> = []
@@ -464,4 +465,17 @@ describe('keyboard dispatch', () => {
     expect(readingScrollDelta(key('ArrowDown', { altKey: true }), 1000)).toBeNull()
     expect(readingScrollDelta(key('j'), 1000)).toBeNull()
   })
+})
+
+test('shortcut reference includes unmounted views and preserves live command labels', () => {
+  const before = getCommandRegistrySnapshot()
+  const reference = shortcutReferenceCommands([
+    createCommand('triage.star', () => {}, { titleOf: () => 'Unstar' })
+  ])
+  expect(
+    reference.some((command) => command.id === 'composer.send' && command.shortcut === 'Mod+Enter')
+  ).toBe(true)
+  expect(reference.find((command) => command.id === 'triage.star')?.titleOf?.()).toBe('Unstar')
+  expect(new Set(reference.map((command) => command.id)).size).toBe(reference.length)
+  expect(getCommandRegistrySnapshot()).toBe(before)
 })
