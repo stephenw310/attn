@@ -322,6 +322,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           <button
             type="button"
             data-testid="sidebar-toggle"
+            data-reset-focus-on-show
             data-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
             aria-label={sidebarAction}
             aria-keyshortcuts={isMacPlatform() ? 'Meta+B' : 'Control+B'}
@@ -339,6 +340,7 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
           <button
             type="button"
             data-testid="footer-toggle"
+            data-reset-focus-on-show
             aria-label={footerCollapsed ? 'Show keyboard hints' : 'Hide keyboard hints'}
             data-tooltip={`${footerCollapsed ? 'Show keyboard hints' : 'Hide keyboard hints'} (${modKeyLabel()}⇧B)`}
             aria-keyshortcuts={isMacPlatform() ? 'Meta+Shift+B' : 'Control+Shift+B'}

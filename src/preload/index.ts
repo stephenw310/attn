@@ -369,7 +369,12 @@ const api = {
   },
   app: {
     getInfo: (): Promise<AppInfo> => invoke(IPC_CHANNELS.appGetInfo),
-    closeWindow: (): Promise<undefined> => invoke(IPC_CHANNELS.appCloseWindow)
+    closeWindow: (): Promise<undefined> => invoke(IPC_CHANNELS.appCloseWindow),
+    onWindowShown: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(IPC_CHANNELS.appWindowShown, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.appWindowShown, listener)
+    }
   },
   update: {
     getState: (): Promise<UpdateState> => invoke(IPC_CHANNELS.updateGetState),

@@ -83,7 +83,7 @@ A sync error shows an inline mailbox notice with Retry and Details. Details open
 
 The reader header stays compact without an action toolbar or separate message-actions dialog. It omits participant names and mailbox-position counters. Snooze timing appears in the actionable banner, not again below the subject. Conversations outside Inbox, Spam, Trash, Drafts, and pending reminders show Done and their All Mail location. Trashed-message and blocked-image notices use filled panels. Message details use an unbordered grid. Search rows place sender and subject together without date-group headings. Search timestamps include the year for mail outside the current calendar year; the search header and submission controls keep their existing positions.
 
-The signed-in window initially focuses the mail view without highlighting a toolbar button or showing its hint. Toolbar controls retain keyboard focus hints.
+The signed-in window initially focuses the mail view without highlighting a toolbar button or showing its hint. Toolbar controls retain keyboard focus hints. Mailbox, label, settings, and split-rule navigation draw keyboard focus outlines inside controls so scrolling panels do not clip them. Focus alone does not change the selected destination.
 
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
 
@@ -649,6 +649,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 **Acceptance criteria**
 - Closing the window never stops snooze timers, polling, or notifications.
 - On macOS, closing and reopening preserves the open draft and view. The Dock icon returns when the window reopens.
+- Reopening clears focus from the sidebar and hint-bar toggles. Tab can focus them again. Draft and search inputs retain focus.
 - A close immediately after reopening can take about one second to remove the Dock icon because of Electron's activation guard.
 - Disabling the macOS menu-bar setting never removes the reopen control while the window is closed.
 - Quitting (tray menu / `Cmd+Q`) stops everything — no orphaned background processes.

@@ -66,6 +66,10 @@ export interface IpcContext {
   pickAttachmentPaths?: () => Promise<string[]>
 }
 
+export function registerWindowEvents(win: BrowserWindow): void {
+  win.on('show', () => win.webContents.send(IPC_CHANNELS.appWindowShown))
+}
+
 export function registerIpc(context: IpcContext): () => void {
   // Every channel main answers itself; the rest are forwarded to the utility
   // by the loop below, so registering here is what claims a channel.

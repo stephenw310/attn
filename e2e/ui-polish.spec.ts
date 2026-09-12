@@ -20,6 +20,42 @@ test('opens with mail focus and preserves sidebar keyboard hints', async ({ page
   await relaunched.page.screenshot({ path: join(__dirname, '.artifacts/window-initial-focus.png') })
 })
 
+test('reopening the window clears layout-toggle focus without disabling focus hints', async ({
+  app,
+  page
+}) => {
+  test.skip(process.platform === 'linux', 'Close to tray is supported on macOS and Windows')
+  await expect(page.getByTestId('thread-list')).toBeVisible()
+  await app.evaluate(({ app: electronApp }) => electronApp.emit('activate'))
+  await expect
+    .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()))
+    .toBe(true)
+  const toggle = page.getByTestId('sidebar-toggle')
+  await toggle.focus()
+  await expect(toggle).toBeFocused()
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close())
+  await expect
+    .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()))
+    .toBe(false)
+  if (process.platform === 'darwin') {
+    await expect.poll(() => app.evaluate(({ app: electronApp }) => electronApp.dock?.isVisible())).toBe(false)
+  }
+  await app.evaluate(({ app: electronApp }) => electronApp.emit('activate'))
+  await expect
+    .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()))
+    .toBe(true)
+  await expect(page.getByTestId('mail-window')).toBeFocused()
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
+  mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+  for (const colorScheme of ['dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await page.screenshot({ path: join(__dirname, `.artifacts/window-reopened-${colorScheme}.png`) })
+  }
+  await toggle.focus()
+  await expect(toggle).toBeFocused()
+  await expect(page.getByRole('tooltip')).toContainText('Collapse sidebar')
+})
+
 test('exposes layout shortcuts and fast icon hints', async ({ page }) => {
   await expect(page.getByTestId('thread-list')).toBeVisible()
   const search = page.getByTestId('search-open')

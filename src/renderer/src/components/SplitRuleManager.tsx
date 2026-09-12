@@ -367,7 +367,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <div className="min-h-0 w-56 shrink-0 overflow-y-auto border-r border-edge/60 pr-6 max-md:w-44 max-md:pr-3">
+          <div className="app-navigation-focus min-h-0 w-56 shrink-0 overflow-y-auto border-r border-edge/60 pr-6 max-md:w-44 max-md:pr-3">
             <div className="mb-3 flex justify-between px-3 text-[10px] text-ink-dim">
               <span>Match order</span>
               <span>Unread</span>
@@ -447,6 +447,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                data-testid="split-rule-new"
                 onClick={() => setDraft(draftFor())}
                 className="h-9 cursor-pointer rounded-md px-2 text-xs text-accent"
               >

@@ -30,7 +30,7 @@ import {
 import { applyLoginItemSetting } from './backgroundSettings'
 import { CURRENT_SCHEMA_VERSION } from './db/schema'
 import { isOpenableExternalUrl } from './externalLinks'
-import { registerIpc } from './ipc'
+import { registerIpc, registerWindowEvents } from './ipc'
 import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
   DEFAULT_REMOTE_IMAGE_POLICY,
@@ -260,6 +260,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
   win.on('focus', publishFocus)
   win.on('blur', publishFocus)
   attachBackgroundWindow(win)
+  registerWindowEvents(win)
   win.webContents.on('will-navigate', (event) => event.preventDefault())
   // T33: a reload or a renderer crash takes every mounted mail frame with it
   // without unregistering; stale entries (an `allowOnce` grant among them)

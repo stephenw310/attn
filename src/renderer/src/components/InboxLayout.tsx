@@ -32,6 +32,26 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
   useLayoutEffect(() => {
     // Give the window a focus target before Electron selects the first button.
     rootRef.current?.focus({ preventScroll: true })
+    let frame = 0
+    const restoreMailFocus = (): void => {
+      const active = document.activeElement
+      if (
+        active === document.body ||
+        active === rootRef.current ||
+        active?.hasAttribute('data-reset-focus-on-show')
+      ) {
+        rootRef.current?.focus({ preventScroll: true })
+      }
+    }
+    // Wait until native window activation has restored its previous DOM focus.
+    const unsubscribe = window.attn.app.onWindowShown(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(restoreMailFocus)
+    })
+    return () => {
+      unsubscribe()
+      cancelAnimationFrame(frame)
+    }
   }, [])
 
   return (

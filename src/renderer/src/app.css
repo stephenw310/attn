@@ -234,6 +234,11 @@
   }
 }
 
+/* Keep keyboard focus inside controls at the edges of scrolling navigation. */
+.app-navigation-focus :focus-visible {
+  outline-offset: -2px;
+}
+
 .app-login-backdrop {
   background: var(--attn-login-glow);
 }
