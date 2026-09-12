@@ -92,6 +92,7 @@ export const IPC_CHANNELS = {
   outboxProgress: 'outbox:progress',
   appGetInfo: 'app:getInfo',
   appCloseWindow: 'app:closeWindow',
+  appWindowShown: 'app:windowShown',
   updateGetState: 'update:getState',
   updateCheck: 'update:check',
   updateRestart: 'update:restart',
@@ -379,6 +380,7 @@ export interface InvokeChannels {
 }
 
 export interface BroadcastChannels {
+  [IPC_CHANNELS.appWindowShown]: undefined
   [IPC_CHANNELS.outboxChanged]: OutboxChanged
   [IPC_CHANNELS.outboxProgress]: import('./outbox').OutboxProgress | null
   [IPC_CHANNELS.mailChanged]: { serverSearchRequestId?: string; reason?: MailChangeReason }
@@ -401,6 +403,7 @@ export type InvokeChannel = keyof InvokeChannels
 export type BroadcastChannel = keyof BroadcastChannels
 
 const BROADCAST_CHANNELS = {
+  [IPC_CHANNELS.appWindowShown]: true,
   [IPC_CHANNELS.outboxChanged]: true,
   [IPC_CHANNELS.outboxProgress]: true,
   [IPC_CHANNELS.mailChanged]: true,

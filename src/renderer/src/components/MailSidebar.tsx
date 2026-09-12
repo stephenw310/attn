@@ -90,7 +90,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
     <aside
       id="mail-sidebar"
       data-testid="mail-sidebar"
-      className="flex w-[190px] flex-none flex-col px-2.5 py-5"
+      className="app-navigation-focus flex w-[190px] flex-none flex-col px-2.5 py-5"
       aria-label="Mail navigation"
     >
       <div

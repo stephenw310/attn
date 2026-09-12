@@ -236,7 +236,10 @@ export function SettingsView({
       </div>
 
       <div className="flex min-h-0 flex-1 gap-[66px] pb-8 max-md:gap-5">
-        <nav aria-label="Settings sections" className="w-[190px] shrink-0 overflow-y-auto max-md:w-36">
+        <nav
+          aria-label="Settings sections"
+          className="app-navigation-focus w-[190px] shrink-0 overflow-y-auto max-md:w-36"
+        >
           {(['app', 'account', 'connections'] as const).map((scope) => (
             <div key={scope} className="mb-8">
               <p className="mb-3 px-2.5 text-[10px] font-medium text-ink-dim">
