@@ -582,9 +582,10 @@ When a split reaches zero, the list pane is replaced by a full-pane zero state: 
 
 Attn ships Matcha, Mist, Linen, and Dusk color palettes. Matcha is the default for existing and new profiles.
 The app-wide palette preference is independent of System, Light, and Dark appearance. System follows the OS.
-Both preferences persist across restart and account switches. Palette choices appear in Settings, the account menu,
-and command-palette commands. Existing saved appearance preferences remain valid. Saved Midnight resolves to Dark;
-saved Sand resolves to Light. Invalid or absent color palette values resolve to Matcha.
+Both preferences persist across restart and account switches. Color palettes are available in Appearance settings
+and command-palette commands. The account menu offers only System, Light, and Dark appearance, not color palettes.
+Appearance settings also provide these appearance choices. Existing saved appearance preferences remain valid.
+Saved Midnight resolves to Dark; saved Sand resolves to Light. Invalid or absent color palette values resolve to Matcha.
 
 All app text tokens meet normal-text AA contrast on the page, elevated panel, and selection backgrounds.
 Primary actions use the palette accent with a contrasting foreground. Secondary text remains readable in dark mode.
