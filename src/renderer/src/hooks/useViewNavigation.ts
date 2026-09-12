@@ -59,6 +59,7 @@ interface Options {
   closePickers: () => void
   closeMove: () => void
   closeSettings: () => void
+  closeSplitRules: () => void
   setDetachedDraftThread: (thread: null) => void
   listElRef: React.RefObject<HTMLElement | null>
   selectedIndexRef: React.RefObject<number>
@@ -378,6 +379,7 @@ export function useViewNavigation(options: Options): ViewNavigation {
 
   const openOutbox = useCallback(() => {
     const options = latest.current
+    options.closeSplitRules()
     if (options.viewRef.current === 'outbox' && !options.searchOpenRef.current) return
     const inline = options.inlineComposerRef.current
     if (inline) {

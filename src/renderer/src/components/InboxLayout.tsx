@@ -95,6 +95,7 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
               }}
               onClose={c.closeSettings}
               focusControl={c.settingsFocus}
+              onNavigate={c.clearSettingsFocus}
             />
           )}
           <div
