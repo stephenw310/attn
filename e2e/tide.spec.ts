@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { ComposerPage } from './composer'
 import { expect, test } from './electron'
 import { runPaletteCommand } from './nav'
 
@@ -66,6 +67,22 @@ test('Tide palettes preserve appearance, persist, and keep app text readable', a
 
 test.describe('Tide split shell', () => {
   test.use({ seed: 'fixtures/seed-splits.json' })
+  test('opening Outbox closes split rules', async ({ page }) => {
+    await expect(page.getByTestId('thread-row').first()).toBeVisible()
+    const composer = new ComposerPage(page)
+    await composer.openNew()
+    await composer.addRecipient('queued@example.com')
+    await composer.subject.fill('Queued from split rules')
+    await composer.typeBody('Keep this message in Outbox.')
+    await composer.triggerSend()
+    await composer.expectPending(1)
+    await runPaletteCommand(page, 'Manage inbox splits')
+    await expect(page.getByTestId('split-rules')).toBeVisible()
+    await page.getByTestId('outbox-count').click()
+    await expect(page.getByTestId('split-rules')).toHaveCount(0)
+    await expect(page.getByTestId('outbox-list')).toBeVisible()
+  })
+
   test('Tide keeps Write fixed, restores sidebar preference, and boxes shortcut hints', async ({
     page,
     app

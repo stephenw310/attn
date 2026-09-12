@@ -428,6 +428,8 @@ export function useInboxController({
     },
     [showToast]
   )
+  const clearSettingsFocus = useCallback(() => setSettingsFocus(null), [])
+  const closeSplitRules = useCallback(() => setSplitRulesOpen(false), [])
   const closeSettings = useCallback(() => {
     settingsOpenRef.current = false
     setSettingsOpen(false)
@@ -610,6 +612,7 @@ export function useInboxController({
     closePickers,
     closeMove,
     closeSettings,
+    closeSplitRules,
     setDetachedDraftThread,
     listElRef,
     selectedIndexRef,
@@ -864,6 +867,7 @@ export function useInboxController({
     setSplitRulesOpen,
     settingsOpen,
     settingsFocus,
+    clearSettingsFocus,
     cheatSheetOpen,
     paletteOpen,
     setPaletteOpen,

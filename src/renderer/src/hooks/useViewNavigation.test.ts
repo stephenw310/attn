@@ -106,6 +106,7 @@ async function mount(overrides: Record<string, unknown> = {}) {
         closePickers: () => calls.push('closePickers'),
         closeMove: () => calls.push('closeMove'),
         closeSettings: () => calls.push('closeSettings'),
+        closeSplitRules: () => calls.push('closeSplitRules'),
         setDetachedDraftThread: () => calls.push('detach:null'),
         listElRef: createRef<HTMLElement>(),
         selectedIndexRef: { current: state.selectedIndex },

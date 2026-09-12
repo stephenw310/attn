@@ -76,7 +76,7 @@ interface EditingState {
   bodyHtml: string
 }
 
-export function SnippetManager(): React.JSX.Element {
+export function SnippetManager({ active }: { active: boolean }): React.JSX.Element {
   const onToast = useShowToast()
   const [snippets, setSnippets] = useState<Snippet[] | null>(null)
   const [editing, setEditing] = useState<EditingState | null>(null)
@@ -114,7 +114,7 @@ export function SnippetManager(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!editing) return
+    if (!active || !editing) return
     const close = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || saving) return
       if (
@@ -128,7 +128,7 @@ export function SnippetManager(): React.JSX.Element {
     }
     window.addEventListener('keydown', close, true)
     return () => window.removeEventListener('keydown', close, true)
-  }, [editing, saving])
+  }, [active, editing, saving])
 
   const save = useCallback(() => {
     const bridge = window.attn

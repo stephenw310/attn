@@ -94,6 +94,7 @@ interface SettingsViewProps {
   onSignOut: () => void
   onOpenSplits?: () => void
   onClose: () => void
+  onNavigate: () => void
   focusControl: SettingsControl | null
 }
 
@@ -122,7 +123,8 @@ export function SettingsView({
   onSignOut,
   onOpenSplits,
   onClose,
-  focusControl
+  focusControl,
+  onNavigate
 }: SettingsViewProps): React.JSX.Element {
   const [page, setPage] = useState<SettingsPage>(focusControl ? CONTROL_PAGE[focusControl] : 'appearance')
   const selectedPage = SETTINGS_PAGES.find((item) => item.id === page) ?? SETTINGS_PAGES[0]
@@ -255,7 +257,10 @@ export function SettingsView({
                   type="button"
                   data-testid={`settings-nav-${item.id}`}
                   aria-current={page === item.id ? 'page' : undefined}
-                  onClick={() => setPage(item.id)}
+                  onClick={() => {
+                    onNavigate()
+                    setPage(item.id)
+                  }}
                   className={`mb-1 block w-full rounded-md px-2.5 py-2.5 text-left text-xs ${page === item.id ? 'bg-active text-ink' : 'text-ink-dim hover:bg-active/50'}`}
                 >
                   {item.title}
@@ -588,7 +593,7 @@ export function SettingsView({
                   One set of reusable snippets is available in every account.
                 </p>
                 <div className="mt-5">
-                  <SnippetManager />
+                  <SnippetManager active={page === 'snippets'} />
                 </div>
               </section>
 

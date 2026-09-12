@@ -175,6 +175,9 @@ test.describe('settings surface', () => {
     await expect(settings).toBeVisible()
     // The palette deep-link lands focus on the auto-advance control.
     await expect(page.getByTestId('settings-auto-advance')).toBeFocused()
+    await page.getByTestId('settings-nav-appearance').click()
+    await runPaletteCommand(page, 'Set auto-advance')
+    await expect(page.getByTestId('settings-auto-advance')).toBeFocused()
     await page.getByTestId('settings-auto-advance').selectOption('previous')
     await page.keyboard.press('Escape')
     await expect(settings).toHaveCount(0)

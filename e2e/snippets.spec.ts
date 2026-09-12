@@ -101,6 +101,20 @@ test('Escape inside the snippet body cancels nothing and keeps Settings open (B9
   await expect(page.getByTestId('settings-view')).toHaveCount(0)
 })
 
+test('a hidden snippet editor leaves Escape to Settings', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-snippets').click()
+  await page.getByTestId('settings-snippet-new').click()
+  await page.getByTestId('settings-snippet-name').fill('Unsaved snippet')
+  await page.getByTestId('settings-nav-appearance').click()
+  await page.getByTestId('settings-nav-snippets').click()
+  await expect(page.getByTestId('settings-snippet-name')).toHaveValue('Unsaved snippet')
+  await page.getByTestId('settings-nav-appearance').click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-view')).toHaveCount(0)
+})
+
 test('the manager creates, edits, and deletes snippets, and the set survives relaunch', async ({
   boot,
   page
