@@ -273,6 +273,42 @@ test('changes Gmail importance without presenting splits as move destinations', 
   await expect(boardMemo).toBeVisible()
 })
 
+test('opening Settings from split rules closes the manager', async ({ page }) => {
+  await openSplitRules(page)
+  await page.getByTestId('account-menu').getByRole('button').first().click()
+  await page.getByTestId('account-settings').click()
+  await expect(page.getByTestId('split-rules')).toHaveCount(0)
+  await expect(page.getByTestId('settings-view')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-view')).toHaveCount(0)
+  await expect(page.getByTestId('split-strip')).toBeVisible()
+})
+
+test('manager selects the first rule, keeps account controls, and closes with one Escape', async ({
+  page
+}) => {
+  await openSplitRules(page)
+  await expect(page.getByTestId('split-rule').first().getByTestId('split-rule-summary')).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  await expect(page.getByTestId('account-menu')).toBeVisible()
+  await expect(page.getByTestId('write-button')).toHaveCount(0)
+  await page
+    .locator('[data-split-id="preset:calendar"][data-testid="split-rule"]')
+    .getByTestId('split-rule-summary')
+    .click()
+  const editor = page.getByTestId('split-rule-editor')
+  await expect(editor).toBeVisible()
+  expect(await editor.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect(
+    await editor.evaluate((element) => parseFloat(getComputedStyle(element).paddingRight))
+  ).toBeGreaterThanOrEqual(16)
+  await page.screenshot({ path: join(__dirname, '.artifacts/split-rule-editor.png') })
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('split-rules')).toHaveCount(0)
+})
+
 test('edits, reorders, deletes, persists, and explicitly restores a starter preset', async ({
   boot,
   page
@@ -311,15 +347,23 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await conditionValue.pressSequentially('sam@example.com')
   await expect(conditionValue).toBeFocused()
   await expect(conditionValue).toHaveValue('sam@example.com')
-  await page.getByRole('button', { name: 'Save split' }).click()
+  await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByTestId('split-rule')).toHaveCount(6)
-  await expect(page.getByTestId('split-rule').filter({ hasText: 'Personal' })).toContainText('1 total')
+  await expect(page.getByTestId('split-rule').filter({ hasText: 'Personal' })).toContainText('1 condition')
 
   const github = page.locator('[data-testid="split-rule"][data-split-id="preset:github"]')
-  await github.getByRole('button', { name: 'Edit' }).click()
+  await github.getByTestId('split-rule-summary').click()
   await page.getByTestId('split-rule-name').fill('Code reviews')
-  await page.getByRole('button', { name: 'Save split' }).click()
+  await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(github).toContainText('Code reviews')
+  await expect(
+    page.getByTestId('split-rules').getByRole('heading', { name: 'Important', exact: true })
+  ).toBeVisible()
+  await expect(
+    page
+      .locator('[data-testid="split-rule"][data-split-id="base:important"]')
+      .getByTestId('split-rule-summary')
+  ).toHaveAttribute('aria-pressed', 'true')
 
   const newsletters = page.locator('[data-testid="split-rule"][data-split-id="preset:newsletters"]')
   const newslettersHandle = newsletters.getByTestId('split-rule-drag-handle')
@@ -361,7 +405,8 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await newslettersHandle.press('ArrowUp')
   await expect(page.getByTestId('split-rule').nth(1)).toHaveAttribute('data-split-id', 'preset:newsletters')
 
-  await github.getByTestId('split-rule-delete').click()
+  await github.getByTestId('split-rule-summary').click()
+  await page.getByTestId('split-rule-delete').click()
   await expect(github).toHaveCount(0)
   await expect(page.getByTestId('split-rule-restore').filter({ hasText: 'GitHub' })).toBeVisible()
   await page.getByRole('button', { name: 'Close split rules' }).click()

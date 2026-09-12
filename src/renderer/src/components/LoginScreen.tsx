@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
+import tidalInlet from '../assets/login-tidal-inlet.png'
 
 interface LoginScreenProps {
   status: AuthStatus | null
@@ -44,37 +45,15 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
       data-testid="login-screen"
       className="app-drag relative flex h-full flex-col overflow-hidden bg-ground"
     >
-      <div className="app-login-backdrop pointer-events-none absolute inset-0 opacity-80" />
-      <header className="relative flex items-center px-7 py-5">
-        <div className="text-base font-bold tracking-tight">
-          attn<span className="text-accent">:</span>
-        </div>
-      </header>
-
-      <main className="relative flex min-h-0 flex-1 items-center justify-center px-6 pb-14">
-        <section className="app-no-drag w-full max-w-[430px] text-center">
-          <div className="mx-auto mb-7 flex size-14 items-center justify-center rounded-2xl border border-accent/25 bg-accent/[0.08] text-accent shadow-dialog">
-            <svg aria-hidden viewBox="0 0 24 24" className="size-6" fill="none">
-              <title>Mail</title>
-              <path
-                d="M4 7.5 12 13l8-5.5M5.5 18h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 18.5 6h-13A1.5 1.5 0 0 0 4 7.5v9A1.5 1.5 0 0 0 5.5 18Z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-          <p className="mb-3 text-[11px] font-semibold tracking-[0.18em] text-accent uppercase">
-            Your inbox, in focus
-          </p>
-          <h1 className="text-[32px] font-semibold tracking-[-0.035em] text-ink">
-            Make space for what matters.
-          </h1>
-          <p className="mx-auto mt-4 max-w-[390px] text-sm leading-6 text-ink-dim">
-            Sign in with Google to bring your Gmail into a fast, keyboard-first inbox that keeps its local
-            copy on this device.
-          </p>
+      <div
+        className="app-login-tide pointer-events-none absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: `url(${tidalInlet})` }}
+      />
+      <main className="relative flex min-h-0 flex-1 justify-center overflow-y-auto px-6 pt-[22vh] pb-10">
+        <section className="app-no-drag w-full max-w-[480px] text-center">
+          <div className="mb-16 text-[32px] font-semibold tracking-tight text-ink">attn:</div>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink">Your mail, at your pace.</h1>
+          <p className="mt-5 text-sm text-ink">Sign in with Google to bring your Gmail into Attn.</p>
 
           {/* Keyboard-first: the screen's only action answers Enter on arrival. */}
           <button
@@ -84,12 +63,9 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
             autoFocus
             disabled={!configured || busy || !bridgeAvailable}
             onClick={signIn}
-            className="mt-8 flex h-12 w-full cursor-pointer items-center justify-center gap-3 rounded-[9px] border border-white/15 bg-[#f3f4f7] px-5 text-sm font-semibold text-[#202124] shadow-[0_10px_30px_rgba(0,0,0,0.28)] transition hover:bg-white disabled:cursor-default disabled:opacity-45"
+            className="mx-auto mt-10 flex cursor-pointer items-center justify-center rounded-md bg-accent px-5 py-2.5 text-xs font-medium text-on-accent disabled:cursor-default disabled:opacity-45"
           >
-            <span className="flex size-5 items-center justify-center rounded-full border border-[#dadce0] bg-white text-[12px] font-bold text-[#4285f4]">
-              G
-            </span>
-            {busy ? 'Waiting for Google…' : 'Continue with Google'}
+            {busy ? 'Waiting for Google…' : 'Sign in with Google'}
           </button>
 
           <div className="mt-4 min-h-10 text-xs leading-5 text-ink-faint" aria-live="polite">
@@ -110,14 +86,6 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
                 Try again
               </button>
             )}
-          </div>
-
-          <div className="mt-7 flex items-center justify-center gap-3 text-[11px] text-ink-faint">
-            <span>Local-first</span>
-            <span className="text-edge">•</span>
-            <span>Keyboard-first</span>
-            <span className="text-edge">•</span>
-            <span>Private by design</span>
           </div>
         </section>
       </main>

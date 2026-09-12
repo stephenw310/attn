@@ -31,6 +31,17 @@ afterEach(() => {
 })
 
 describe('AiKeyStore', () => {
+  it('masks keys before exposing a display identifier', () => {
+    const store = new AiKeyStore(tempDir(), fakeCipher())
+    expect(store.preview()).toBeNull()
+    store.save('sk-test-secret-middle-1234')
+    expect(store.preview()).toBe('sk-t••••••••1234')
+    store.save('short-key')
+    expect(store.preview()).toBe('••••••••')
+    store.delete()
+    expect(store.preview()).toBeNull()
+  })
+
   it('round-trips a key and reports presence', () => {
     const store = new AiKeyStore(tempDir(), fakeCipher())
     expect(store.present()).toBe(false)

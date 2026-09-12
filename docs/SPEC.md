@@ -74,7 +74,7 @@ A 216-pixel sidebar contains mailboxes and user labels. A persistent control and
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
 The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title sits above the Inbox splits without enclosing header borders. The top-bar controls start at the expanded sidebar boundary and stay there when the sidebar closes. Write stays in the top bar outside the sidebar. The sidebar and keyboard-hint toggles sit together. The hint footer uses the page background and boxed keycaps without a contrasting panel. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight and do not show hover tooltips. Each tab fits its label and visible unread count. Zero unread counts reserve no space; tabs resize when counts change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
-Reader, Settings, and new-message headers use one clickable `Esc` close control without a separate Back button.
+Reader and new-message headers use one clickable `Esc` close control. Settings uses one Back to mail control with an `Esc` keycap.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
 `Mod` means Command on macOS and Control on Windows. Section 5 lists the default keyboard commands.
@@ -89,7 +89,7 @@ Electron `safeStorage` encrypts OAuth tokens through macOS Keychain or Windows D
 
 **Accounts:** the account menu and palette expose Add account. Each account has separate tokens keyed by its normalized email address. Existing single-account token files migrate to the account map on first launch. Signing in with an existing address refreshes that account's tokens. All accounts use the same OAuth client, with separate per-user quota budgets.
 
-**Signed-out state:** the app shows the sign-in screen without mounting mail views, subscriptions, or mail commands. The sign-in action has keyboard focus. If `oauth.config.json` is missing, the screen refers to the README setup instructions. If the authentication status request fails, the screen offers Retry.
+**Signed-out state:** the app shows the approved tidal-inlet illustration behind the centered sign-in content, with theme-specific shading for readable text. The app shows the sign-in screen without mounting mail views, subscriptions, or mail commands. The sign-in action has keyboard focus. If `oauth.config.json` is missing, the screen refers to the README setup instructions. If the authentication status request fails, the screen offers Retry.
 
 Each user supplies a Google Cloud OAuth client. `gmail.modify` is a restricted scope. A shared public OAuth client requires a separate distribution decision. See [Google's scope requirements](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
@@ -526,6 +526,7 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   nearby rows rearrange immediately, and release chooses the nearest position. A focused drag handle also
   accepts Up and Down for keyboard access. Attn never recreates a changed or deleted preset during launch,
   sync, or an app update. The rule manager can restore a preset only after an explicit user action.
+- The split-rule manager keeps the sortable list beside the selected rule editor. It identifies the current account and explains first-match ordering. Important and Other show their built-in behavior and notification preference. Custom rules expose their existing conditions, notification preference, save, and delete actions. The manager selects the first rule on opening. Escape closes it in one step, except during a drag.
 - A split expression combines conditions with **any** or **all**. Conditions match a sender address, a sender
   domain, an exact `List-Id`, `List-Id` presence, a label, an attachment MIME type, or an attachment filename
   suffix. A thread matches when at least one message satisfies the whole expression. Under **all**, the same
@@ -595,6 +596,8 @@ normalization that `mailSurface.ts` applies today, with a per-message "View orig
 
 ### F15 — Settings
 
+Settings uses a left navigation list and one content panel. All accounts groups app-wide preferences. Current account identifies the owning email and groups Sync & storage and Signature. Connections contains Accounts. Existing palette commands open the relevant panel. Settings and split rules hide mail controls while retaining status and the profile menu. Appearance offers palette swatches. The profile menu does not repeat the palette picker. Snippets remain in Settings, with search, message previews, and an inline editor.
+
 Settings and the palette expose:
 
 - Accounts: live sync status, add, reconnect, Sign out with Delete/Keep local data, and reorder for
@@ -638,7 +641,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 ### F17 — AI reply drafting and inline autocomplete (opt-in, bring-your-own key)
 
-**Off by default.** Enabling requires the user's own API key — an Anthropic key or any OpenAI-compatible endpoint (which also covers fully local models via Ollama / LM Studio for a zero-cloud setup). Keys live in `safeStorage`; requests go **directly from the client to the chosen provider**, no intermediary (consistent with D2). Provider-agnostic; model user-selectable with a sensible default per provider.
+**Off by default.** Enabling requires the user's own API key — an Anthropic key or any OpenAI-compatible endpoint (which also covers fully local models via Ollama / LM Studio for a zero-cloud setup). Settings shows only a masked key preview: the first four and last four characters, with short keys fully masked. Main creates this preview before sending it to the renderer. Keys live in `safeStorage`; requests go **directly from the client to the chosen provider**, no intermediary (consistent with D2). Provider-agnostic; model user-selectable with a sensible default per provider.
 
 **Reply drafting:**
 
@@ -777,7 +780,7 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   queues and polling and no other's.
 - **Sign out:** the account menu and palette use this short label. The confirmation identifies the account
   and asks what to do with local data. Confirming always removes the account's tokens
-  and stops its sync. The default, **Delete local data**, purges every local trace —
+  and stops its sync. Cancel receives initial focus; neither removal choice is preselected. **Delete local data** purges every local trace —
   store rows in every account-keyed table, FTS entries, attachment and draft spool files, reminders, and
   per-account settings — so removal is the privacy boundary and re-adding re-syncs from scratch (local data
   is a cache of Gmail, decision #6's posture). **Keep local data** leaves those rows in place, unreadable

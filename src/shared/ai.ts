@@ -92,6 +92,8 @@ export interface AiStoredSettings {
 /** The renderer-facing snapshot: stored settings plus main-only key presence. */
 export interface AiSettings extends AiStoredSettings {
   keyPresent: boolean
+  /** Masked in main before crossing IPC. Never contains the complete key. */
+  keyPreview?: string | null
 }
 
 export const AI_SETTINGS_DEFAULTS: AiStoredSettings = {

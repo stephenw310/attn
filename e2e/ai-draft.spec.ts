@@ -320,6 +320,7 @@ test('opening Settings cancels an AI reply whose settings read is still pending'
   await page.keyboard.press('ControlOrMeta+j')
   await expectResponseHeld(app)
   await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-ai').click()
   await expect(page.getByTestId('settings-view')).toBeVisible()
   await release()
 

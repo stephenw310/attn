@@ -437,7 +437,8 @@ async function initialize(): Promise<void> {
   })
   const aiSettingsSnapshot = async (): Promise<AiSettings> => ({
     ...(await ownedService.invoke(IPC_CHANNELS.aiGetSettings)),
-    keyPresent: aiKeyStore.present()
+    keyPresent: aiKeyStore.present(),
+    keyPreview: aiKeyStore.preview()
   })
   // T39: only an explicit, packaged release build constructs an updater —
   // personal, dev, and seeded builds make zero feed requests (§6 Packaging).
@@ -495,7 +496,7 @@ async function initialize(): Promise<void> {
         else if (update.key === 'autocompleteEnabled' && update.value === false) {
           ownedAiManager.cancelAll('autocomplete')
         }
-        return { ...stored, keyPresent: aiKeyStore.present() }
+        return { ...stored, keyPresent: aiKeyStore.present(), keyPreview: aiKeyStore.preview() }
       },
       setKey: async (key) => {
         aiKeyStore.save(key)

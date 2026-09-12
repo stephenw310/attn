@@ -18,8 +18,9 @@ export function AccountHealthLine({
     <span
       data-testid={testId}
       data-phase={health.phase}
-      className={`text-[11px] ${attention ? 'font-medium text-accent' : 'text-ink-faint'}`}
+      className={`inline-flex items-center gap-1.5 text-[11px] ${attention ? 'font-medium text-accent' : 'text-ink-faint'}`}
     >
+      <span aria-hidden className={`size-1.5 rounded-full ${attention ? 'bg-danger' : 'bg-accent/60'}`} />
       {ACCOUNT_SYNC_PHASE_LABELS[health.phase]}
       {health.unread > 0 ? ` · ${health.unread} unread` : ''}
     </span>

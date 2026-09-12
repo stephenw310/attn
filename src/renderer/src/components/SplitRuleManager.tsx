@@ -12,8 +12,10 @@ import {
   type SplitState,
   type SplitSummary
 } from '../../../shared/splits'
+import { Kbd } from './Kbd'
 
 interface SplitRuleManagerProps {
+  accountEmail?: string
   state: SplitState
   onSave: (input: SaveSplitInput) => Promise<void>
   onNotify: (id: string, notify: boolean) => Promise<void>
@@ -95,6 +97,7 @@ interface SplitRuleRowProps {
   handleProps?: ButtonHTMLAttributes<HTMLButtonElement>
   isDragSource?: boolean
   isDropTarget?: boolean
+  selected?: boolean
   isOverlay?: boolean
   onNotify: (notify: boolean) => void
   onEdit: () => void
@@ -114,13 +117,11 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
     isDragSource = false,
     isDropTarget = false,
     isOverlay = false,
-    onNotify,
+    selected = false,
     onEdit,
-    onDelete,
     onMove
   } = props
   const fallback = split.id === OTHER_SPLIT_ID
-  const readOnlyMatch = split.id === IMPORTANT_SPLIT_ID || fallback
 
   return (
     <li
@@ -132,14 +133,16 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
       aria-hidden={isOverlay || undefined}
       inert={isOverlay || undefined}
       style={rowStyle}
-      className={`relative grid min-h-[72px] grid-cols-[36px_minmax(0,1fr)_96px_112px] items-center gap-3 rounded-lg border px-3 transition-[border-color,background-color,box-shadow,opacity] ${
+      className={`relative grid min-h-[62px] grid-cols-[20px_minmax(0,1fr)_28px] items-center gap-2 rounded-md border border-transparent px-2 transition-[border-color,background-color,box-shadow,opacity] ${
         isOverlay
           ? 'z-70 cursor-grabbing border-accent bg-raised shadow-dialog'
           : isDragSource
             ? 'opacity-0'
             : isDropTarget
               ? 'border-accent bg-active'
-              : 'border-edge bg-ground/45'
+              : selected
+                ? 'bg-active'
+                : 'hover:bg-active/40'
       }`}
     >
       {!fallback ? (
@@ -164,7 +167,7 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
               onMove(1)
             }
           }}
-          className="flex size-8 touch-none cursor-grab items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink active:cursor-grabbing disabled:cursor-default disabled:opacity-30"
+          className="flex size-5 touch-none cursor-grab items-center justify-center rounded-md text-ink-faint hover:bg-active hover:text-ink active:cursor-grabbing disabled:cursor-default disabled:opacity-30"
         >
           <svg aria-hidden="true" viewBox="0 0 16 16" className="size-4 fill-current">
             <circle cx="5" cy="3" r="1.25" />
@@ -176,56 +179,30 @@ function SplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
           </svg>
         </button>
       ) : (
-        <span aria-hidden="true" className="size-8" />
-      )}
-      <div data-testid="split-rule-summary" className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold text-ink">{split.name}</span>
-          <span className="text-[10px] tabular-nums text-ink-faint">
-            {split.total.toLocaleString()} total · {split.unread.toLocaleString()} unread
-          </span>
-        </div>
-        <p className="truncate text-[11px] text-ink-faint">
-          {fallback
-            ? 'Everything that did not match an earlier split'
-            : `${split.match.operator === 'all' ? 'All' : 'Any'} of ${split.match.conditions.length} conditions`}
-        </p>
-      </div>
-      <label className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-ink-dim">
-        <input
-          data-testid="split-rule-notify"
-          type="checkbox"
-          checked={split.notify}
-          disabled={busy}
-          onChange={(event) => onNotify(event.target.checked)}
-        />
-        Notify
-      </label>
-      {readOnlyMatch ? (
-        <span data-testid="split-rule-action" className="w-28 text-right text-[10px] text-ink-faint">
-          {fallback ? 'Always last' : 'Built in'}
+        <span aria-hidden="true" className="size-5 text-center text-ink-faint">
+          ·
         </span>
-      ) : (
-        <div data-testid="split-rule-action" className="flex w-28 items-center justify-end gap-1">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="h-8 cursor-pointer rounded-md px-2 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            data-testid="split-rule-delete"
-            aria-label={`Delete ${split.name}`}
-            disabled={busy}
-            onClick={onDelete}
-            className="size-8 cursor-pointer rounded-md text-ink-faint hover:bg-danger hover:text-on-danger"
-          >
-            ×
-          </button>
-        </div>
       )}
+      <button
+        type="button"
+        data-testid="split-rule-summary"
+        onClick={onEdit}
+        disabled={busy}
+        aria-pressed={selected}
+        className="min-w-0 py-3 text-left"
+      >
+        <span className="block truncate text-xs text-ink">{split.name}</span>
+        <span className="mt-1 block truncate text-[10px] text-ink-dim">
+          {fallback
+            ? 'Remaining Inbox mail'
+            : split.id === IMPORTANT_SPLIT_ID
+              ? 'Gmail Important'
+              : `${split.match.conditions.length} ${split.match.conditions.length === 1 ? 'condition' : 'conditions'}`}
+        </span>
+      </button>
+      <span className="text-right text-[10px] tabular-nums text-ink-dim">
+        {fallback ? 'Last' : split.unread.toLocaleString()}
+      </span>
       <span className="sr-only">Position {index + 1}</span>
     </li>
   )
@@ -257,7 +234,14 @@ function SortableSplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
 
 export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Element {
   const { state, onSave, onNotify, onDelete, onReorder, onRestore, onClose } = props
-  const [draft, setDraft] = useState<RuleDraft | null>(null)
+  const [draft, setDraft] = useState<RuleDraft | null>(() => {
+    const first = state.splits[0]
+    return first && first.id !== IMPORTANT_SPLIT_ID && first.id !== OTHER_SPLIT_ID ? draftFor(first) : null
+  })
+  const [builtInId, setBuiltInId] = useState<string>(() =>
+    state.splits[0]?.id === OTHER_SPLIT_ID ? OTHER_SPLIT_ID : IMPORTANT_SPLIT_ID
+  )
+  const builtIn = state.splits.find((split) => split.id === builtInId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -304,16 +288,15 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || draggingId) return
       event.preventDefault()
-      if (draft) setDraft(null)
-      else onClose()
+      onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [draft, draggingId, onClose])
+  }, [draggingId, onClose])
 
   useEffect(() => {
-    if (editorOpen) nameInputRef.current?.focus()
-  }, [editorOpen])
+    if (editorOpen && !draft?.id) nameInputRef.current?.focus()
+  }, [editorOpen, draft?.id])
 
   const run = async (operation: () => Promise<void>): Promise<boolean> => {
     setBusy(true)
@@ -347,10 +330,11 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
   }
 
   return (
-    <div className="fixed inset-0 z-60 flex items-center justify-center bg-overlay p-8">
+    <div className="app-split-rules fixed inset-x-0 bottom-0 top-14 z-40 flex items-center justify-center bg-ground px-7 py-8">
       <button
         type="button"
         aria-label="Dismiss split rules"
+        data-tooltip=""
         data-testid="split-rules-backdrop"
         onClick={onClose}
         className="absolute inset-0 cursor-default"
@@ -360,178 +344,34 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
         aria-modal="true"
         aria-labelledby="split-rules-title"
         data-testid="split-rules"
-        className="relative flex max-h-[min(720px,90vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-edge bg-raised shadow-dialog"
+        className="relative flex h-full w-full max-w-[1024px] flex-col overflow-hidden bg-ground"
       >
-        <header className="flex h-14 flex-none items-center border-b border-edge px-5">
+        <header className="mb-7 flex flex-none items-start gap-5">
           <div>
-            <h2 id="split-rules-title" className="text-sm font-semibold text-ink">
-              Split inbox
+            <h2 id="split-rules-title" className="text-[21px] font-medium tracking-tight text-ink">
+              Split rules
             </h2>
-            <p className="text-[11px] text-ink-faint">First matching split wins. Other is always last.</p>
+            <p className="mt-6 text-xs text-ink-dim">
+              For {props.accountEmail ?? 'this account'}. A conversation appears in the first matching split.
+              Other always stays last.
+            </p>
           </div>
           <button
             type="button"
             aria-label="Close split rules"
             onClick={onClose}
-            className="ml-auto size-8 cursor-pointer rounded-md text-xl text-ink-faint hover:bg-active hover:text-ink"
+            className="ml-auto flex items-center gap-2 rounded-md px-2 py-1 text-xs text-ink-dim hover:bg-active"
           >
-            ×
+            Close <Kbd>Esc</Kbd>
           </button>
         </header>
 
-        {draft ? (
-          <form
-            data-testid="split-rule-editor"
-            className="min-h-0 flex-1 overflow-y-auto p-5"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void run(async () => {
-                await onSave({
-                  ...draft,
-                  conditions: draft.conditions.map(({ condition }) => condition)
-                })
-                setDraft(null)
-              })
-            }}
-          >
-            <label className="block text-xs font-semibold text-ink-dim">
-              Name
-              <input
-                ref={nameInputRef}
-                data-testid="split-rule-name"
-                value={draft.name}
-                maxLength={64}
-                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                className="mt-1.5 h-9 w-full rounded-md border border-edge bg-ground px-3 text-sm text-ink outline-none focus:border-accent"
-              />
-            </label>
-            <div className="mt-4 flex items-center gap-3">
-              <label className="text-xs font-semibold text-ink-dim" htmlFor="split-operator">
-                Match
-              </label>
-              <select
-                id="split-operator"
-                data-testid="split-rule-operator"
-                value={draft.operator}
-                onChange={(event) =>
-                  setDraft({ ...draft, operator: event.target.value === 'all' ? 'all' : 'any' })
-                }
-                className="h-8 rounded-md border border-edge bg-ground px-2 text-xs text-ink"
-              >
-                <option value="any">Any condition</option>
-                <option value="all">All conditions on one message</option>
-              </select>
+        <div className="flex min-h-0 flex-1">
+          <div className="min-h-0 w-56 shrink-0 overflow-y-auto border-r border-edge/60 pr-6 max-md:w-44 max-md:pr-3">
+            <div className="mb-3 flex justify-between px-3 text-[10px] text-ink-dim">
+              <span>Match order</span>
+              <span>Unread</span>
             </div>
-            <div className="mt-3 flex flex-col gap-2">
-              {draft.conditions.map(({ key, condition }, index) => (
-                <div key={key} data-testid="split-rule-condition" className="flex gap-2">
-                  <select
-                    aria-label={`Condition ${index + 1} type`}
-                    value={condition.type}
-                    onChange={(event) => {
-                      const type = event.target.value as SplitCondition['type']
-                      const next: SplitCondition = type === 'listIdPresent' ? { type } : { type, value: '' }
-                      const conditions = [...draft.conditions]
-                      conditions[index] = { key, condition: next }
-                      setDraft({ ...draft, conditions })
-                    }}
-                    className="h-9 w-52 rounded-md border border-edge bg-ground px-2 text-xs text-ink"
-                  >
-                    {CONDITION_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {CONDITION_LABELS[type]}
-                      </option>
-                    ))}
-                  </select>
-                  {conditionNeedsValue(condition) ? (
-                    <input
-                      aria-label={`Condition ${index + 1} value`}
-                      value={condition.value}
-                      onChange={(event) => {
-                        const conditions = [...draft.conditions]
-                        conditions[index] = {
-                          key,
-                          condition: { ...condition, value: event.target.value }
-                        }
-                        setDraft({ ...draft, conditions })
-                      }}
-                      placeholder={condition.type === 'label' ? 'IMPORTANT' : 'Value'}
-                      className="h-9 min-w-0 flex-1 rounded-md border border-edge bg-ground px-3 text-sm text-ink outline-none focus:border-accent"
-                    />
-                  ) : (
-                    <div className="flex h-9 min-w-0 flex-1 items-center px-3 text-xs text-ink-faint">
-                      Matches any stored List-Id header
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    aria-label={`Remove condition ${index + 1}`}
-                    disabled={draft.conditions.length === 1}
-                    onClick={() =>
-                      setDraft({
-                        ...draft,
-                        conditions: draft.conditions.filter((_, conditionIndex) => conditionIndex !== index)
-                      })
-                    }
-                    className="size-9 cursor-pointer rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-30"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                setDraft({
-                  ...draft,
-                  conditions: [...draft.conditions, draftCondition({ type: 'senderDomain', value: '' })]
-                })
-              }
-              className="mt-3 cursor-pointer text-xs font-semibold text-accent hover:underline"
-            >
-              Add condition
-            </button>
-            <label className="mt-5 flex items-center gap-2 text-xs text-ink-dim">
-              <input
-                type="checkbox"
-                checked={draft.notify}
-                onChange={(event) => setDraft({ ...draft, notify: event.target.checked })}
-              />
-              Show native notifications for this split
-            </label>
-            <p className="mt-4 rounded-md border border-edge bg-ground/60 p-3 text-[11px] leading-5 text-ink-faint">
-              Attachment rules use cached message metadata. After a database upgrade, Attn refreshes older
-              Inbox metadata in the background. Reading a split never starts a network request.
-            </p>
-            {error && (
-              <p role="alert" className="mt-3 text-xs text-danger">
-                {error}
-              </p>
-            )}
-            <footer className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setDraft(null)}
-                className="h-9 cursor-pointer rounded-md px-4 text-xs font-semibold text-ink-dim hover:bg-active"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={busy}
-                className="h-9 cursor-pointer rounded-md bg-accent px-4 text-xs font-semibold text-ground disabled:opacity-50"
-              >
-                Save split
-              </button>
-            </footer>
-          </form>
-        ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            <p id="split-reorder-help" className="sr-only">
-              Drag a handle to reorder splits. With a handle focused, use the Up and Down arrow keys.
-            </p>
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -560,7 +400,13 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                       index={index}
                       busy={busy}
                       onNotify={(notify) => void run(() => onNotify(split.id, notify))}
-                      onEdit={() => setDraft(draftFor(split))}
+                      selected={draft ? draft.id === split.id : builtInId === split.id}
+                      onEdit={() => {
+                        if (split.id === IMPORTANT_SPLIT_ID) {
+                          setDraft(null)
+                          setBuiltInId(split.id)
+                        } else setDraft(draftFor(split))
+                      }}
                       onDelete={() => void run(() => onDelete(split.id))}
                       onMove={(direction) => move(split.id, direction)}
                     />
@@ -572,7 +418,11 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                     index={orderedSplits.length}
                     busy={busy}
                     onNotify={(notify) => void run(() => onNotify(fallbackSplit.id, notify))}
-                    onEdit={noop}
+                    selected={!draft && builtInId === OTHER_SPLIT_ID}
+                    onEdit={() => {
+                      setDraft(null)
+                      setBuiltInId(OTHER_SPLIT_ID)
+                    }}
                     onDelete={noop}
                     onMove={noop}
                   />
@@ -594,13 +444,13 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               </DragOverlay>
             </DndContext>
 
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-edge pt-4">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setDraft(draftFor())}
-                className="h-9 cursor-pointer rounded-md bg-accent px-4 text-xs font-semibold text-ground"
+                className="h-9 cursor-pointer rounded-md px-2 text-xs text-accent"
               >
-                New split
+                ＋ New split
               </button>
               {state.restorablePresetIds.map((id) => (
                 <button
@@ -609,19 +459,235 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   data-testid="split-rule-restore"
                   disabled={busy}
                   onClick={() => void run(() => onRestore(id))}
-                  className="h-9 cursor-pointer rounded-md border border-edge px-3 text-xs font-semibold text-ink-dim hover:bg-active hover:text-ink"
+                  className="h-9 cursor-pointer rounded-md px-2 text-xs text-ink-dim hover:bg-active hover:text-ink"
                 >
                   Restore {PRESET_NAMES[id]}
                 </button>
               ))}
             </div>
+            <p
+              id="split-reorder-help"
+              className="mt-4 border-t border-edge px-3 pt-[18px] text-[11px] leading-[1.7] text-ink-dim"
+            >
+              First match wins.
+              <br />
+              Drag a handle to change the order. Other stays at the end.
+              <span className="sr-only">With a handle focused, use the Up and Down arrow keys.</span>
+            </p>
             {error && (
               <p role="alert" className="mt-3 text-xs text-danger">
                 {error}
               </p>
             )}
           </div>
-        )}
+
+          {draft ? (
+            <form
+              data-testid="split-rule-editor"
+              className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pl-[33px] pr-4 pt-2 max-md:pl-4"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void run(async () => {
+                  await onSave({
+                    ...draft,
+                    conditions: draft.conditions.map(({ condition }) => condition)
+                  })
+                  setDraft(null)
+                })
+              }}
+            >
+              <p className="mb-4 text-[11px] text-ink-dim">Current account · {props.accountEmail}</p>
+              <h3 className="mb-[22px] text-[17px] font-medium text-ink">{draft.name || 'New split'}</h3>
+              <label className="block text-[11px] text-ink-dim">
+                Split name
+                <input
+                  ref={nameInputRef}
+                  data-testid="split-rule-name"
+                  value={draft.name}
+                  maxLength={64}
+                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                  className="mt-1.5 h-9 w-full rounded-md border border-edge bg-ground px-3 text-[13px] text-ink outline-none focus:border-accent"
+                />
+              </label>
+              <div className="mt-[25px] mb-[19px] flex items-center gap-2.5">
+                <label className="text-xs text-ink" htmlFor="split-operator">
+                  Match
+                </label>
+                <select
+                  id="split-operator"
+                  data-testid="split-rule-operator"
+                  value={draft.operator}
+                  onChange={(event) =>
+                    setDraft({ ...draft, operator: event.target.value === 'all' ? 'all' : 'any' })
+                  }
+                  className="h-8 rounded-md border border-edge bg-ground px-2 text-xs text-ink"
+                >
+                  <option value="any">any</option>
+                  <option value="all">all</option>
+                </select>
+                <span className="text-xs text-ink">of these conditions</span>
+              </div>
+              <div className="flex flex-col gap-[11px]">
+                {draft.conditions.map(({ key, condition }, index) => (
+                  <div
+                    key={key}
+                    data-testid="split-rule-condition"
+                    className="grid grid-cols-[145px_minmax(0,1fr)_24px] items-center gap-2.5"
+                  >
+                    <select
+                      aria-label={`Condition ${index + 1} type`}
+                      value={condition.type}
+                      onChange={(event) => {
+                        const type = event.target.value as SplitCondition['type']
+                        const next: SplitCondition = type === 'listIdPresent' ? { type } : { type, value: '' }
+                        const conditions = [...draft.conditions]
+                        conditions[index] = { key, condition: next }
+                        setDraft({ ...draft, conditions })
+                      }}
+                      className="h-9 w-full rounded-md border border-edge bg-ground px-2 text-xs text-ink"
+                    >
+                      {CONDITION_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {CONDITION_LABELS[type]}
+                        </option>
+                      ))}
+                    </select>
+                    {conditionNeedsValue(condition) ? (
+                      <input
+                        aria-label={`Condition ${index + 1} value`}
+                        value={condition.value}
+                        onChange={(event) => {
+                          const conditions = [...draft.conditions]
+                          conditions[index] = {
+                            key,
+                            condition: { ...condition, value: event.target.value }
+                          }
+                          setDraft({ ...draft, conditions })
+                        }}
+                        placeholder={condition.type === 'label' ? 'IMPORTANT' : 'Value'}
+                        className="h-9 min-w-0 flex-1 rounded-md border border-edge bg-ground px-3 text-[11px] text-ink outline-none focus:border-accent"
+                      />
+                    ) : (
+                      <div className="flex h-9 min-w-0 flex-1 items-center px-3 text-xs text-ink-faint">
+                        Matches any stored List-Id header
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      aria-label={`Remove condition ${index + 1}`}
+                      disabled={draft.conditions.length === 1}
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          conditions: draft.conditions.filter((_, conditionIndex) => conditionIndex !== index)
+                        })
+                      }
+                      className="h-9 w-full cursor-pointer rounded-md text-ink-faint hover:bg-active hover:text-ink disabled:cursor-default disabled:opacity-30"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setDraft({
+                    ...draft,
+                    conditions: [...draft.conditions, draftCondition({ type: 'senderDomain', value: '' })]
+                  })
+                }
+                className="mt-3 mb-6 cursor-pointer text-[11px] text-accent hover:underline"
+              >
+                ＋ Add condition
+              </button>
+              <p className="mb-[27px] text-[11px] leading-[1.65] text-ink-dim">
+                {draft.operator === 'all'
+                  ? 'The same message must satisfy every condition.'
+                  : 'A thread matches when a message satisfies any condition.'}{' '}
+                Splits organize your view; they do not move mail.
+              </p>
+              <label className="flex items-center justify-between border-t border-edge pt-[23px] text-xs text-ink">
+                <span>
+                  Notify for this split
+                  <span className="mt-[7px] block text-[11px] text-ink-dim">
+                    Show a desktop alert for new matching mail.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  className="app-pref-toggle"
+                  checked={draft.notify}
+                  onChange={(event) => setDraft({ ...draft, notify: event.target.checked })}
+                />
+              </label>
+              {error && (
+                <p role="alert" className="mt-3 text-xs text-danger">
+                  {error}
+                </p>
+              )}
+              <footer className="mt-[35px] flex items-center gap-[19px]">
+                {draft.id && (
+                  <button
+                    type="button"
+                    data-testid="split-rule-delete"
+                    disabled={busy}
+                    className="order-2 ml-auto rounded-md px-2 py-2 text-[11px] text-ink-dim hover:bg-active"
+                    onClick={() => {
+                      const id = draft.id
+                      if (id)
+                        void run(() => onDelete(id)).then((saved) => {
+                          if (saved) setDraft(null)
+                        })
+                    }}
+                  >
+                    Delete split
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="h-9 cursor-pointer rounded-md bg-accent px-4 text-xs text-on-accent disabled:opacity-50"
+                >
+                  Save changes
+                </button>
+              </footer>
+              <p className="mt-[25px] border-t border-edge pt-[17px] text-[11px] text-ink-dim">
+                Changes apply to this account’s Inbox.
+              </p>
+            </form>
+          ) : (
+            <div className="min-w-0 flex-1 overflow-y-auto pl-[33px] pr-4 pt-2">
+              <p className="mb-4 text-[11px] text-ink-dim">Current account · {props.accountEmail}</p>
+              <h3 className="mb-[22px] text-[17px] font-medium text-ink">
+                {builtIn?.name ?? 'Select a split'}
+              </h3>
+              <p className="text-xs leading-6 text-ink-dim">
+                {builtInId === OTHER_SPLIT_ID
+                  ? 'Other contains Inbox mail that does not match an earlier split. It always stays last.'
+                  : 'Important uses Gmail’s Important label. Its matching rule cannot be edited.'}
+              </p>
+              {builtIn && (
+                <label className="mt-8 flex items-center justify-between border-t border-edge/50 pt-5 text-xs text-ink">
+                  <span>
+                    Notify for this split
+                    <span className="mt-[7px] block text-[11px] text-ink-dim">
+                      Show a desktop alert for new matching mail.
+                    </span>
+                  </span>
+                  <input
+                    data-testid="split-rule-notify"
+                    type="checkbox"
+                    checked={builtIn.notify}
+                    disabled={busy}
+                    className="app-pref-toggle"
+                    onChange={(event) => void run(() => onNotify(builtIn.id, event.target.checked))}
+                  />
+                </label>
+              )}
+            </div>
+          )}
+        </div>
       </section>
     </div>
   )

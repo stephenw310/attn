@@ -845,3 +845,76 @@
 .app-inline-composer [data-testid="composer-editor"] {
   min-height: 160px;
 }
+
+.app-settings [hidden] {
+  display: none;
+}
+
+.app-login-tide::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--attn-ground) 15%, transparent),
+    transparent 70%
+  );
+}
+[data-theme-appearance="dark"] .app-login-tide::after {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--attn-ground) 92%, transparent),
+    color-mix(in srgb, var(--attn-ground) 65%, transparent)
+  );
+}
+
+/* Settings controls share the approved compact switch geometry. */
+.app-pref-toggle {
+  appearance: none;
+  position: relative;
+  width: 32px;
+  height: 19px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--attn-edge);
+  cursor: pointer;
+}
+.app-pref-toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--attn-ink-dim);
+}
+.app-pref-toggle:checked {
+  background: var(--attn-accent);
+}
+.app-pref-toggle:checked::after {
+  left: 16px;
+  background: var(--attn-ground);
+}
+.app-pref-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.app-pref-toggle:focus-visible {
+  outline: 2px solid var(--attn-accent);
+  outline-offset: 3px;
+}
+.app-settings .app-setting-row .text-sm {
+  font-size: 13px;
+}
+.app-settings h2:not(.sr-only),
+.app-settings h3:not(.sr-only) {
+  font-weight: 450;
+}
+
+.app-settings .border-edge,
+.app-settings .app-setting-row,
+.app-split-rules .border-edge {
+  border-color: color-mix(in srgb, var(--attn-edge) 55%, var(--attn-ground));
+}

@@ -67,7 +67,7 @@ export function useAccountSession(options: Options): AccountSession {
   const [accountSwitchPending, setAccountSwitchPending] = useState(false)
   const accountSwitchPendingRef = useRef(false)
   const [removeAccountConfirm, setRemoveAccountConfirm] = useState(false)
-  const removeAccountDeleteRef = useRef<HTMLButtonElement | null>(null)
+  const removeAccountCancelRef = useRef<HTMLButtonElement | null>(null)
   const activeAccount = status.activeAccountId ?? status.email ?? null
 
   // Live roster health: seeded once, then pushed by the utility whenever any
@@ -214,10 +214,8 @@ export function useAccountSession(options: Options): AccountSession {
 
   useEffect(() => {
     if (!removeAccountConfirm) return
-    // Focus the first choice once, on open — an inline ref callback would
-    // re-run on every re-render and yank focus back onto the destructive
-    // button after the user tabbed to Keep or Cancel.
-    removeAccountDeleteRef.current?.focus()
+    // Keep keyboard focus on Cancel so opening the dialog never selects deletion.
+    removeAccountCancelRef.current?.focus()
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         event.stopPropagation()
@@ -245,7 +243,7 @@ export function useAccountSession(options: Options): AccountSession {
       // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is the pointer dismissal path
       <div
         data-testid="remove-account-dialog"
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-overlay"
         onClick={() => setRemoveAccountConfirm(false)}
       >
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: the handler only stops backdrop dismissal */}
@@ -253,25 +251,16 @@ export function useAccountSession(options: Options): AccountSession {
           role="dialog"
           aria-modal="true"
           aria-label={`Sign out of ${activeAccount}?`}
-          className="w-[460px] rounded-lg border border-edge bg-raised p-5 shadow-menu"
+          className="w-[min(480px,90vw)] rounded-lg border border-edge bg-raised p-6 shadow-dialog"
           onClick={(event) => event.stopPropagation()}
         >
-          <h2 className="text-sm font-semibold text-ink">Sign out of {activeAccount}?</h2>
+          <h2 className="text-lg font-semibold text-ink">Sign out of {activeAccount}?</h2>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
             This signs the account out and stops its sync. Choose what happens to its mail cached on this
             device: deleting removes every local trace; keeping leaves it dormant so adding the account again
             picks up where it left off.
           </p>
           <div className="mt-4 flex flex-col gap-1.5">
-            <button
-              type="button"
-              data-testid="remove-account-delete"
-              ref={removeAccountDeleteRef}
-              onClick={() => removeActiveAccount(true)}
-              className="w-full cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-accent/20"
-            >
-              Sign out and delete local data
-            </button>
             <button
               type="button"
               data-testid="remove-account-keep"
@@ -282,7 +271,16 @@ export function useAccountSession(options: Options): AccountSession {
             </button>
             <button
               type="button"
+              data-testid="remove-account-delete"
+              onClick={() => removeActiveAccount(true)}
+              className="w-full cursor-pointer rounded-md border border-edge px-3 py-1.5 text-[13px] font-medium text-danger hover:bg-active"
+            >
+              Sign out and delete local data
+            </button>
+            <button
+              type="button"
               data-testid="remove-account-cancel"
+              ref={removeAccountCancelRef}
               onClick={() => setRemoveAccountConfirm(false)}
               className="w-full cursor-pointer rounded-md px-3 py-1.5 text-[13px] text-ink-faint hover:bg-active hover:text-ink"
             >

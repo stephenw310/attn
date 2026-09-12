@@ -27,6 +27,7 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
   return (
     <div className="flex h-full flex-col">
       <MailHeader
+        preferencesOpen={c.settingsOpen || c.splitRulesOpen}
         pendingActionCount={c.pendingActionCount}
         pausedActionCount={c.pausedActionCount}
         outboxCount={c.realOutbox.length}
@@ -88,6 +89,10 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
               onAddAccount={c.accounts.addAccount}
               onReconnect={c.accounts.reconnectActions}
               onSignOut={c.accounts.requestRemoveAccount}
+              onOpenSplits={() => {
+                c.closeSettings()
+                c.setSplitRulesOpen(true)
+              }}
               onClose={c.closeSettings}
               focusControl={c.settingsFocus}
             />

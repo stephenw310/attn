@@ -96,11 +96,8 @@ export function AiSettingsSection(): React.JSX.Element {
     <div data-testid="settings-ai-controls">
       <label className={`mt-2 ${ROW}`}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-sm text-ink">AI reply drafting</span>
-          <span className={NOTE}>
-            Draft replies with your own AI provider and key. Off by default; turning it on shows exactly what
-            each invocation sends.
-          </span>
+          <span className="text-sm text-ink">Enable AI writing</span>
+          <span className={NOTE}>Use your provider to help draft replies.</span>
         </span>
         <input
           type="checkbox"
@@ -116,7 +113,7 @@ export function AiSettingsSection(): React.JSX.Element {
               write('enabled', false)
             }
           }}
-          className="size-4 cursor-pointer accent-accent"
+          className="app-pref-toggle"
         />
       </label>
       {confirming === 'enable' && (
@@ -149,10 +146,7 @@ export function AiSettingsSection(): React.JSX.Element {
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
           <span className="text-sm text-ink">Provider</span>
-          <span className={NOTE}>
-            Anthropic, or any OpenAI-compatible endpoint — including fully local models via Ollama or LM
-            Studio for a zero-cloud setup.
-          </span>
+          <span className={NOTE}>Your configuration is shared by every account.</span>
         </span>
         <select
           data-testid="settings-ai-provider"
@@ -248,8 +242,8 @@ export function AiSettingsSection(): React.JSX.Element {
         </span>
         {settings?.keyPresent ? (
           <span className="flex flex-none items-center gap-1.5">
-            <span data-testid="settings-ai-key-present" className="text-xs text-ink-dim">
-              Key saved
+            <span data-testid="settings-ai-key-present" className="font-mono text-xs text-ink-dim">
+              {settings.keyPreview ?? '••••••••'}
             </span>
             <button
               type="button"
@@ -287,8 +281,8 @@ export function AiSettingsSection(): React.JSX.Element {
 
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-sm text-ink">Voice</span>
-          <span className={NOTE}>The tone drafts aim for, plus standing rules every draft follows.</span>
+          <span className="text-sm text-ink">Voice tone</span>
+          <span className={NOTE}>Default tone for AI writing.</span>
         </span>
         <select
           data-testid="settings-ai-voice-tone"
@@ -310,11 +304,11 @@ export function AiSettingsSection(): React.JSX.Element {
 
       <div className={`${ROW} items-start`}>
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span className="text-sm text-ink">Standing rules</span>
+          <span className="text-sm text-ink">Writing rules</span>
           <textarea
             data-testid="settings-ai-voice-rules"
             aria-label="AI standing rules"
-            rows={10}
+            rows={4}
             placeholder={'e.g. sign off with "Best, Chao"; never use exclamation marks'}
             disabled={!settings}
             value={rulesValue}
@@ -351,7 +345,7 @@ export function AiSettingsSection(): React.JSX.Element {
           disabled={!settings}
           checked={settings?.voiceMatchingEnabled ?? false}
           onChange={(event) => write('voiceMatchingEnabled', event.target.checked)}
-          className="size-4 cursor-pointer accent-accent"
+          className="app-pref-toggle"
         />
       </label>
 
@@ -376,7 +370,7 @@ export function AiSettingsSection(): React.JSX.Element {
               write('autocompleteEnabled', false)
             }
           }}
-          className="size-4 cursor-pointer accent-accent"
+          className="app-pref-toggle"
         />
       </label>
       {confirming === 'autocomplete' && (
