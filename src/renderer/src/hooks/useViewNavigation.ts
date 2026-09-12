@@ -347,7 +347,6 @@ export function useViewNavigation(options: Options): ViewNavigation {
   const openOutboxNow = useCallback(() => {
     const options = latest.current
     const { records, viewRef, searchOpenRef, selectedThreadIdRef, selectedDraftIdRef } = options
-    options.closeSplitRules()
     if (viewRef.current === 'outbox') {
       if (searchOpenRef.current) {
         const record = records.searchReturn.current ?? EMPTY_RECORD
@@ -380,6 +379,7 @@ export function useViewNavigation(options: Options): ViewNavigation {
 
   const openOutbox = useCallback(() => {
     const options = latest.current
+    options.closeSplitRules()
     if (options.viewRef.current === 'outbox' && !options.searchOpenRef.current) return
     const inline = options.inlineComposerRef.current
     if (inline) {

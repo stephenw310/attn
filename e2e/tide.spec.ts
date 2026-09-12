@@ -81,6 +81,14 @@ test.describe('Tide split shell', () => {
     await page.getByTestId('outbox-count').click()
     await expect(page.getByTestId('split-rules')).toHaveCount(0)
     await expect(page.getByTestId('outbox-list')).toBeVisible()
+    for (const viaPalette of [false, true]) {
+      await runPaletteCommand(page, 'Manage inbox splits')
+      await expect(page.getByTestId('split-rules')).toBeVisible()
+      if (viaPalette) await runPaletteCommand(page, 'Go to Outbox')
+      else await page.getByTestId('outbox-count').click()
+      await expect(page.getByTestId('split-rules')).toHaveCount(0)
+      await expect(page.getByTestId('outbox-list')).toBeVisible()
+    }
   })
 
   test('Tide keeps Write fixed, restores sidebar preference, and boxes shortcut hints', async ({
