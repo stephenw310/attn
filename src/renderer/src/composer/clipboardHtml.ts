@@ -1,6 +1,17 @@
 import { cssDeclarations } from '../../../shared/css'
 import { COMPOSER_STYLE_PROPERTIES } from './sanitize'
 
+/** Expand ordinary font shorthands using the browser's CSS parser. */
+function expandFont(document: Document, value: string): string[] | null {
+  const probe = document.createElement('span')
+  probe.style.font = value
+  if (!probe.style.fontSize || !probe.style.fontFamily) return null
+  return ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']
+    .map((name) => [name, probe.style.getPropertyValue(name)])
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}: ${value}`)
+}
+
 /** Expand the small paragraph/span stylesheet emitted by macOS rich-text copy. */
 function expandCocoaStyles(html: string): string {
   const document = new DOMParser().parseFromString(html, 'text/html')
@@ -21,13 +32,9 @@ function expandCocoaStyles(html: string): string {
       for (const { property, value, raw } of cssDeclarations(match[2])) {
         if (value.includes('!')) return html
         if (property === 'font') {
-          const probe = document.createElement('span')
-          probe.style.font = value
-          if (!probe.style.fontSize || !probe.style.fontFamily) return html
-          for (const name of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']) {
-            const expanded = probe.style.getPropertyValue(name)
-            if (expanded) declarations.push(`${name}: ${expanded}`)
-          }
+          const expanded = expandFont(document, value)
+          if (!expanded) return html
+          declarations.push(...expanded)
         } else if (
           property === 'list-style-type' &&
           ((match[1].startsWith('ul.') && value === 'disc') ||
@@ -217,7 +224,8 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
         ].includes(property)
       )
         continue
-      if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
+      if (property === 'font') declarations.push(...(expandFont(document, value) ?? []))
+      else if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
       else declarations.push(raw)
     }
     if (declarations.length) element.setAttribute('style', declarations.join('; '))

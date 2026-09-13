@@ -114,3 +114,13 @@ it('uses clipboard plain text for unsupported CSS without interpreting markup', 
   )
   expect(result).toBe('<p>&lt;b&gt;literal&lt;/b&gt;<br>Second line</p>')
 })
+
+it('expands inline font shorthand while respecting later longhands', () => {
+  const result = prepareHtmlForEditor(
+    normalizeClipboardHtml('<p><span style="font:italic 16px Arial;font-size:18px">Sample</span></p>')
+  )
+  expect(result.issues).toEqual([])
+  expect(result.html).toContain('font-family: Arial')
+  expect(result.html).toContain('font-size: 18px')
+  expect(result.html).toContain('font-style: italic')
+})

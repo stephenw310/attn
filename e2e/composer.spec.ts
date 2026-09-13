@@ -1904,6 +1904,32 @@ for (const source of ['docs', 'notion'] as const) {
   })
 }
 
+test('inline fonts and inherited underline remain editable after paste', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Inline formatting')
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(
+    composer,
+    '<p><span style="font:italic 16px Arial">Font sample</span></p><p><u><span style="text-decoration:none">Underlined sample</span></u></p><p><s><span style="text-decoration:none">Struck sample</span></s></p>'
+  )
+  const font = composer.editor.getByText('Font sample', { exact: true })
+  const underline = composer.editor.getByText('Underlined sample', { exact: true })
+  await expect(font).toHaveCSS('font-style', 'italic')
+  await expect(font).toHaveCSS('font-size', '16px')
+  await expect(font).toHaveCSS('font-family', 'Arial')
+  await expect(underline).toHaveCSS('text-decoration-line', 'underline')
+  await expect(composer.editor.getByText('Struck sample', { exact: true })).toHaveCSS(
+    'text-decoration-line',
+    'line-through'
+  )
+  await page.keyboard.press('ControlOrMeta+Shift+f')
+  await underline.selectText()
+  await page.getByRole('button', { name: 'Underline', exact: true }).click()
+  await expect(underline).toHaveCSS('text-decoration-line', 'none')
+  await composer.expectSaved()
+})
+
 test('unsupported stylesheet paste remains editable without CSS emulation', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

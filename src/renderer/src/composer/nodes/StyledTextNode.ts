@@ -29,7 +29,7 @@ function styleConversion(element: HTMLElement): DOMConversionOutput {
   const decoration = style.textDecoration.trim().split(/\s+/)
   if (decoration.every((value) => ['none', 'underline', 'line-through'].includes(value))) {
     represented.add('text-decoration')
-    if (decoration.includes('none')) resets.push('underline', 'strikethrough')
+    // A descendant cannot cancel a decoration established by an ancestor.
     if (decoration.includes('underline')) formats.push('underline')
     if (decoration.includes('line-through')) formats.push('strikethrough')
   }
