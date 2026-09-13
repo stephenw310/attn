@@ -132,7 +132,8 @@ const INHERITED_TEXT_STYLES = new Set([
   'font-style',
   'font-weight',
   'line-height',
-  'text-decoration'
+  'text-decoration',
+  'white-space'
 ])
 
 /**
@@ -157,7 +158,11 @@ function materializeInheritedTextStyles(document: Document): void {
     const inherited = new Map<string, string>()
     for (const element of ancestors) {
       for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
-        if (INHERITED_TEXT_STYLES.has(property)) inherited.set(property, value)
+        if (
+          INHERITED_TEXT_STYLES.has(property) ||
+          (element.tagName === 'SPAN' && ['background', 'background-color'].includes(property))
+        )
+          inherited.set(property, value)
       }
     }
     if (inherited.size === 0) continue

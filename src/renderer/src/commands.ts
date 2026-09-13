@@ -354,6 +354,12 @@ export const COMMAND_SPECS = {
   },
   'composer.italic': { title: 'Italic', shortcut: 'Mod+I', context: 'composer' },
   'composer.underline': { title: 'Underline', shortcut: 'Mod+U', context: 'composer' },
+  'composer.pastePlainText': {
+    title: 'Paste without formatting',
+    shortcut: 'Mod+Shift+V',
+    context: 'composer'
+  },
+  'composer.clearFormatting': { title: 'Clear formatting', context: 'composer' },
   'composer.strikethrough': { title: 'Strikethrough', context: 'composer' },
   'composer.fontFamily': { title: 'Set font family', context: 'composer' },
   'composer.fontSize': { title: 'Set font size', context: 'composer' },

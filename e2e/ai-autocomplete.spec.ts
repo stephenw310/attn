@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { AUTOCOMPLETE_DEBOUNCE_MS, AUTOCOMPLETE_MIN_START_INTERVAL_MS } from '../src/shared/ai'
 import { ATTN_SIGNATURE_LINE } from '../src/shared/settings'
@@ -109,6 +111,55 @@ test('an AI-ready reply shows its shortcut tip, then completes the recipient nam
   const requests = await aiRequests(app)
   expect(requests[0].messages.at(-1)?.content).toContain('Hi Theo,\n\nWe are')
   await expect(preview(page)).toContainText('hiring next week.')
+})
+
+test('the continuation hint stays hidden before existing draft text', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await enableAi(page, false)
+  const composer = await openDesignReply(page)
+  await page.clock.install()
+  await composer.editor.locator('p').first().click()
+  await page.keyboard.type('Hello there')
+  await page.clock.fastForward(1500)
+  const tip = page.getByTestId('composer-ai-tip')
+  await expect(tip).toContainText('Continue draft with AI')
+  await page.keyboard.press('ArrowLeft')
+  // Typing also delivers the moved caret to Lexical in a hidden test window.
+  await page.keyboard.type('X')
+  await page.clock.fastForward(1500)
+  await expect(tip).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Earlier paragraph')
+  await page.clock.fastForward(1500)
+  await expect(tip).toHaveCount(0)
+  mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
+    await page.screenshot({ path: join(__dirname, `.artifacts/ai-hint-middle-${colorScheme}.png`) })
+  }
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.type(' End')
+  await page.clock.fastForward(1500)
+  await expect(tip).toContainText('Continue draft with AI')
+  const firstParagraph = composer.editor.locator('p').first()
+  await firstParagraph.evaluate((element) => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
+  await page.keyboard.type(' First paragraph end')
+  await expect(firstParagraph).toContainText('First paragraph end')
+  await page.clock.fastForward(1500)
+  await expect(tip).toContainText('Continue draft with AI')
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
+    await page.screenshot({ path: join(__dirname, `.artifacts/ai-hint-paragraph-end-${colorScheme}.png`) })
+  }
 })
 
 test('reply drafting alone sends no typing traffic; the opt-in suggests, Tab accepts as one undo', async ({

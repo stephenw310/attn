@@ -1,8 +1,18 @@
 import { $generateNodesFromDOM } from '@lexical/html'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
-import { $insertNodes } from 'lexical'
-import { useEffect } from 'react'
+import {
+  $getNodeByKey,
+  $getSelection,
+  $insertNodes,
+  $isRangeSelection,
+  $setSelection,
+  HISTORY_PUSH_TAG,
+  type RangeSelection
+} from 'lexical'
+import { useEffect, useRef } from 'react'
 import type { Draft } from '../../../shared/drafts'
+import { createCommand, registerCommands } from '../commands'
+import { normalizeClipboardHtml } from './clipboardHtml'
 import { $createImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { preserveBlankLineBlocks } from './rootNodes'
@@ -34,7 +44,35 @@ export function PasteContentPlugin({
   onPreservedContent: () => void
 }): null {
   const [editor] = useLexicalComposerContext()
+  const selectionRef = useRef<RangeSelection | null>(null)
   useEffect(() => {
+    let disposed = false
+    const unregisterSelection = editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(() => {
+        const selection = $getSelection()
+        if ($isRangeSelection(selection)) selectionRef.current = selection.clone()
+      })
+    })
+    const unregisterCommand = registerCommands([
+      createCommand('composer.pastePlainText', () => {
+        const selection = selectionRef.current?.clone()
+        void navigator.clipboard
+          .readText()
+          .then((text) => {
+            if (disposed || !selection || !text) return
+            editor.update(
+              () => {
+                if (!$getNodeByKey(selection.anchor.key) || !$getNodeByKey(selection.focus.key)) return
+                $setSelection(selection)
+                selection.insertRawText(text.replace(/\r\n?/g, '\n'))
+              },
+              { tag: HISTORY_PUSH_TAG }
+            )
+            editor.focus()
+          })
+          .catch(() => onError('Could not read clipboard text. Try pasting directly into the message.'))
+      })
+    ])
     // One handler per effect run: Lexical calls the root listener with
     // `(null, previousRoot)` on unregister, so the function removed there must
     // be the one that was added, or every re-run leaves a paste handler behind.
@@ -69,7 +107,7 @@ export function PasteContentPlugin({
       event.preventDefault()
       event.stopPropagation()
       void (async () => {
-        const prepared = prepareHtmlForEditor(html)
+        const prepared = prepareHtmlForEditor(normalizeClipboardHtml(html))
         if (prepared.issues.length > 0) onPreservedContent()
         const document = new DOMParser().parseFromString(prepared.html, 'text/html')
         preserveBlankLineBlocks(document)
@@ -98,10 +136,16 @@ export function PasteContentPlugin({
         editor.update(() => $insertNodes($generateNodesFromDOM(editor, document)))
       })()
     }
-    return editor.registerRootListener((root, previous) => {
+    const unregisterRoot = editor.registerRootListener((root, previous) => {
       previous?.removeEventListener('paste', onPaste, true)
       root?.addEventListener('paste', onPaste, true)
     })
+    return () => {
+      disposed = true
+      unregisterRoot()
+      unregisterSelection()
+      unregisterCommand()
+    }
   }, [draftId, editor, onAttachment, onError, onPreservedContent])
   return null
 }

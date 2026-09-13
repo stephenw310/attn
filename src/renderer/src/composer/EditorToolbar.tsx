@@ -3,13 +3,16 @@ import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lex
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $patchStyleText } from '@lexical/selection'
 import {
+  $addUpdateTag,
   $getNodeByKey,
   $getSelection,
   $isDecoratorNode,
   $isRangeSelection,
+  $isTextNode,
   $setSelection,
   FORMAT_ELEMENT_COMMAND,
   FORMAT_TEXT_COMMAND,
+  HISTORY_PUSH_TAG,
   type LexicalNode,
   type RangeSelection,
   type TextFormatType
@@ -192,6 +195,21 @@ export function EditorToolbar(): React.JSX.Element {
     },
     [editor, withSelection]
   )
+  const clearFormatting = useCallback(() => {
+    withSelection(() => {
+      $addUpdateTag(HISTORY_PUSH_TAG)
+      const selection = $getSelection()
+      if (!$isRangeSelection(selection)) return
+      if (!selection.isCollapsed()) {
+        for (const node of selection.extract()) {
+          if ($isTextNode(node)) node.setFormat(0).setStyle('')
+        }
+      }
+      selection.setFormat(0)
+      selection.setStyle('')
+      editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)
+    })
+  }, [editor, withSelection])
   const patchStyle = useCallback(
     (property: string, value: string) => {
       withSelection(() => {
@@ -255,6 +273,7 @@ export function EditorToolbar(): React.JSX.Element {
           setFallbackOpen(true)
         }),
         createCommand('composer.link', openLink),
+        createCommand('composer.clearFormatting', clearFormatting),
         createCommand('composer.strikethrough', () => format('strikethrough')),
         createCommand('composer.fontFamily', () => patchStyle('font-family', 'Arial, sans-serif')),
         createCommand('composer.fontSize', () => patchStyle('font-size', '14px')),
@@ -264,7 +283,7 @@ export function EditorToolbar(): React.JSX.Element {
         createCommand('composer.alignCenter', () => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'center')),
         createCommand('composer.alignRight', () => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'right'))
       ]),
-    [editor, format, openLink, patchStyle]
+    [editor, format, openLink, patchStyle, clearFormatting]
   )
 
   const button =
@@ -457,6 +476,13 @@ export function EditorToolbar(): React.JSX.Element {
                   }}
                 >
                   <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      className={menuButton}
+                      onClick={() => runMoreAction(clearFormatting)}
+                    >
+                      Clear formatting
+                    </button>
                     <button
                       type="button"
                       className={`${menuButton} line-through`}
