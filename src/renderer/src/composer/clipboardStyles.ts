@@ -51,9 +51,10 @@ export function snapshotClipboardStyles(source: Document): void {
     const inline = originalElements.map(
       (element, index) => (index === 0 ? source.body : element).getAttribute('style') ?? ''
     )
+    inline.unshift(source.documentElement.getAttribute('style') ?? '')
     for (const element of originalElements) element.removeAttribute('style')
     frame.body.append(...[...parsed.body.childNodes].map((node) => frame.importNode(node, true)))
-    const elements = [frame.body, ...frame.body.querySelectorAll<HTMLElement>('*')]
+    const elements = [frame.documentElement, frame.body, ...frame.body.querySelectorAll<HTMLElement>('*')]
     const css = sheets.join('\n') + inline.join(';')
     const properties = [...COMPOSER_STYLE_PROPERTIES, ...PRESERVED_STYLE_PROPERTIES]
       .filter(
@@ -129,7 +130,9 @@ export function snapshotClipboardStyles(source: Document): void {
       'writing-mode',
       'text-orientation'
     ])
-    const generated = materializeGeneratedContent(frame.body, view)
+    const generated = materializeGeneratedContent(frame.documentElement, view)
+    const rootBefore: Node[] = []
+    const rootAfter: Node[] = []
     for (let index = 0; index < elements.length; index++) {
       const element = elements[index]
       const snapshot = snapshots[index]
@@ -184,14 +187,18 @@ export function snapshotClipboardStyles(source: Document): void {
             .join(';')
         )
         span.style.whiteSpace = 'pre-wrap'
-        if (side === 'marker') {
+        if (element === frame.documentElement) {
+          ;(side === 'after' ? rootAfter : rootBefore).push(span)
+        } else if (side === 'marker') {
           element.style.listStyleType = 'none'
           element.prepend(span)
         } else if (side === 'before') element.prepend(span)
         else element.append(span)
       }
     }
-    const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
+    const children = [...rootBefore, ...frame.body.childNodes, ...rootAfter].map((node) =>
+      source.importNode(node, true)
+    )
     const direction = frame.body.dir || frame.documentElement.dir
     const language = frame.body.lang || frame.documentElement.lang
     if (frame.body.getAttribute('style')?.trim() || direction || language) {

@@ -3440,6 +3440,8 @@ test('preserves empty generated layout and flex item order', async ({ page }) =>
     composer,
     `<style>
     .clearfix::after {content:"";display:table;clear:both}
+    html::before {content:"Root banner"} html::after {content:"Root footer"}
+    .clearfix {position:relative} .floating {position:absolute;top:0;right:0}
     .floating {float:left} .row {display:flex} .second {order:-1}
     </style><div class="clearfix"><div class="floating">Float</div></div><div class="row"><div>First</div><div class="second">Second</div></div>`
   )
@@ -3451,4 +3453,7 @@ test('preserves empty generated layout and flex item order', async ({ page }) =>
   expect(html).toMatch(/clear:\s*both/)
   expect(html).toMatch(/display:\s*table/)
   expect(html).toMatch(/order:\s*-1/)
+  expect(html).toMatch(/position:\s*absolute/)
+  expect(html).toContain('Root banner')
+  expect(html).toContain('Root footer')
 })
