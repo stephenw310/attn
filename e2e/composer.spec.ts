@@ -3670,7 +3670,7 @@ test('respects atomic inline boundaries for text pseudos', async ({ page }) => {
   await composer.editor.click()
   await pasteHtml(
     composer,
-    '<style>.line::first-line{color:blue}.letter::first-letter{color:red}</style><p class="line"><span style="display:inline-block">A<br>B</span>Tail</p><p class="letter"><img width="20" height="20">Text</p>'
+    '<style>.line::first-line{color:blue}.letter::first-letter{color:red}</style><p class="line"><span style="display:inline-block">A<br>B</span>Tail</p><p class="letter"><img width="20" height="20">Text</p><p class="line"><span style="display:inline-block;width:100%">Full</span>SecondLine</p>'
   )
   await composer.expectSaved()
   const result = await page.evaluate(async () => {
@@ -3685,5 +3685,6 @@ test('respects atomic inline boundaries for text pseudos', async ({ page }) => {
     return { blue: colored('rgb(0, 0, 255)'), red: colored('rgb(255, 0, 0)') }
   })
   expect(result.blue).toContain('Tail')
+  expect(result.blue).not.toContain('SecondLine')
   expect(result.red).not.toContain('T')
 })

@@ -36,8 +36,12 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
   let pastLine = false
   while (walker.nextNode()) {
     if (walker.currentNode.nodeType === Node.ELEMENT_NODE) {
-      if (atomic(walker.currentNode as Element) && (walker.currentNode as Element).getClientRects().length)
+      if (atomic(walker.currentNode as Element) && (walker.currentNode as Element).getClientRects().length) {
         letterState = 2
+        firstRect ??= [...(walker.currentNode as Element).getClientRects()].find(
+          (rect) => rect.width > 0 && rect.height > 0
+        )
+      }
       if (
         (walker.currentNode as Element).tagName === 'BR' &&
         (walker.currentNode as Element).getClientRects().length
