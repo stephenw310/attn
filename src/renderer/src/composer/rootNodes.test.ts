@@ -147,6 +147,23 @@ it('preserves Cocoa paragraph geometry and inline background through save and re
 })
 
 it.each([
+  ['.x {--Accent:red;color:var(--Accent)}', '<p class="x">Text</p>', 'span', 'color', 'red'],
+  [
+    '.parent {--accent:red}.x {color:var(--missing,var(--accent))}',
+    '<div class="parent"><p class="x">Text</p></div>',
+    'span',
+    'color',
+    'red'
+  ],
+  ['@layer base {.x {color:red}}', '<p class="x">Text</p>', 'span', 'color', 'red'],
+  ['@layer base {.x {color:red}} .x {color:blue}', '<p class="x">Text</p>', 'span', 'color', 'blue'],
+  [
+    '@layer base {.x {color:red!important}} .x {color:blue!important}',
+    '<p class="x">Text</p>',
+    'span',
+    'color',
+    'red'
+  ],
   ['table {width:500px}', '<table><tr><td>Cell</td></tr></table>', 'table', 'width', '500px'],
   ['@media screen {table {width:400px}}', '<table><tr><td>Cell</td></tr></table>', 'table', 'width', '400px'],
   [

@@ -65,7 +65,8 @@ export function cssDeclarations(style: string): CssDeclaration[] {
   return splitCssDeclarations(style).flatMap((raw) => {
     const separator = raw.indexOf(':')
     if (separator <= 0) return []
-    const property = raw.slice(0, separator).replace(CSS_COMMENT, '').replace(/\s/g, '').toLowerCase()
+    const name = raw.slice(0, separator).replace(CSS_COMMENT, '').replace(/\s/g, '')
+    const property = name.startsWith('--') ? name : name.toLowerCase()
     if (!property) return []
     return [{ property, value: raw.slice(separator + 1).trim(), raw: raw.trim() }]
   })

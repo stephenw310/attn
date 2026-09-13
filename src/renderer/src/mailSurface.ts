@@ -899,22 +899,43 @@ export function forceLightMailCss(css: string): string {
 
 /** Snapshot applicable stylesheet declarations before a clipboard import removes stylesheets. */
 export function inlineClipboardStylesheets(document: Document): void {
-  type Declaration = { text: string; important: boolean; inline: boolean; specificity: Specificity }
+  type Declaration = {
+    text: string
+    important: boolean
+    inline: boolean
+    specificity: Specificity
+    layer: number
+  }
+  const layers = new Map<string, number>()
+  const layerIndex = (name: string): number => {
+    if (!layers.has(name)) layers.set(name, layers.size)
+    return layers.get(name) ?? 0
+  }
   const matched = new Map<Element, Declaration[]>()
-  const add = (element: Element, css: string, specificity: Specificity, inline = false): void => {
+  const add = (
+    element: Element,
+    css: string,
+    specificity: Specificity,
+    inline = false,
+    layer = Number.MAX_SAFE_INTEGER
+  ): void => {
     const declarations = matched.get(element) ?? []
     for (const { property, value } of cssDeclarations(css)) {
       declarations.push({
         text: `${property}: ${value.replace(IMPORTANT, '')}`,
         important: IMPORTANT.test(value),
         inline,
-        specificity
+        specificity,
+        layer
       })
     }
     matched.set(element, declarations)
   }
-  const visit = (css: string): void => {
+  const visit = (css: string, layerName = ''): void => {
     const source = css.replace(CSS_COMMENT, '')
+    for (const order of source.matchAll(/@layer\s+([^;{}]+);/g)) {
+      for (const name of order[1].split(',')) layerIndex(layerName + name.trim())
+    }
     let block = nextCssBlock(source, 0)
     while (block) {
       const close = matchingBlockEnd(source, block.open)
@@ -930,8 +951,14 @@ export function inlineClipboardStylesheets(document: Document): void {
             ? window.matchMedia(condition).matches
             : lightScreenMediaCanApply(condition))
         )
-          visit(content)
-        if (name === 'supports' && typeof CSS !== 'undefined' && CSS.supports(condition)) visit(content)
+          visit(content, layerName)
+        if (name === 'supports' && typeof CSS !== 'undefined' && CSS.supports(condition))
+          visit(content, layerName)
+        if (name === 'layer') {
+          const childLayer = (layerName ? `${layerName}.` : '') + (condition || `anonymous-${layers.size}`)
+          layerIndex(childLayer)
+          visit(content, childLayer)
+        }
       } else {
         for (const selector of splitCssList(block.prelude)) {
           let elements: NodeListOf<Element>
@@ -941,7 +968,13 @@ export function inlineClipboardStylesheets(document: Document): void {
             continue
           }
           for (const element of elements)
-            add(element, directDeclarations(content), selectorSpecificity(selector))
+            add(
+              element,
+              directDeclarations(content),
+              selectorSpecificity(selector),
+              false,
+              layerName ? layerIndex(layerName) : Number.MAX_SAFE_INTEGER
+            )
         }
       }
       block = nextCssBlock(source, close + 1)
@@ -954,9 +987,61 @@ export function inlineClipboardStylesheets(document: Document): void {
       (left, right) =>
         Number(left.important) - Number(right.important) ||
         Number(left.inline) - Number(right.inline) ||
+        (left.important ? right.layer - left.layer : left.layer - right.layer) ||
         compareSpecificity(left.specificity, right.specificity)
     )
     element.setAttribute('style', declarations.map(({ text }) => text).join('; '))
   }
   for (const style of document.querySelectorAll('style')) style.remove()
+}
+
+/** Resolve inherited custom properties while their definitions still exist. */
+export function resolveClipboardVariables(document: Document): void {
+  const inherited = new Map<Element, Map<string, string>>()
+  const substitute = (
+    value: string,
+    variables: Map<string, string>,
+    visiting: Set<string>
+  ): string | null => {
+    let result = value
+    let match = /var\s*\(/i.exec(result)
+    let expansions = 0
+    while (match) {
+      if (++expansions > 100) return null
+      const open = match.index + match[0].length - 1
+      const close = matchingDelimiterEnd(result, open, '(', ')')
+      const args = result.slice(open + 1, close)
+      const comma = args.indexOf(',')
+      const name = (comma < 0 ? args : args.slice(0, comma)).trim()
+      const fallback = comma < 0 ? null : args.slice(comma + 1).trim()
+      const raw = variables.get(name)
+      const next = new Set(visiting).add(name)
+      let replacement = raw !== undefined && !visiting.has(name) ? substitute(raw, variables, next) : null
+      if (replacement === null && fallback !== null) replacement = substitute(fallback, variables, visiting)
+      if (replacement === null) return null
+      result = result.slice(0, match.index) + replacement + result.slice(close + 1)
+      match = /var\s*\(/i.exec(result)
+    }
+    return result
+  }
+  for (const element of document.querySelectorAll('*')) {
+    const variables = new Map(element.parentElement ? inherited.get(element.parentElement) : undefined)
+    const declarations = cssDeclarations(element.getAttribute('style') ?? '')
+    for (const { property, value } of declarations)
+      if (property.startsWith('--')) variables.set(property, value)
+    const computedVariables = new Map<string, string>()
+    for (const [name, value] of variables) {
+      const computed = substitute(value, variables, new Set([name]))
+      if (computed !== null) computedVariables.set(name, computed)
+    }
+    inherited.set(element, computedVariables)
+    const resolved: string[] = []
+    for (const { property, value } of declarations) {
+      if (property.startsWith('--')) continue
+      const substituted = substitute(value, variables, new Set())
+      if (substituted !== null) resolved.push(`${property}: ${substituted}`)
+    }
+    if (resolved.length) element.setAttribute('style', resolved.join('; '))
+    else element.removeAttribute('style')
+  }
 }
