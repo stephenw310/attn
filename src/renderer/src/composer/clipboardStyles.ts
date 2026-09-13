@@ -87,8 +87,10 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
           )
           .map((property) => [
             property,
-            /^(?:min-|max-)?(?:width|height|(?:inline|block)-size)$/.test(property) && typed
-              ? (typed.get(property)?.toString() ?? computed.getPropertyValue(property))
+            /^(?:min-|max-)?(?:width|height|(?:inline|block)-size)$/.test(property)
+              ? typed?.get(property)?.toString() ||
+                (pseudo && computed.getPropertyValue(`--attn-snapshot-${property}`).trim()) ||
+                computed.getPropertyValue(property)
               : computed.getPropertyValue(property)
           ])
       )
@@ -119,6 +121,30 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       const style = frame.createElement('style')
       style.textContent = css
       frame.head.append(style)
+    }
+    // Mirror dimensions through non-inherited custom properties so the browser
+    // resolves the pseudo cascade and variables without converting percentages
+    // to used pixels. These properties never enter the serialized output.
+    const dimensions = properties.filter((name) =>
+      /^(?:min-|max-)?(?:width|height|(?:inline|block)-size)$/.test(name)
+    )
+    const cssApi = (view as Window & { CSS?: typeof CSS }).CSS
+    if (cssApi?.registerProperty) {
+      for (const name of dimensions)
+        cssApi.registerProperty({ name: `--attn-snapshot-${name}`, syntax: '*', inherits: false })
+      const mirror = (rules: CSSRuleList) => {
+        for (const rule of rules) {
+          if ('style' in rule) {
+            const style = (rule as CSSStyleRule).style
+            for (const name of dimensions) {
+              const value = style.getPropertyValue(name)
+              if (value) style.setProperty(`--attn-snapshot-${name}`, value, style.getPropertyPriority(name))
+            }
+          }
+          if ('cssRules' in rule) mirror((rule as CSSGroupingRule).cssRules)
+        }
+      }
+      for (const sheet of frame.styleSheets) mirror(sheet.cssRules)
     }
     // Read everything before changing the DOM so selectors and inheritance stay intact.
     const snapshots = elements.map((element) => ({

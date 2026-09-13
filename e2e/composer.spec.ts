@@ -3628,6 +3628,28 @@ test('keeps physical-size flex siblings responsive after paste', async ({ page }
   expect(sizes.second).toBe(400)
 })
 
+test('preserves responsive generated dimensions and grid areas', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.box::before{content:"";display:inline-block;width:50%;height:10px;background:red}.box{display:grid;grid-template-areas:"banner banner"}</style><div class="box">Content</div>'
+  )
+  const box = composer.editor.frameLocator('iframe').locator('div[style*="grid-template-areas"]')
+  await expect(box).toHaveCSS('grid-template-areas', '"banner banner"')
+  const result = await box.evaluate((element) => {
+    const generated = element.querySelector('span') as HTMLElement
+    const container = element as HTMLElement
+    container.style.display = 'block'
+    container.style.width = '400px'
+    const first = generated.getBoundingClientRect().width
+    container.style.width = '600px'
+    return { width: generated.style.width, first, second: generated.getBoundingClientRect().width }
+  })
+  expect(result).toEqual({ width: '50%', first: 200, second: 300 })
+})
+
 test('preserves automatic clipboard grid placement', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
