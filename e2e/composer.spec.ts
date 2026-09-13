@@ -3269,6 +3269,8 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     `<style>
     .attribute::before {content:attr(data-label)}
     .alternative::before {content:"★/" / "star"}
+    .image-content::before {content:url("https://clipboard-resource.attn.test/icons/check.svg") / "check"}
+    .image-label::before {content:url(https://clipboard-resource.attn.test/icons/check.svg) "Label"}
     .numbered {counter-reset:item}
     .numbered p::before {counter-increment:item;content:counter(item) ". "}
     @counter-style thumbs {system:cyclic;symbols:"👍"}
@@ -3281,7 +3283,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     .quoted::before {content:open-quote}
     .quoted::after {content:close-quote}
     .markers li::marker {content:"✓ ";color:red}
-  </style><p class="alternative">Symbol</p><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
+  </style><p class="image-content">Image</p><p class="image-label">Tail</p><p class="alternative">Symbol</p><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3292,6 +3294,8 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     (html) => new DOMParser().parseFromString(html, 'text/html').body.textContent,
     saved?.bodyHtml ?? ''
   )
+  expect(text).toContain('LabelTail')
+  expect(text).not.toContain('icons/check.svg')
   expect(text).toContain('★/Symbol')
   expect(text).not.toContain('star')
   expect(text).toContain('Prefix Attribute')

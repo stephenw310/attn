@@ -54,10 +54,31 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
       '‘',
       '’'
     ]
-    const tokens =
-      content.match(
-        /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:attr|counters?)\([^)]*\)|(?:no-)?(?:open|close)-quote|\//g
-      ) ?? []
+    const tokens: string[] = []
+    let token = ''
+    let quote = ''
+    let depth = 0
+    for (let index = 0; index < content.length; index++) {
+      const character = content[index]
+      if (character === '\\') {
+        token += character + (content[++index] ?? '')
+        continue
+      }
+      if (quote) {
+        token += character
+        if (character === quote) quote = ''
+        continue
+      }
+      if (character === '"' || character === "'") quote = character
+      else if (character === '(') depth++
+      else if (character === ')') depth = Math.max(0, depth - 1)
+      if (!quote && depth === 0 && (/\s/.test(character) || character === '/')) {
+        if (token) tokens.push(token)
+        token = ''
+        if (character === '/') tokens.push('/')
+      } else token += character
+    }
+    if (token) tokens.push(token)
     let text = ''
     for (const token of tokens) {
       if (token === '/') break
@@ -75,7 +96,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
         text += plural
           ? values.map((value) => formatClipboardCounter(value, style)).join(args[1] ? unquote(args[1]) : '')
           : formatClipboardCounter(values[values.length - 1], style)
-      } else {
+      } else if (/^(?:no-)?(?:open|close)-quote$/.test(token)) {
         const opening = token.endsWith('open-quote')
         if (!opening) quoteDepth = Math.max(0, quoteDepth - 1)
         const index = Math.min(quoteDepth, Math.floor(quotePairs.length / 2) - 1) * 2 + (opening ? 0 : 1)
