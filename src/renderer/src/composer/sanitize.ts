@@ -70,6 +70,54 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
   'width'
 ])
 
+// Safe presentation that remains read-only because Lexical does not round-trip it.
+export const PRESERVED_STYLE_PROPERTIES = new Set([
+  'display',
+  'opacity',
+  'transform',
+  'transform-origin',
+  'letter-spacing',
+  'word-spacing',
+  'text-transform',
+  'text-shadow',
+  'box-shadow',
+  'border-radius',
+  'overflow',
+  'overflow-x',
+  'overflow-y',
+  'max-width',
+  'min-width',
+  'max-height',
+  'min-height',
+  'box-sizing',
+  'text-overflow',
+  'word-break',
+  'writing-mode',
+  'text-orientation',
+  'text-indent',
+  'object-fit',
+  'object-position',
+  'flex',
+  'flex-direction',
+  'flex-wrap',
+  'flex-grow',
+  'flex-shrink',
+  'flex-basis',
+  'align-items',
+  'align-content',
+  'align-self',
+  'justify-content',
+  'justify-items',
+  'justify-self',
+  'gap',
+  'row-gap',
+  'column-gap',
+  'grid-template-columns',
+  'grid-template-rows',
+  'grid-column',
+  'grid-row'
+])
+
 const UNSAFE_STYLE_RESOURCE =
   /(?:url\s*\(|(?:-webkit-)?image-set\s*\(|(?:image|cross-fade|element|-moz-element|paint|src)\s*\(|expression\s*\(|javascript:|@import|behavior\s*:|(?:https?|data|cid|blob|file):|\/\/|\\|\/\*)/i
 
@@ -77,7 +125,9 @@ export function sanitizeComposerStyle(style: unknown): string {
   if (typeof style !== 'string') return ''
   return cssDeclarations(style)
     .filter(
-      ({ property, value }) => COMPOSER_STYLE_PROPERTIES.has(property) && !UNSAFE_STYLE_RESOURCE.test(value)
+      ({ property, value }) =>
+        (COMPOSER_STYLE_PROPERTIES.has(property) || PRESERVED_STYLE_PROPERTIES.has(property)) &&
+        !UNSAFE_STYLE_RESOURCE.test(value)
     )
     .map(({ raw }) => raw)
     .join('; ')

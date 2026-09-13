@@ -84,7 +84,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
         if (msg.type() !== 'error') return
         // The clipboard isolation case deliberately probes its no-resource CSP.
         if (
-          msg.text().includes('clipboard-resource.invalid/') &&
+          msg.text().includes('clipboard-resource.attn.test/') &&
           msg.text().includes('Content Security Policy')
         )
           return

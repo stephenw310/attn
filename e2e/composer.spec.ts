@@ -3034,7 +3034,23 @@ test('Drafts and Outbox display whitespace subjects without changing their store
 
 test('snapshots complex clipboard CSS with the browser cascade through save and reopen', async ({ page }) => {
   test.setTimeout(180_000)
+  await page.route('https://clipboard-resource.attn.test/**', (route) => route.abort())
   const cases: string[][] = [
+    [
+      '.x {display:inline;opacity:.5;transform:rotate(5deg);letter-spacing:2px}',
+      '<p class="x">Text</p>',
+      'p',
+      'opacity',
+      '0.5'
+    ],
+    [
+      'img[src] {border:5px solid red}',
+      '<img src="https://clipboard-resource.attn.test/picture.png" alt="Picture">',
+      'img',
+      'border-width',
+      '5px'
+    ],
+
     [
       '@scope (.outer) {.x {color:red}}',
       '<div class="outer"><p class="x">Text</p></div>',
@@ -3203,7 +3219,7 @@ test('snapshots complex clipboard CSS with the browser cascade through save and 
 
 test('clipboard CSS snapshot cannot execute scripts or load CSS resources', async ({ page }) => {
   const requests: string[] = []
-  await page.route('https://clipboard-resource.invalid/**', async (route) => {
+  await page.route('https://clipboard-resource.attn.test/**', async (route) => {
     requests.push(route.request().url())
     await route.abort()
   })
@@ -3213,10 +3229,46 @@ test('clipboard CSS snapshot cannot execute scripts or load CSS resources', asyn
   await composer.editor.click()
   await pasteHtml(
     composer,
-    '<style>@import url("https://clipboard-resource.invalid/import.css"); .x {color:red;background-image:url("https://clipboard-resource.invalid/image.png")}</style><p class="x" onclick="window.clipboardScriptRan=true">Safe text</p><script>window.clipboardScriptRan=true</script>'
+    '<style>@import url("https://clipboard-resource.attn.test/import.css"); .x {color:red;background-image:url("https://clipboard-resource.attn.test/image.png")}</style><p class="x" onclick="window.clipboardScriptRan=true">Safe text</p><script>window.clipboardScriptRan=true</script>'
   )
   await composer.expectSaved()
   expect(await page.evaluate(() => 'clipboardScriptRan' in window)).toBe(false)
   expect(requests).toEqual([])
   expect(await page.locator('iframe[aria-hidden="true"]').count()).toBe(0)
+})
+
+test('materializes clipboard attributes, counters, quotes, and list markers', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Generated CSS text')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    `<style>
+    .attribute::before {content:attr(data-label)}
+    .numbered {counter-reset:item}
+    .numbered p::before {counter-increment:item;content:counter(item) ". "}
+    .quoted::before {content:open-quote}
+    .quoted::after {content:close-quote}
+    .markers li::marker {content:"✓ ";color:red}
+  </style><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
+  )
+  await composer.expectSaved()
+  const saved = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Generated CSS text')
+    return draft ? await window.attn.draft.get(draft.id) : null
+  })
+  const text = await page.evaluate(
+    (html) => new DOMParser().parseFromString(html, 'text/html').body.textContent,
+    saved?.bodyHtml ?? ''
+  )
+  expect(text).toContain('Prefix Attribute')
+  expect(text).toContain('1. First')
+  expect(text).toContain('2. Second')
+  expect(text).toContain('“Quoted”')
+  expect(text).toContain('✓ Marked')
+  expect(saved?.bodyHtml).toContain('list-style-type: none')
+  await expect(composer.editor.locator('iframe')).toHaveCount(1)
+  await page.mouse.move(0, 0)
+  await page.screenshot({ path: join(__dirname, '.artifacts/clipboard-generated-content.png') })
 })
