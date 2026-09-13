@@ -3570,6 +3570,35 @@ test('preserves logical clipboard dimensions', async ({ page }) => {
   await expect(card).toHaveCSS('height', '100px')
 })
 
+test('keeps logical-size flex siblings responsive after paste', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.row{display:flex}.fixed{inline-size:200px;flex-shrink:0}.fluid{flex:1}</style><div class="row"><div class="fixed">Fixed</div><div class="fluid">Fluid</div></div>'
+  )
+  const fluid = composer.editor.frameLocator('iframe').getByText('Fluid', { exact: true })
+  const sizes = await fluid.evaluate((element) => {
+    let item = element as HTMLElement
+    while (item.parentElement && getComputedStyle(item.parentElement).display !== 'flex')
+      item = item.parentElement
+    const parent = item.parentElement
+    if (!parent) throw new Error('Missing flex container')
+    parent.style.width = '500px'
+    const first = item.getBoundingClientRect().width
+    parent.style.width = '600px'
+    return {
+      first,
+      second: item.getBoundingClientRect().width,
+      inlineSize: item.style.inlineSize
+    }
+  })
+  expect(sizes.inlineSize).not.toMatch(/px/)
+  expect(sizes.first).toBe(300)
+  expect(sizes.second).toBe(400)
+})
+
 test('preserves multicolumn clipboard layouts', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
