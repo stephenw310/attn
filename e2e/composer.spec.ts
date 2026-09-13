@@ -3662,3 +3662,28 @@ test('ignores hidden breaks and retains fixed table layout on paste', async ({ p
   expect(result.blue).toContain('Visible')
   expect(result.html).toMatch(/table-layout:\s*fixed/)
 })
+
+test('respects atomic inline boundaries for text pseudos', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Atomic text boundaries')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.line::first-line{color:blue}.letter::first-letter{color:red}</style><p class="line"><span style="display:inline-block">A<br>B</span>Tail</p><p class="letter"><img width="20" height="20">Text</p>'
+  )
+  await composer.expectSaved()
+  const result = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Atomic text boundaries')
+    const html = draft ? ((await window.attn.draft.get(draft.id))?.bodyHtml ?? '') : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const colored = (color: string) =>
+      [...doc.querySelectorAll('span')]
+        .filter((span) => span.style.color === color)
+        .map((span) => span.textContent)
+        .join('')
+    return { blue: colored('rgb(0, 0, 255)'), red: colored('rgb(255, 0, 0)') }
+  })
+  expect(result.blue).toContain('Tail')
+  expect(result.red).not.toContain('T')
+})
