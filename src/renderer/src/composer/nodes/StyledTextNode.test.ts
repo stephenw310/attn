@@ -60,12 +60,7 @@ it('retains CSS emphasis that format flags cannot fully represent through HTML e
       throw error
     }
   })
-  const styles = [
-    'text-decoration: overline',
-    'text-decoration: underline dotted red',
-    'font-weight: 500',
-    'font-style: oblique 10deg'
-  ]
+  const styles = ['text-decoration: overline', 'font-weight: 500', 'font-style: oblique 10deg']
   editor.update(
     () => {
       const html = prepareHtmlForEditor(
@@ -162,4 +157,12 @@ it('keeps code typography on every preformatted line and tab', () => {
     },
     { discrete: true }
   )
+})
+
+it('preserves distinct decorations on nested inline ancestors', () => {
+  const html =
+    '<span style="text-decoration:underline solid red"><span style="text-decoration:line-through dotted blue">X</span></span>'
+  const prepared = prepareHtmlForEditor(html)
+  expect(prepared.issues.length).toBeGreaterThan(0)
+  expect(restoreOpaqueHtml(prepared.html)).toBe(html)
 })

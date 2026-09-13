@@ -280,11 +280,7 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   }
   for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
-    if (
-      property === 'text-decoration' &&
-      ['div', 'p', 'blockquote', 'ul', 'ol', 'li'].includes(tag) &&
-      !/^(?:none|underline|line-through|overline|\s)*$/.test(value)
-    )
+    if (property === 'text-decoration' && !/^(?:none|underline|line-through|overline|\s)*$/.test(value))
       return `${tag}[text-decoration]`
     if (property === 'white-space' && value === 'nowrap') return `${tag}[white-space]`
     if (property === 'list-style-type' || property === 'font') return `${tag}[style:${property}]`

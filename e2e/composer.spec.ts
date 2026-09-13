@@ -3468,7 +3468,7 @@ test('preserves differently styled propagated decorations from clipboard CSS', a
   await composer.editor.click()
   await pasteHtml(
     composer,
-    '<style>.outer{text-decoration:underline solid red}.inner{text-decoration:line-through dotted blue}</style><div class="outer"><p class="inner">Combined</p></div>'
+    '<style>.outer{text-decoration:underline solid red}.inner{text-decoration:line-through dotted blue}</style><div class="outer"><p class="inner">Combined</p></div><span class="outer"><span class="inner">Inline</span></span><table class="outer"><tr><td class="inner">Cell</td></tr></table>'
   )
   await composer.expectSaved()
   const html = await page.evaluate(async () => {
@@ -3478,5 +3478,5 @@ test('preserves differently styled propagated decorations from clipboard CSS', a
   expect(html).toMatch(/text-decoration:[^";]*underline/)
   expect(html).toMatch(/text-decoration:[^";]*line-through/)
   expect(html).toContain('dotted')
-  await expect(composer.editor.locator('iframe')).toHaveCount(1)
+  await expect(composer.editor.locator('iframe')).toHaveCount(3)
 })
