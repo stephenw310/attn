@@ -20,18 +20,20 @@ describe('composer HTML fidelity', () => {
     // into a text highlight, and the recipient sees a different mail.
     const html =
       '<table><tbody><tr><td style="background-color:#eee">Shaded</td></tr></tbody></table>' +
-      '<div style="background-color:#ffc;padding:12px">Highlight</div>'
-    expect(draftHtmlFidelityIssues(html)).toEqual([])
+      '<div style="background-color:#ffc; padding:12px">Highlight</div>'
+    expect(draftHtmlFidelityIssues(html)).toEqual(['div[block:background-color]'])
     const prepared = prepareHtmlForEditor(html)
 
-    expect(prepared.issues).toEqual([])
-    expect(prepared.html).not.toContain('data-attn-opaque')
+    expect(prepared.issues).toEqual(['div[block:background-color]'])
+    expect(prepared.html).toContain('data-attn-opaque')
     expect(prepared.html).toContain('<td style="background-color: #eee">Shaded</td>')
-    expect(prepared.html).toContain('<div style="background-color: #ffc; padding: 12px">Highlight</div>')
+    expect(restoreOpaqueHtml(prepared.html)).toContain(
+      '<div style="background-color:#ffc; padding:12px">Highlight</div>'
+    )
 
-    const outgoing = sanitizeOutgoingHtml(prepared.html)
+    const outgoing = sanitizeOutgoingHtml(restoreOpaqueHtml(prepared.html))
     expect(outgoing).toContain('<td style="background-color: #eee">Shaded</td>')
-    expect(outgoing).toContain('<div style="background-color: #ffc; padding: 12px">Highlight</div>')
+    expect(outgoing).toContain('<div style="background-color:#ffc; padding:12px">Highlight</div>')
   })
 
   it('keeps Gmail CID image metadata on the editable image path', () => {

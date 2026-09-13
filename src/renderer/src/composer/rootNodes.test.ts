@@ -8,6 +8,7 @@ import { QuoteNode } from '@lexical/rich-text'
 import { TableCellNode, TableNode, TableRowNode } from '@lexical/table'
 import { $getRoot, TextNode } from 'lexical'
 import { describe, expect, it } from 'vitest'
+import { normalizeClipboardHtml } from './clipboardHtml'
 import { GmailSignatureNode } from './nodes/GmailSignatureNode'
 import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { ImageNode } from './nodes/ImageNode'
@@ -118,6 +119,31 @@ describe('root-level node normalization', () => {
       'Hi there,\nThis is a test of email format.\nHopefully it looks good\n\nBests,\nChao Wu\nhttps://chaowu.xyz'
     )
   })
+})
+
+it('preserves Cocoa paragraph geometry and inline background through save and reload', () => {
+  const source =
+    '<meta name="Generator" content="Cocoa HTML Writer">' +
+    '<style>p.p1 { padding-left: 40px }</style>' +
+    '<p class="p1" style="background-color:yellow">Text</p>'
+  let html = normalizeClipboardHtml(source)
+  for (let round = 0; round < 2; round++) {
+    const target = editor()
+    target.update(
+      () => {
+        const prepared = prepareHtmlForEditor(html)
+        const document = new DOMParser().parseFromString(prepared.html, 'text/html')
+        $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
+        html = restoreOpaqueHtml($generateHtmlFromNodes(target))
+        const restored = new DOMParser().parseFromString(html, 'text/html')
+        const paragraph = restored.querySelector<HTMLParagraphElement>('p.p1')
+        expect(paragraph?.style.paddingLeft).toBe('40px')
+        expect(paragraph?.style.backgroundColor).toBe('yellow')
+        expect(paragraph?.textContent).toBe('Text')
+      },
+      { discrete: true }
+    )
+  }
 })
 
 it('preserves styled list items inside one valid enclosing list through Lexical export', () => {

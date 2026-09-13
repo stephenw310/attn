@@ -255,6 +255,15 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
     if (property === 'list-style-type') return `${tag}[style:${property}]`
+    // Text styles are materialized on editable runs. Block paint and geometry
+    // are not serialized by the paragraph/list/quote nodes.
+    if (
+      ['p', 'div', 'blockquote', 'ul', 'ol', 'li'].includes(tag) &&
+      !INHERITED_TEXT_STYLES.has(property) &&
+      property !== 'text-align' &&
+      !(/^(margin|padding)/.test(property) && /^(?:0(?:\.0+)?(?:px)?\s*){1,4}$/.test(value))
+    )
+      return `${tag}[block:${property}]`
     if (
       tag === 'span' &&
       /^(border|padding|margin|width$|height$)/.test(property) &&
