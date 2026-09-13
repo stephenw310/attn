@@ -1,6 +1,28 @@
 import { cssDeclarations } from '../../../shared/css'
 import { COMPOSER_STYLE_PROPERTIES } from './sanitize'
 
+function expandFont(document: Document, value: string): string[] {
+  // Some CSS parsers accept stretch keywords but omit their longhand.
+  // Restrict the prefix to components that we explicitly expand.
+  if (
+    !/^(?:(?:normal|italic|oblique|bold|bolder|lighter|[1-9]00)\s+)*\d*\.?\d+(?:px|pt|em|rem|%)\b/i.test(
+      value
+    )
+  )
+    return [`font: ${value}`]
+  const expandedStyles: string[] = []
+  const probe = document.createElement('span')
+  probe.style.font = value
+  if ([probe.style.fontVariant, probe.style.fontStretch].some((value) => value && value !== 'normal'))
+    return [`font: ${value}`]
+  if (!probe.style.fontSize || !probe.style.fontFamily) return [`font: ${value}`]
+  for (const name of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']) {
+    const expanded = probe.style.getPropertyValue(name)
+    if (expanded) expandedStyles.push(`${name}: ${expanded}`)
+  }
+  return expandedStyles
+}
+
 /** Expand the small paragraph/span stylesheet emitted by macOS rich-text copy. */
 function expandCocoaStyles(html: string): string {
   const document = new DOMParser().parseFromString(html, 'text/html')
@@ -21,23 +43,7 @@ function expandCocoaStyles(html: string): string {
       for (const { property, value, raw } of cssDeclarations(match[2])) {
         if (value.includes('!')) return html
         if (property === 'font') {
-          // Some CSS parsers accept stretch keywords but omit their longhand.
-          // Restrict the prefix to components that we explicitly expand.
-          if (
-            !/^(?:(?:normal|italic|oblique|bold|bolder|lighter|[1-9]00)\s+)*\d*\.?\d+(?:px|pt|em|rem|%)\b/i.test(
-              value
-            )
-          )
-            return html
-          const probe = document.createElement('span')
-          probe.style.font = value
-          if ([probe.style.fontVariant, probe.style.fontStretch].some((value) => value && value !== 'normal'))
-            return html
-          if (!probe.style.fontSize || !probe.style.fontFamily) return html
-          for (const name of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']) {
-            const expanded = probe.style.getPropertyValue(name)
-            if (expanded) declarations.push(`${name}: ${expanded}`)
-          }
+          declarations.push(...expandFont(document, value))
         } else if (
           property === 'list-style-type' &&
           ((match[1].startsWith('ul.') && value === 'disc') ||
@@ -213,7 +219,8 @@ export function normalizeClipboardHtml(html: string): string {
         ].includes(property)
       )
         continue
-      if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
+      if (property === 'font') declarations.push(...expandFont(document, value))
+      else if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
       else declarations.push(raw)
     }
     if (declarations.length) element.setAttribute('style', declarations.join('; '))

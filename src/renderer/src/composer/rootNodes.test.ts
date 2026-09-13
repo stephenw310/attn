@@ -181,6 +181,53 @@ it.each([
   }
 })
 
+it.each(['small-caps 13px Helvetica', 'condensed 13px Helvetica', 'oblique 10deg 13px Helvetica'])(
+  'preserves unsupported font shorthand through save and reload: %s',
+  (font) => {
+    for (const source of [
+      `<meta name="Generator" content="Cocoa HTML Writer"><style>p.p1 {font:${font}}</style><p class="p1">Text</p>`,
+      `<span style="font:${font}">Text</span>`
+    ]) {
+      let html = normalizeClipboardHtml(source)
+      for (let round = 0; round < 2; round++) {
+        const target = editor()
+        target.update(
+          () => {
+            const prepared = prepareHtmlForEditor(html)
+            expect(prepared.issues.length).toBeGreaterThan(0)
+            const document = new DOMParser().parseFromString(prepared.html, 'text/html')
+            $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
+            html = restoreOpaqueHtml($generateHtmlFromNodes(target))
+            expect(html).toContain(`font: ${font}`)
+          },
+          { discrete: true }
+        )
+      }
+    }
+  }
+)
+
+it('imports supported inline font shorthand as editable text formatting', () => {
+  const target = editor()
+  target.update(
+    () => {
+      const prepared = prepareHtmlForEditor(
+        normalizeClipboardHtml('<span style="font:italic bold 16px/1.5 Georgia">Text</span>')
+      )
+      expect(prepared.issues).toEqual([])
+      const document = new DOMParser().parseFromString(prepared.html, 'text/html')
+      $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
+      const text = $getRoot().getAllTextNodes()[0]
+      expect(text.hasFormat('bold')).toBe(true)
+      expect(text.hasFormat('italic')).toBe(true)
+      expect(text.getStyle()).toContain('font-family: Georgia')
+      expect(text.getStyle()).toContain('font-size: 16px')
+      expect(text.getStyle()).toContain('line-height: 1.5')
+    },
+    { discrete: true }
+  )
+})
+
 it('preserves styled list items inside one valid enclosing list through Lexical export', () => {
   const target = editor()
   const source = '<ul><li style="list-style-type: square">Item</li><li>Other</li></ul>'

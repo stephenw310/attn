@@ -42,8 +42,6 @@ describe('Cocoa clipboard text', () => {
       cocoa('table {width:500px}', '<table><tr><td>Cell</td></tr></table>'),
       cocoa('@media print {p.p1 {color:red}}', '<p class="p1">Text</p>'),
       cocoa('p.p1 {min-height:100px}', '<p class="p1">Layout</p>'),
-      cocoa('p.p1 {font:small-caps 13px Helvetica}', '<p class="p1">Text</p>'),
-      cocoa('p.p1 {font:condensed 13px Helvetica}', '<p class="p1">Text</p>'),
       cocoa('p.p1 {position:absolute}', '<p class="p1">Positioned</p>')
     ]
     for (const html of cases) expect(normalizeClipboardHtml(html)).toBe(html)

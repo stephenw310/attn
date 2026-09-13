@@ -43,6 +43,7 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
   'border-top',
   'border-width',
   'color',
+  'font',
   'font-family',
   'font-size',
   'font-style',
