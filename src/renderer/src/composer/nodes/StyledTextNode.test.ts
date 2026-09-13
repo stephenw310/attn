@@ -113,3 +113,37 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
     { discrete: true }
   )
 })
+
+it('retains outer span borders and padding when materializing nested emphasis or highlights', () => {
+  const editor = createHeadlessEditor({
+    nodes: [
+      StyledTextNode,
+      {
+        replace: TextNode,
+        with: (node: TextNode) => new StyledTextNode(node.getTextContent()),
+        withKlass: StyledTextNode
+      }
+    ],
+    onError: (error) => {
+      throw error
+    }
+  })
+  editor.update(
+    () => {
+      const html = prepareHtmlForEditor(
+        '<p><span style="border:2px solid red;padding:4px"><b>Badge</b></span></p><p><span style="background-color:yellow;border:1px solid blue;padding:3px">Highlight</span></p>'
+      ).html
+      $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
+      const [badge, highlight] = $getRoot().getAllTextNodes()
+      expect(badge.getStyle()).toContain('border: 2px solid red')
+      expect(badge.getStyle()).toContain('padding: 4px')
+      expect(badge.hasFormat('bold')).toBe(true)
+      expect(highlight.getStyle()).toContain('border: 1px solid blue')
+      expect(highlight.getStyle()).toContain('padding: 3px')
+      const exported = $generateHtmlFromNodes(editor)
+      expect(exported).toContain('border: 2px solid red')
+      expect(exported).toContain('padding: 3px')
+    },
+    { discrete: true }
+  )
+})

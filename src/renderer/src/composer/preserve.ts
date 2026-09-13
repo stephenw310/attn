@@ -165,7 +165,7 @@ function materializeInheritedTextStyles(document: Document): void {
       for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
         if (
           INHERITED_TEXT_STYLES.has(property) ||
-          (element.tagName === 'SPAN' && ['background', 'background-color'].includes(property))
+          (element.tagName === 'SPAN' && COMPOSER_STYLE_PROPERTIES.has(property))
         )
           inherited.set(property, value)
       }
