@@ -219,6 +219,32 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       'text-orientation'
     ])
     const generated = materializeGeneratedContent(frame.documentElement, view)
+    // Freeze the captured cascade before synthetic children can match source selectors.
+    for (const sheet of frame.styleSheets) sheet.disabled = true
+    frame.adoptedStyleSheets = []
+    const measurementSheet = new (view as Window & { CSSStyleSheet: typeof CSSStyleSheet }).CSSStyleSheet()
+    frame.adoptedStyleSheets = [measurementSheet]
+    for (let index = 0; index < elements.length; index++) {
+      const element = elements[index]
+      element.setAttribute('data-attn-measure', String(index))
+      element.setAttribute(
+        'style',
+        [...snapshots[index].style].map(([name, value]) => `${name}:${value}`).join(';')
+      )
+      for (const [side, pseudo] of [
+        ['firstLine', 'first-line'],
+        ['firstLetter', 'first-letter']
+      ] as const) {
+        const styles = [...snapshots[index][side]].filter(
+          ([name, value]) => value && value !== snapshots[index].style.get(name)
+        )
+        measurementSheet.insertRule(
+          `[data-attn-measure="${index}"]::${pseudo}{${styles.map(([name, value]) => `${name}:${value}`).join(';')}}`
+        )
+      }
+    }
+
+    applyDestination()
     const finalizeStyles: (() => void)[] = []
     const rootBefore: Node[] = []
     const rootAfter: Node[] = []
@@ -307,6 +333,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
     })
     for (const materialize of textPseudos.reverse()) materialize()
     for (const finalize of finalizeStyles) finalize()
+    for (const element of elements) element.removeAttribute('data-attn-measure')
     const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
     const direction = frame.body.dir || frame.documentElement.dir
     const language = frame.body.lang || frame.documentElement.lang

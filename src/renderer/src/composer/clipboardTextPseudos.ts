@@ -73,6 +73,12 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
       )
         pastLine = true
       const style = new Map(!pastLine ? line : [])
+      if (node.parentElement && node.parentElement !== element) {
+        const origin = document.defaultView?.getComputedStyle(element)
+        const descendant = document.defaultView?.getComputedStyle(node.parentElement)
+        for (const name of style.keys())
+          if (descendant?.getPropertyValue(name) !== origin?.getPropertyValue(name)) style.delete(name)
+      }
       if (letterState === 1 && !/^\p{P}+$/u.test(character)) letterState = 2
       if (letterState < 2 && !/^\s+$/u.test(character)) {
         for (const [name, value] of letter) style.set(name, value)
