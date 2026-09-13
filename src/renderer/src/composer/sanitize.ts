@@ -49,6 +49,7 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
   'font-weight',
   'height',
   'line-height',
+  'list-style-type',
   'margin',
   'margin-bottom',
   'margin-left',

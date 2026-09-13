@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { normalizeClipboardHtml } from './clipboardHtml'
-import { prepareHtmlForEditor } from './preserve'
+import { prepareHtmlForEditor, restoreOpaqueHtml } from './preserve'
 
 const notesHtml = readFileSync('e2e/fixtures/notes-clipboard.html.txt', 'utf8')
 
@@ -102,7 +102,14 @@ it('imports Cocoa list and table class names and sanitizes converted embed URLs'
 it('retains non-default Cocoa list markers on the preservation path', () => {
   for (const marker of ['circle', 'square', 'decimal']) {
     const html = cocoa(`ul.ul1 {list-style-type:${marker}}`, '<ul class="ul1"><li>Item</li></ul>')
-    expect(normalizeClipboardHtml(html)).toBe(html)
-    expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues.length).toBeGreaterThan(0)
+    const prepared = prepareHtmlForEditor(normalizeClipboardHtml(html))
+    expect(prepared.issues.length).toBeGreaterThan(0)
+    const restored = restoreOpaqueHtml(prepared.html)
+    const doc = new DOMParser().parseFromString(restored, 'text/html')
+    expect(doc.querySelector('ul')?.style.listStyleType).toBe(marker)
+    const reopened = restoreOpaqueHtml(prepareHtmlForEditor(restored).html)
+    expect(
+      new DOMParser().parseFromString(reopened, 'text/html').querySelector('ul')?.style.listStyleType
+    ).toBe(marker)
   }
 })

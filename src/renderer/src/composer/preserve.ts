@@ -254,6 +254,7 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   }
   for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
+    if (property === 'list-style-type') return `${tag}[style:${property}]`
     if (
       tag === 'span' &&
       /^(border|padding|margin|width$|height$)/.test(property) &&
