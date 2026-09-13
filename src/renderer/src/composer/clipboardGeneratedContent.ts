@@ -117,6 +117,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     }
     const pseudo = (side: keyof GeneratedContent): void => {
       const style = view.getComputedStyle(element, `::${side}`)
+      if (side === 'marker' && view.getComputedStyle(element).display !== 'list-item') return
       if (side === 'marker' && style.content === 'normal') {
         const values = nested.get('list-item')
         content.marker = formatClipboardCounter(
