@@ -1930,6 +1930,33 @@ test('pastes without formatting and clears selected formatting through commands'
   await composer.expectSaved()
 })
 
+test('plain paste leaves recipient and subject shortcuts native', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.locator('p').first().click()
+  await page.keyboard.type('Existing body')
+  await page.getByRole('button', { name: 'Show Cc and Bcc fields' }).click()
+  for (const input of [
+    composer.subject,
+    ...(['to', 'cc', 'bcc'] as const).map((field) => composer.recipientField(field).locator('input'))
+  ]) {
+    await input.focus()
+    const native = await input.evaluate((element) =>
+      element.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'V',
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true
+        })
+      )
+    )
+    expect(native).toBe(true)
+  }
+  await expect(composer.editor).toContainText('Existing body')
+})
+
 test('preserves unsupported foreign HTML pasted into a new draft', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

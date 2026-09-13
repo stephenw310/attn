@@ -14,16 +14,24 @@ function styleConversion(element: HTMLElement): DOMConversionOutput {
   const sanitized = sanitizeComposerStyle(element.getAttribute('style') ?? '')
   style.cssText = sanitized
   const formats: TextFormatType[] = []
-  if (style.fontWeight === 'bold' || Number.parseInt(style.fontWeight, 10) >= 600) formats.push('bold')
-  if (style.fontStyle === 'italic' || style.fontStyle === 'oblique') formats.push('italic')
-  if (style.textDecoration.includes('underline')) formats.push('underline')
-  if (style.textDecoration.includes('line-through')) formats.push('strikethrough')
-  // Native format flags must control emphasis, including later toolbar edits.
-  style.removeProperty('font-weight')
-  style.removeProperty('font-style')
-  style.removeProperty('text-decoration')
+  const represented = new Set<string>()
+  if (['normal', '400', 'bold', '700'].includes(style.fontWeight)) {
+    represented.add('font-weight')
+    if (['bold', '700'].includes(style.fontWeight)) formats.push('bold')
+  }
+  if (['normal', 'italic'].includes(style.fontStyle)) {
+    represented.add('font-style')
+    if (style.fontStyle === 'italic') formats.push('italic')
+  }
+  const decoration = style.textDecoration.trim().split(/\s+/)
+  if (decoration.every((value) => ['none', 'underline', 'line-through'].includes(value))) {
+    represented.add('text-decoration')
+    if (decoration.includes('underline')) formats.push('underline')
+    if (decoration.includes('line-through')) formats.push('strikethrough')
+  }
+  // Keep CSS whenever flags cannot reproduce the complete presentation.
   const cleanStyle = cssDeclarations(sanitized)
-    .filter(({ property }) => !['font-weight', 'font-style', 'text-decoration'].includes(property))
+    .filter(({ property }) => !represented.has(property))
     .map(({ raw }) => raw)
     .join('; ')
   return {

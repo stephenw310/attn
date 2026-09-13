@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createHeadlessEditor } from '@lexical/headless'
-import { $generateNodesFromDOM } from '@lexical/html'
+import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html'
 import { $getRoot, TextNode } from 'lexical'
 import { expect, it } from 'vitest'
 import { prepareHtmlForEditor } from '../preserve'
@@ -39,6 +39,42 @@ it('imports CSS and semantic emphasis as editable formats without overriding too
       expect(css.getStyle()).toBe('')
       semantic.toggleFormat('bold')
       expect(semantic.hasFormat('bold')).toBe(false)
+    },
+    { discrete: true }
+  )
+})
+
+it('retains CSS emphasis that format flags cannot fully represent through HTML export', () => {
+  const editor = createHeadlessEditor({
+    namespace: 'css-emphasis',
+    nodes: [
+      StyledTextNode,
+      {
+        replace: TextNode,
+        with: (node: TextNode) => new StyledTextNode(node.getTextContent()),
+        withKlass: StyledTextNode
+      }
+    ],
+    onError: (error) => {
+      throw error
+    }
+  })
+  const styles = [
+    'text-decoration: overline',
+    'text-decoration: underline dotted red',
+    'font-weight: 500',
+    'font-style: oblique 10deg'
+  ]
+  editor.update(
+    () => {
+      const html = prepareHtmlForEditor(
+        styles.map((style, i) => `<p><span style="${style}">Sample ${i}</span></p>`).join('')
+      ).html
+      $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
+      const texts = $getRoot().getAllTextNodes()
+      for (const [i, style] of styles.entries()) expect(texts[i].getStyle()).toContain(style)
+      const exported = $generateHtmlFromNodes(editor)
+      for (const style of styles) expect(exported).toContain(style)
     },
     { discrete: true }
   )

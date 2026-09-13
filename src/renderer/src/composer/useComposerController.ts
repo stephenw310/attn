@@ -188,6 +188,11 @@ export function useComposerController({
       if (event.target instanceof Element && event.target.closest('dialog[open]')) return false
       const command = matchComposerKey(event)
       if (command) {
+        if (
+          command.id === 'composer.pastePlainText' &&
+          (!(event.target instanceof Element) || !event.target.closest('[data-testid="composer-editor"]'))
+        )
+          return false
         command.run()
         return true
       }
