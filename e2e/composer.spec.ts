@@ -3724,6 +3724,31 @@ test('inherits winning logical aliases in generated widths', async ({ page }) =>
   expect(result.second).toBe(600)
 })
 
+test('preserves clipboard style attribute selectors', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Style attribute selectors')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>p:not([style]){color:red}p[style]{color:blue}</style><p>Absent</p><p style="">Present</p>'
+  )
+  await composer.expectSaved()
+  const result = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (item) => item.subject === 'Style attribute selectors'
+    )
+    const html = draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+    const doc = new DOMParser().parseFromString(html ?? '', 'text/html')
+    return [...doc.querySelectorAll<HTMLElement>('p, span')].map((span) => ({
+      text: span.textContent,
+      color: span.style.color
+    }))
+  })
+  expect(result).toContainEqual({ text: 'Absent', color: 'rgb(255, 0, 0)' })
+  expect(result).toContainEqual({ text: 'Present', color: 'rgb(0, 0, 255)' })
+})
+
 test('preserves automatic clipboard grid placement', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

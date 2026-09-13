@@ -49,10 +49,10 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
     const sheets = [...parsed.querySelectorAll('style')].map((style) => style.textContent ?? '')
     for (const style of parsed.querySelectorAll('style')) style.remove()
     const originalElements = [parsed.body, ...parsed.body.querySelectorAll<HTMLElement>('*')]
-    const inline = originalElements.map(
-      (element, index) => (index === 0 ? source.body : element).getAttribute('style') ?? ''
+    const inline = originalElements.map((element, index) =>
+      (index === 0 ? source.body : element).getAttribute('style')
     )
-    inline.unshift(source.documentElement.getAttribute('style') ?? '')
+    inline.unshift(source.documentElement.getAttribute('style'))
     for (const element of originalElements) element.removeAttribute('style')
     frame.body.append(...[...parsed.body.childNodes].map((node) => frame.importNode(node, true)))
     const elements = [frame.documentElement, frame.body, ...frame.body.querySelectorAll<HTMLElement>('*')]
@@ -116,9 +116,12 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       before: read(element, '::before'),
       after: read(element, '::after')
     }))
-    for (let index = 0; index < elements.length; index++) elements[index].setAttribute('style', inline[index])
+    for (let index = 0; index < elements.length; index++) {
+      const style = inline[index]
+      if (style === null) elements[index].removeAttribute('style')
+      else elements[index].setAttribute('style', style)
+    }
     applyDestination()
-    frame.documentElement.setAttribute('style', source.documentElement.getAttribute('style') ?? '')
     for (const css of sheets) {
       const style = frame.createElement('style')
       style.textContent = css
@@ -152,7 +155,16 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
         }
       }
       for (const sheet of frame.styleSheets) mirror(sheet.cssRules)
+      const mirrorSheet = new (view as Window & { CSSStyleSheet: typeof CSSStyleSheet }).CSSStyleSheet()
+      frame.adoptedStyleSheets = [...frame.adoptedStyleSheets, mirrorSheet]
       for (const element of elements) {
+        const path: string[] = []
+        for (let node: Element | null = element; node; node = node.parentElement)
+          path.unshift(
+            node.parentElement ? `:nth-child(${[...node.parentElement.children].indexOf(node) + 1})` : ':root'
+          )
+        const ruleIndex = mirrorSheet.insertRule(`${path.join(' > ')} {}`)
+        const declaration = (mirrorSheet.cssRules[ruleIndex] as CSSStyleRule).style
         const values = (
           element as Element & {
             computedStyleMap?(): { get(name: string): { toString(): string } | undefined }
@@ -161,7 +173,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
         for (const name of dimensions) {
           // Read the winning physical/logical alias after cascade and writing-mode mapping.
           const value = values?.get(name)?.toString() ?? element.style.getPropertyValue(name)
-          if (value) element.style.setProperty(`--attn-snapshot-${name}`, value, 'important')
+          if (value) declaration.setProperty(`--attn-snapshot-${name}`, value, 'important')
         }
       }
     }
