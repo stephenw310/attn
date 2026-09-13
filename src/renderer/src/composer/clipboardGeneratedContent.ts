@@ -87,6 +87,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
   const visit = (element: Element, counters: Counters, depth: number): void => {
     const style = view.getComputedStyle(element)
     if (style.display === 'none') return
+    applyCounters(style, counters, depth)
     if (style.display === 'list-item') {
       const list = element.closest('ol, ul')
       const step = list?.hasAttribute('reversed') ? -1 : 1
@@ -97,7 +98,6 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
       if (explicit !== null && /^[-+]?\d+$/.test(explicit.trim())) counter.value = Number(explicit)
       else if (!/\blist-item\b/.test(style.counterIncrement)) counter.value += step
     }
-    applyCounters(style, counters, depth)
     const content: GeneratedContent = { marker: '', before: '', after: '' }
     result.set(element, content)
     const nested = new Map(counters)

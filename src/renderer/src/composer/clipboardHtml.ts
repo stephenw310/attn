@@ -94,6 +94,12 @@ function expandCocoaStyles(html: string): string {
 export function normalizeClipboardHtml(html: string): string {
   const expanded = expandCocoaStyles(html)
   const document = new DOMParser().parseFromString(expanded, 'text/html')
+  for (const element of document.querySelectorAll('iframe[src],video[src],audio[src]')) {
+    const link = document.createElement('a')
+    link.href = element.getAttribute('src') ?? ''
+    link.textContent = element.getAttribute('title') || 'Embedded content'
+    element.replaceWith(link)
+  }
   // Unknown stylesheets may carry meaningful layout; keep the preservation path.
   if (
     document.querySelector('style') ||
@@ -157,13 +163,6 @@ export function normalizeClipboardHtml(html: string): string {
     if (preserved.has(element)) continue
     const paragraph = replace(element, 'p')
     paragraph.textContent = '—'
-  }
-  for (const element of document.querySelectorAll('iframe[src],video[src],audio[src]')) {
-    if (preserved.has(element)) continue
-    const link = document.createElement('a')
-    link.href = element.getAttribute('src') ?? ''
-    link.textContent = element.getAttribute('title') || 'Embedded content'
-    element.replaceWith(link)
   }
   for (const element of document.querySelectorAll<HTMLElement>('*')) {
     if (preserved.has(element)) continue

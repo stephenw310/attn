@@ -145,6 +145,15 @@ const INHERITED_TEXT_STYLES = new Set([
  * erase those supported declarations.
  */
 function materializeInheritedTextStyles(document: Document): void {
+  // A declaration on the semantic element replaces its own default decoration.
+  // A descendant declaration cannot remove decoration propagated by an ancestor.
+  for (const element of document.querySelectorAll<HTMLElement>('u[style], s[style], strike[style]')) {
+    if (element.style.textDecoration.trim() !== 'none') continue
+    const span = document.createElement('span')
+    for (const attribute of element.attributes) span.setAttribute(attribute.name, attribute.value)
+    span.append(...element.childNodes)
+    element.replaceWith(span)
+  }
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   const textNodes: Text[] = []
   while (walker.nextNode()) textNodes.push(walker.currentNode as Text)

@@ -98,7 +98,7 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
   editor.update(
     () => {
       const html = prepareHtmlForEditor(
-        '<p><b><span style="font-weight:normal">Reset bold</span></b><i><span style="font-style:normal">Reset italic</span></i><u><span style="text-decoration:none">Keep underline</span></u><s><span style="text-decoration:none">Keep strike</span></s></p><p style="font-weight:normal"><b>Keep bold</b></p>'
+        '<p><b><span style="font-weight:normal">Reset bold</span></b><i><span style="font-style:normal">Reset italic</span></i><u><span style="text-decoration:none">Keep underline</span></u><s><span style="text-decoration:none">Keep strike</span></s><u style="text-decoration:none">Reset own underline</u><s style="text-decoration:none">Reset own strike</s></p><p style="font-weight:normal"><b>Keep bold</b></p>'
       ).html
       $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
       const nodes = $getRoot().getAllTextNodes()
@@ -106,6 +106,7 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
         expect(node.hasFormat('bold')).toBe(false)
         expect(node.hasFormat('italic')).toBe(false)
         expect(node.hasFormat('underline')).toBe(false)
+        expect(node.hasFormat('strikethrough')).toBe(false)
       }
       expect(nodes.find((node) => node.getTextContent() === 'Keep underline')?.hasFormat('underline')).toBe(
         true
