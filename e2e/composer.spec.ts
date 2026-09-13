@@ -3780,7 +3780,7 @@ test('preserves descendant overrides and structural selectors in first lines', a
   await composer.editor.click()
   await pasteHtml(
     composer,
-    '<style>p{width:40px}p:has(>span){width:400px!important}p::before{content:"A "}p::first-line{color:red}p>em{color:blue}</style><p>One two three four five</p><p><em>Blue</em></p>'
+    '<style>p{width:40px;color:blue}p:has(>span){width:400px!important}p::before{content:"A "}p::first-line{color:red}p>em{color:blue}</style><p>One two three four five</p><p><em>Blue</em></p>'
   )
   await composer.expectSaved()
   const result = await page.evaluate(async () => {
@@ -3795,6 +3795,30 @@ test('preserves descendant overrides and structural selectors in first lines', a
   expect(result).not.toContain('Blue')
   expect(result).not.toContain('three')
   expect(result).toContain('A')
+})
+
+test('measures inherited first-line fonts through unstyled descendants', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Inherited first line font')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>p{width:100px}p::first-line{font-size:30px}</style><p><span>One two three four five six seven</span></p>'
+  )
+  await composer.expectSaved()
+  const text = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (item) => item.subject === 'Inherited first line font'
+    )
+    const html = draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+    const doc = new DOMParser().parseFromString(html ?? '', 'text/html')
+    return [...doc.querySelectorAll<HTMLElement>('span')]
+      .filter((span) => span.style.fontSize === '30px')
+      .map((span) => span.textContent)
+      .join('')
+  })
+  expect(text.trim()).toBe('One')
 })
 
 test('preserves automatic clipboard grid placement', async ({ page }) => {

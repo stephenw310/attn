@@ -218,6 +218,39 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       'writing-mode',
       'text-orientation'
     ])
+    const overrides = new Map<Element, Set<string>>()
+    for (const element of elements) {
+      const declared = new Set<string>()
+      const inspect = (style: CSSStyleDeclaration) => {
+        for (const name of inherited) {
+          const value = style.getPropertyValue(name)
+          if (value && !['inherit', 'unset'].includes(value)) declared.add(name)
+        }
+      }
+      const visit = (rules: CSSRuleList) => {
+        for (const rule of rules) {
+          if ('selectorText' in rule) {
+            try {
+              if (element.matches((rule as CSSStyleRule).selectorText)) inspect((rule as CSSStyleRule).style)
+            } catch {
+              /* Ignore selectors unavailable to matches(). */
+            }
+          }
+          if ('cssRules' in rule) {
+            if ('media' in rule && !view.matchMedia((rule as CSSMediaRule).conditionText).matches) continue
+            if (
+              rule.constructor.name === 'CSSSupportsRule' &&
+              !(view as Window & { CSS: typeof CSS }).CSS.supports((rule as CSSSupportsRule).conditionText)
+            )
+              continue
+            visit((rule as CSSGroupingRule).cssRules)
+          }
+        }
+      }
+      for (const sheet of frame.styleSheets) visit(sheet.cssRules)
+      inspect(element.style)
+      overrides.set(element, declared)
+    }
     const generated = materializeGeneratedContent(frame.documentElement, view)
     // Freeze the captured cascade before synthetic children can match source selectors.
     for (const sheet of frame.styleSheets) sheet.disabled = true
@@ -229,7 +262,16 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       element.setAttribute('data-attn-measure', String(index))
       element.setAttribute(
         'style',
-        [...snapshots[index].style].map(([name, value]) => `${name}:${value}`).join(';')
+        [...snapshots[index].style]
+          .filter(
+            ([name, value]) =>
+              !inherited.has(name) ||
+              overrides.get(element)?.has(name) ||
+              !element.parentElement ||
+              desired.get(element.parentElement)?.get(name) !== value
+          )
+          .map(([name, value]) => `${name}:${value}`)
+          .join(';')
       )
       for (const [side, pseudo] of [
         ['firstLine', 'first-line'],
@@ -329,7 +371,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
               value !== snapshots[index].style.get(name)
           )
         )
-      return snapshotTextPseudos(element, changed('firstLine'), changed('firstLetter'))
+      return snapshotTextPseudos(element, changed('firstLine'), changed('firstLetter'), overrides)
     })
     for (const materialize of textPseudos.reverse()) materialize()
     for (const finalize of finalizeStyles) finalize()

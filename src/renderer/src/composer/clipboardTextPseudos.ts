@@ -1,9 +1,17 @@
 type TextStyle = Map<string, string>
 
 /** Capture rendered text ranges before removing first-line and first-letter rules. */
-export function snapshotTextPseudos(element: Element, line: TextStyle, letter: TextStyle): () => void {
+export function snapshotTextPseudos(
+  element: Element,
+  line: TextStyle,
+  letter: TextStyle,
+  overrides?: Map<Element, Set<string>>
+): () => void {
   if (!line.size && !letter.size) return () => {}
   const document = element.ownerDocument
+  // Inline descendants inherit a first-line pseudo style but do not establish
+  // their own first formatted line to capture a second time.
+  if (document.defaultView?.getComputedStyle(element).display === 'inline') return () => {}
   const atomic = (node: Element) =>
     ['IMG', 'VIDEO', 'AUDIO', 'CANVAS', 'SVG', 'IFRAME', 'INPUT'].includes(node.tagName) ||
     ['inline-block', 'inline-flex', 'inline-grid', 'inline-table'].includes(
@@ -69,7 +77,7 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
         firstRect &&
         (vertical
           ? rect.left >= firstRect.right || rect.right <= firstRect.left
-          : rect.top >= firstRect.bottom || rect.bottom <= firstRect.top)
+          : Math.abs(rect.bottom - firstRect.bottom) > Math.min(rect.height, firstRect.height) / 2)
       )
         pastLine = true
       const style = new Map(!pastLine ? line : [])
@@ -78,6 +86,12 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
         const descendant = document.defaultView?.getComputedStyle(node.parentElement)
         for (const name of style.keys())
           if (descendant?.getPropertyValue(name) !== origin?.getPropertyValue(name)) style.delete(name)
+        for (
+          let parent: Element | null = node.parentElement;
+          parent && parent !== element;
+          parent = parent.parentElement
+        )
+          for (const name of overrides?.get(parent) ?? []) style.delete(name)
       }
       if (letterState === 1 && !/^\p{P}+$/u.test(character)) letterState = 2
       if (letterState < 2 && !/^\s+$/u.test(character)) {
