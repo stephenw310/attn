@@ -166,3 +166,16 @@ it('preserves distinct decorations on nested inline ancestors', () => {
   expect(prepared.issues.length).toBeGreaterThan(0)
   expect(restoreOpaqueHtml(prepared.html)).toBe(html)
 })
+
+it('keeps semantic and inherited styles around opaque children', () => {
+  for (const [open, close] of [
+    ['<strong>', '</strong>'],
+    ['<em>', '</em>'],
+    ['<span style="color:red; font-size:20px">', '</span>']
+  ]) {
+    const html = `${open}<span style="border:1px solid red">X</span>${close}`
+    const prepared = prepareHtmlForEditor(html)
+    expect(prepared.html).not.toContain(open)
+    expect(restoreOpaqueHtml(prepared.html)).toBe(html)
+  }
+})

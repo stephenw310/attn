@@ -385,17 +385,15 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
     }
     const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
     if (reason && decorated) promotedContainers.set(decorated, reason)
-    const decoration = cssDeclarations(
-      node.attrs.find((attribute) => attribute.name === 'style')?.value ?? ''
-    ).find(({ property }) => property === 'text-decoration')?.value
-    const addsDecoration = decoration
-      ? /(?:underline|line-through|overline)/.test(decoration)
-      : ['u', 's', 'strike'].includes(tag)
-    const decoratedOwner =
-      decorated ?? (addsDecoration ? (TABLE_SCOPED_TAGS.has(tag) && table ? table : node) : null)
+    const inheritedFormatting =
+      cssDeclarations(node.attrs.find((attribute) => attribute.name === 'style')?.value ?? '').some(
+        ({ property }) => INHERITED_TEXT_STYLES.has(property)
+      ) || ['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'font', 'code', 'pre'].includes(tag)
+    const formattingOwner =
+      decorated ?? (inheritedFormatting ? (TABLE_SCOPED_TAGS.has(tag) && table ? table : node) : null)
     const nearestTable = tag === 'table' ? node : table
     const nearestList = tag === 'ul' || tag === 'ol' ? node : list
-    for (const child of node.childNodes) promote(child, nearestTable, nearestList, decoratedOwner)
+    for (const child of node.childNodes) promote(child, nearestTable, nearestList, formattingOwner)
   }
   for (const child of fragment.childNodes) promote(child, null, null, null)
 
