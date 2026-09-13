@@ -66,7 +66,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       .filter((property) => property !== 'font')
     const read = (element: Element, pseudo?: string): Map<string, string> => {
       const computed = view.getComputedStyle(element, pseudo)
-      // CSSOM resolves logical dimensions to used pixels, including auto-sized
+      // CSSOM resolves dimensions to used pixels, including auto-sized
       // flex siblings. Typed OM retains auto and percentages for each element.
       const typed = !pseudo
         ? (
@@ -87,7 +87,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
           )
           .map((property) => [
             property,
-            /^(?:min-|max-)?(?:inline|block)-size$/.test(property) && typed
+            /^(?:min-|max-)?(?:width|height|(?:inline|block)-size)$/.test(property) && typed
               ? (typed.get(property)?.toString() ?? computed.getPropertyValue(property))
               : computed.getPropertyValue(property)
           ])
