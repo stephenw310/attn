@@ -87,7 +87,9 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
           )
           .map((property) => [
             property,
-            /^(?:min-|max-)?(?:width|height|(?:inline|block)-size)$/.test(property)
+            /^(?:(?:min-|max-)?(?:width|height|(?:inline|block)-size)|grid-template-(?:columns|rows))$/.test(
+              property
+            )
               ? typed?.get(property)?.toString() ||
                 (pseudo && computed.getPropertyValue(`--attn-snapshot-${property}`).trim()) ||
                 computed.getPropertyValue(property)
@@ -131,7 +133,12 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
     const cssApi = (view as Window & { CSS?: typeof CSS }).CSS
     if (cssApi?.registerProperty) {
       for (const name of dimensions)
-        cssApi.registerProperty({ name: `--attn-snapshot-${name}`, syntax: '*', inherits: false })
+        cssApi.registerProperty({
+          name: `--attn-snapshot-${name}`,
+          syntax: '*',
+          inherits: false,
+          initialValue: name.startsWith('max-') ? 'none' : 'auto'
+        })
       const mirror = (rules: CSSRuleList) => {
         for (const rule of rules) {
           if ('style' in rule) {

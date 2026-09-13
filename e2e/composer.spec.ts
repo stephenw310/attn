@@ -3650,6 +3650,31 @@ test('preserves responsive generated dimensions and grid areas', async ({ page }
   expect(result).toEqual({ width: '50%', first: 200, second: 300 })
 })
 
+test('keeps reset pseudo widths and fractional grid tracks responsive', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.grid{display:grid;grid-template-columns:1fr 2fr}.cell::before{content:"";display:block;width:initial;height:10px;background:red}</style><div class="grid"><div class="cell">First</div><div>Second</div></div>'
+  )
+  const grid = composer.editor.frameLocator('iframe').locator('div[style*="grid-template-columns"]')
+  const result = await grid.evaluate((element) => {
+    const container = element as HTMLElement
+    const first = element.children[0] as HTMLElement
+    const generated = first.querySelector('span') as HTMLElement
+    container.style.width = '300px'
+    const before = generated.getBoundingClientRect().width
+    container.style.width = '600px'
+    return {
+      tracks: container.style.gridTemplateColumns,
+      before,
+      after: generated.getBoundingClientRect().width
+    }
+  })
+  expect(result).toEqual({ tracks: '1fr 2fr', before: 100, after: 200 })
+})
+
 test('preserves automatic clipboard grid placement', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
