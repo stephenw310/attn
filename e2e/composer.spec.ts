@@ -3460,3 +3460,23 @@ test('preserves empty generated layout and flex item order', async ({ page }) =>
   expect(html).toContain('Root banner')
   expect(html).toContain('Root footer')
 })
+
+test('preserves differently styled propagated decorations from clipboard CSS', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Clipboard decorations')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.outer{text-decoration:underline solid red}.inner{text-decoration:line-through dotted blue}</style><div class="outer"><p class="inner">Combined</p></div>'
+  )
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Clipboard decorations')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toMatch(/text-decoration:[^";]*underline/)
+  expect(html).toMatch(/text-decoration:[^";]*line-through/)
+  expect(html).toContain('dotted')
+  await expect(composer.editor.locator('iframe')).toHaveCount(1)
+})
