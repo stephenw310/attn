@@ -146,6 +146,41 @@ it('preserves Cocoa paragraph geometry and inline background through save and re
   }
 })
 
+it.each([
+  ['td.td1 {padding:8px}', '<table><tr><td class="td1">Cell</td></tr></table>', 'td', 'padding', '8px'],
+  [
+    'table.t1 {border-spacing:4px}',
+    '<table class="t1"><tr><td>Cell</td></tr></table>',
+    'table',
+    'border-spacing',
+    '4px'
+  ],
+  [
+    'tr.t1 {text-align:right}',
+    '<table><tr class="t1"><td>Cell</td></tr></table>',
+    'tr',
+    'text-align',
+    'right'
+  ]
+])('round-trips Cocoa presentation: %s', (css, body, selector, property, value) => {
+  let html = normalizeClipboardHtml(
+    `<meta name="Generator" content="Cocoa HTML Writer"><style>${css}</style>${body}`
+  )
+  for (let round = 0; round < 2; round++) {
+    const target = editor()
+    target.update(
+      () => {
+        const document = new DOMParser().parseFromString(prepareHtmlForEditor(html).html, 'text/html')
+        $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
+        html = restoreOpaqueHtml($generateHtmlFromNodes(target))
+        const restored = new DOMParser().parseFromString(html, 'text/html')
+        expect(restored.querySelector<HTMLElement>(selector)?.style.getPropertyValue(property)).toBe(value)
+      },
+      { discrete: true }
+    )
+  }
+})
+
 it('preserves styled list items inside one valid enclosing list through Lexical export', () => {
   const target = editor()
   const source = '<ul><li style="list-style-type: square">Item</li><li>Other</li></ul>'

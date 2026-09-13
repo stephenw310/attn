@@ -21,8 +21,18 @@ function expandCocoaStyles(html: string): string {
       for (const { property, value, raw } of cssDeclarations(match[2])) {
         if (value.includes('!')) return html
         if (property === 'font') {
+          // Some CSS parsers accept stretch keywords but omit their longhand.
+          // Restrict the prefix to components that we explicitly expand.
+          if (
+            !/^(?:(?:normal|italic|oblique|bold|bolder|lighter|[1-9]00)\s+)*\d*\.?\d+(?:px|pt|em|rem|%)\b/i.test(
+              value
+            )
+          )
+            return html
           const probe = document.createElement('span')
           probe.style.font = value
+          if ([probe.style.fontVariant, probe.style.fontStretch].some((value) => value && value !== 'normal'))
+            return html
           if (!probe.style.fontSize || !probe.style.fontFamily) return html
           for (const name of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']) {
             const expanded = probe.style.getPropertyValue(name)

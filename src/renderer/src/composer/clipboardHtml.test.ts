@@ -42,6 +42,8 @@ describe('Cocoa clipboard text', () => {
       cocoa('table {width:500px}', '<table><tr><td>Cell</td></tr></table>'),
       cocoa('@media print {p.p1 {color:red}}', '<p class="p1">Text</p>'),
       cocoa('p.p1 {min-height:100px}', '<p class="p1">Layout</p>'),
+      cocoa('p.p1 {font:small-caps 13px Helvetica}', '<p class="p1">Text</p>'),
+      cocoa('p.p1 {font:condensed 13px Helvetica}', '<p class="p1">Text</p>'),
       cocoa('p.p1 {position:absolute}', '<p class="p1">Positioned</p>')
     ]
     for (const html of cases) expect(normalizeClipboardHtml(html)).toBe(html)
@@ -88,7 +90,7 @@ it('imports Cocoa list and table class names and sanitizes converted embed URLs'
     'li.li1 {font: 13px Helvetica} ul.ul1 {list-style-type:disc} td.td1 {border-width:1px}',
     '<ul class="ul1"><li class="li1">Item</li></ul><table><tr><td class="td1">Cell</td></tr></table>'
   )
-  expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues).toEqual([])
+  expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues).toEqual(['td[table:border-width]'])
   const unsafe = prepareHtmlForEditor(
     normalizeClipboardHtml(
       '<iframe src="javascript:alert(1)" title="Unsafe"></iframe><h2 onclick="alert(1)">Heading</h2>'
