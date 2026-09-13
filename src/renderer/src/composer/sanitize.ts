@@ -75,6 +75,7 @@ export const PRESERVED_STYLE_PROPERTIES = new Set([
   'direction',
   'unicode-bidi',
   'float',
+  'table-layout',
   'column-count',
   'column-width',
   'column-gap',

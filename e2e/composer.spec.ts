@@ -3634,3 +3634,31 @@ test('ends first-line styling at a break after a drop cap', async ({ page }) => 
   })
   expect(blue).toBe('A')
 })
+
+test('ignores hidden breaks and retains fixed table layout on paste', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Hidden break and fixed table')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>p::first-line{color:blue}table{table-layout:fixed;width:200px}</style><p><span style="display:none"><br></span><span style="position:absolute"><br></span>Visible</p><table><tr><td>Cell</td></tr></table>'
+  )
+  await composer.expectSaved()
+  const result = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (item) => item.subject === 'Hidden break and fixed table'
+    )
+    const html = draft ? ((await window.attn.draft.get(draft.id))?.bodyHtml ?? '') : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    return {
+      html,
+      blue: [...doc.querySelectorAll('span')]
+        .filter((span) => span.style.color === 'rgb(0, 0, 255)')
+        .map((span) => span.textContent)
+        .join('')
+    }
+  })
+  expect(result.blue).toContain('Visible')
+  expect(result.html).toMatch(/table-layout:\s*fixed/)
+})

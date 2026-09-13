@@ -4,7 +4,21 @@ type TextStyle = Map<string, string>
 export function snapshotTextPseudos(element: Element, line: TextStyle, letter: TextStyle): () => void {
   if (!line.size && !letter.size) return () => {}
   const document = element.ownerDocument
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const style = document.defaultView?.getComputedStyle(node as Element)
+        if (
+          style &&
+          (style.display === 'none' ||
+            ['absolute', 'fixed'].includes(style.position) ||
+            style.float !== 'none')
+        )
+          return NodeFilter.FILTER_REJECT
+      }
+      return NodeFilter.FILTER_ACCEPT
+    }
+  })
   const runs: { range: Range; style: TextStyle }[] = []
   let firstRect: DOMRect | undefined
   let letterState = 0
@@ -15,7 +29,10 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
   let pastLine = false
   while (walker.nextNode()) {
     if (walker.currentNode.nodeType === Node.ELEMENT_NODE) {
-      if ((walker.currentNode as Element).tagName === 'BR') {
+      if (
+        (walker.currentNode as Element).tagName === 'BR' &&
+        (walker.currentNode as Element).getClientRects().length
+      ) {
         pastLine = true
         letterState = 2
       }
