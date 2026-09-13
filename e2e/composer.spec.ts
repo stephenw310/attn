@@ -3269,6 +3269,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     `<style>
     .attribute::before {content:attr(data-label)}
     .alternative::before {content:"★/" / "star"}
+    .spaces::before {content:"A   B";white-space:nowrap}
     .image-content::before {content:url("https://clipboard-resource.attn.test/icons/check.svg") / "check"}
     .image-label::before {content:url(https://clipboard-resource.attn.test/icons/check.svg) "Label" / "mixed"}
     .numbered {counter-reset:item}
@@ -3284,7 +3285,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     .quoted::before {content:open-quote}
     .quoted::after {content:close-quote}
     .markers li::marker {content:"✓ ";color:red}
-  </style><p class="image-content">Image</p><p class="image-label">Tail</p><p class="alternative">Symbol</p><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="unicode">Unicode</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
+  </style><p class="spaces">Spaces</p><p class="image-content">Image</p><p class="image-label">Tail</p><p class="alternative">Symbol</p><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="unicode">Unicode</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3298,6 +3299,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(saved?.bodyHtml).toContain('aria-label="check"')
   expect(saved?.bodyHtml).toContain('aria-label="mixed"')
   expect(saved?.bodyHtml).not.toMatch(/<img[^>]*alt="check"/)
+  expect(saved?.bodyHtml).toMatch(/white-space:\s*nowrap/)
   expect(text).toContain('LabelTail')
   expect(text).not.toContain('icons/check.svg')
   expect(text).toContain('★/Symbol')
@@ -3314,7 +3316,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(text).toContain('1 Sibling A1 Sibling B')
   expect(text).toContain('✓ Marked')
   expect(saved?.bodyHtml).toContain('list-style-type: none')
-  await expect(composer.editor.locator('iframe')).toHaveCount(4)
+  await expect(composer.editor.locator('iframe')).toHaveCount(5)
   await page.mouse.move(0, 0)
   await page.screenshot({ path: join(__dirname, '.artifacts/clipboard-generated-content.png') })
 })
@@ -3418,7 +3420,7 @@ test('preserves clipboard CSS direction and wrapper language', async ({ page }) 
   await pasteHtml(composer, '<body lang="fr"><p>Bonjour</p></body>')
   await pasteHtml(
     composer,
-    '<style>p {direction:rtl;text-align:start;float:right;clear:both}</style><p>مرحبا</p>'
+    '<style>p {direction:rtl;unicode-bidi:bidi-override;text-align:start;float:right;clear:both}</style><p>مرحبا</p>'
   )
   await composer.expectSaved()
   const html = await page.evaluate(async () => {
@@ -3426,6 +3428,7 @@ test('preserves clipboard CSS direction and wrapper language', async ({ page }) 
     return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
   })
   expect(html).toContain('lang="fr"')
+  expect(html).toMatch(/unicode-bidi:\s*bidi-override/)
   expect(html).toMatch(/direction:\s*rtl/)
   expect(html).toMatch(/float:\s*right/)
   expect(html).toMatch(/clear:\s*both/)

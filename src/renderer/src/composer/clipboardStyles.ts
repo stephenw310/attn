@@ -186,7 +186,7 @@ export function snapshotClipboardStyles(source: Document): void {
             .map(([name, value]) => `${name}:${value}`)
             .join(';')
         )
-        span.style.whiteSpace = 'pre-wrap'
+        span.style.whiteSpace = snapshot[side].style.get('white-space') ?? 'normal'
         if (element === frame.documentElement) {
           ;(side === 'after' ? rootAfter : rootBefore).push(span)
         } else if (side === 'marker') {

@@ -98,7 +98,7 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
   editor.update(
     () => {
       const html = prepareHtmlForEditor(
-        '<p><b><span style="font-weight:normal">Reset bold</span></b><i><span style="font-style:normal">Reset italic</span></i><u><span style="text-decoration:none">Keep underline</span></u><s><span style="text-decoration:none">Keep strike</span></s><u style="text-decoration:none">Reset own underline</u><s style="text-decoration:none">Reset own strike</s><u style="text-decoration:none solid rgb(0, 0, 0)">Reset computed underline</u><u style="text-decoration:red none">Reset unordered underline</u><u style="text-decoration:rgb(255, 0, 0)">Reset color-only underline</u></p><p style="font-weight:normal"><b>Keep bold</b></p>'
+        '<p><b><span style="font-weight:normal">Reset bold</span></b><i><span style="font-style:normal">Reset italic</span></i><u><span style="text-decoration:none">Keep underline</span></u><s><span style="text-decoration:none">Keep strike</span></s><u style="text-decoration:none">Reset own underline</u><s style="text-decoration:none">Reset own strike</s><u style="text-decoration:none solid rgb(0, 0, 0)">Reset computed underline</u><u style="text-decoration:red none">Reset unordered underline</u><u style="text-decoration:rgb(255, 0, 0)">Reset color-only underline</u></p><div style="text-decoration:underline"><p style="text-decoration:line-through">Combined</p></div><p></p><p style="font-weight:normal"><b>Keep bold</b></p>'
       ).html
       $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
       const nodes = $getRoot().getAllTextNodes()
@@ -112,6 +112,10 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
         true
       )
       expect(nodes.find((node) => node.getTextContent() === 'Keep strike')?.hasFormat('strikethrough')).toBe(
+        true
+      )
+      expect(nodes.find((node) => node.getTextContent() === 'Combined')?.hasFormat('underline')).toBe(true)
+      expect(nodes.find((node) => node.getTextContent() === 'Combined')?.hasFormat('strikethrough')).toBe(
         true
       )
       expect(nodes.at(-1)?.hasFormat('bold')).toBe(true)

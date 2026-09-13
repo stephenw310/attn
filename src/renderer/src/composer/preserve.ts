@@ -172,6 +172,7 @@ function materializeInheritedTextStyles(document: Document): void {
       ancestor = ancestor.parentElement
     }
     const inherited = new Map<string, string>()
+    const decorationLines = new Set<string>()
     for (const element of ancestors) {
       // Semantic emphasis participates in the cascade before the element's CSS.
       if (['B', 'STRONG'].includes(element.tagName)) inherited.set('font-weight', 'bold')
@@ -185,7 +186,15 @@ function materializeInheritedTextStyles(document: Document): void {
         )
           inherited.set(property, value)
       }
+      for (const line of (inherited.get('text-decoration') ?? '').split(/\s+/)) {
+        if (['underline', 'line-through', 'overline'].includes(line)) decorationLines.add(line)
+      }
     }
+    if (
+      decorationLines.size &&
+      /^(?:none|underline|line-through|overline|\s)*$/.test(inherited.get('text-decoration') ?? '')
+    )
+      inherited.set('text-decoration', [...decorationLines].join(' '))
     if (inherited.size === 0) continue
     const span = document.createElement('span')
     span.setAttribute('style', [...inherited].map(([property, value]) => `${property}: ${value}`).join('; '))
@@ -271,6 +280,7 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   }
   for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
+    if (property === 'white-space' && value === 'nowrap') return `${tag}[white-space]`
     if (property === 'list-style-type' || property === 'font') return `${tag}[style:${property}]`
     if (
       ['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'].includes(tag) &&
