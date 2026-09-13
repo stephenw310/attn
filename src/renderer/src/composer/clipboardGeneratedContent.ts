@@ -87,10 +87,34 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
   const visit = (element: Element, counters: Counters, depth: number): void => {
     const style = view.getComputedStyle(element)
     if (style.display === 'none') return
+    if (style.display === 'list-item') {
+      const list = element.closest('ol, ul')
+      const step = list?.hasAttribute('reversed') ? -1 : 1
+      const stack = counters.get('list-item') ?? [{ value: 0, depth }]
+      counters.set('list-item', stack)
+      const counter = stack[stack.length - 1]
+      const explicit = element.getAttribute('value')
+      if (explicit !== null && /^[-+]?\d+$/.test(explicit.trim())) counter.value = Number(explicit)
+      else if (!/\blist-item\b/.test(style.counterIncrement)) counter.value += step
+    }
     applyCounters(style, counters, depth)
     const content: GeneratedContent = { marker: '', before: '', after: '' }
     result.set(element, content)
     const nested = new Map(counters)
+    if (element.matches('ol, ul')) {
+      const reversed = element.hasAttribute('reversed')
+      const start = element.getAttribute('start')
+      const first =
+        start !== null && /^[-+]?\d+$/.test(start.trim())
+          ? Number(start)
+          : reversed
+            ? [...element.children].filter((child) => child.tagName === 'LI').length
+            : 1
+      nested.set('list-item', [
+        ...(counters.get('list-item') ?? []),
+        { value: first - (reversed ? -1 : 1), depth }
+      ])
+    }
     const pseudo = (side: keyof GeneratedContent): void => {
       const style = view.getComputedStyle(element, `::${side}`)
       if (!style.content || ['none', 'normal'].includes(style.content) || style.display === 'none') return

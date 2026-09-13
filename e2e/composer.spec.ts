@@ -3304,3 +3304,45 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   await page.mouse.move(0, 0)
   await page.screenshot({ path: join(__dirname, '.artifacts/clipboard-generated-content.png') })
 })
+
+test('preserves generated color resets and implicit ordered list counters', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Generated resets and lists')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    `<style>
+    .parent {color:red} .child::before {content:"X";color:black}
+    ol li::marker {content:counter(list-item, lower-roman) ". "}
+    </style><div class="parent"><p class="child">Red</p></div>
+    <ol><li>One</li><li>Two</li></ol>
+    <ol start="3"><li>Three</li><li value="5">Five</li><li>Six</li></ol>
+    <ol reversed><li>Down two</li><li>Down one</li></ol>`
+  )
+  await composer.expectSaved()
+  const saved = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (item) => item.subject === 'Generated resets and lists'
+    )
+    const html = draft ? ((await window.attn.draft.get(draft.id))?.bodyHtml ?? '') : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    return {
+      text: doc.body.textContent,
+      black: [...doc.querySelectorAll('span')].some(
+        (span) => span.textContent === 'X' && ['black', 'rgb(0, 0, 0)'].includes(span.style.color)
+      )
+    }
+  })
+  expect(saved.black).toBe(true)
+  for (const label of [
+    'i. One',
+    'ii. Two',
+    'iii. Three',
+    'v. Five',
+    'vi. Six',
+    'ii. Down two',
+    'i. Down one'
+  ])
+    expect(saved.text).toContain(label)
+})

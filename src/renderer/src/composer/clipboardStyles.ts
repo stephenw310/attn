@@ -157,7 +157,12 @@ export function snapshotClipboardStyles(source: Document): void {
         span.setAttribute(
           'style',
           [...snapshot[side].style]
-            .filter(([name, value]) => value && value !== pseudoBaseline[index][side].get(name))
+            .filter(
+              ([name, value]) =>
+                value &&
+                (value !== pseudoBaseline[index][side].get(name) ||
+                  (inherited.has(name) && snapshot.style.get(name) !== value))
+            )
             .map(([name, value]) => `${name}:${value}`)
             .join(';')
         )
