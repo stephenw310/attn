@@ -1,28 +1,5 @@
 import { cssDeclarations } from '../../../shared/css'
-import { snapshotClipboardStyles } from './clipboardStyles'
 import { COMPOSER_STYLE_PROPERTIES } from './sanitize'
-
-function expandFont(document: Document, value: string): string[] {
-  // Some CSS parsers accept stretch keywords but omit their longhand.
-  // Restrict the prefix to components that we explicitly expand.
-  if (
-    !/^(?:(?:normal|italic|oblique|bold|bolder|lighter|[1-9]00)\s+)*\d*\.?\d+(?:px|pt|em|rem|%)\b/i.test(
-      value
-    )
-  )
-    return [`font: ${value}`]
-  const expandedStyles: string[] = []
-  const probe = document.createElement('span')
-  probe.style.font = value
-  if ([probe.style.fontVariant, probe.style.fontStretch].some((value) => value && value !== 'normal'))
-    return [`font: ${value}`]
-  if (!probe.style.fontSize || !probe.style.fontFamily) return [`font: ${value}`]
-  for (const name of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']) {
-    const expanded = probe.style.getPropertyValue(name)
-    if (expanded) expandedStyles.push(`${name}: ${expanded}`)
-  }
-  return expandedStyles
-}
 
 /** Expand the small paragraph/span stylesheet emitted by macOS rich-text copy. */
 function expandCocoaStyles(html: string): string {
@@ -44,7 +21,13 @@ function expandCocoaStyles(html: string): string {
       for (const { property, value, raw } of cssDeclarations(match[2])) {
         if (value.includes('!')) return html
         if (property === 'font') {
-          declarations.push(...expandFont(document, value))
+          const probe = document.createElement('span')
+          probe.style.font = value
+          if (!probe.style.fontSize || !probe.style.fontFamily) return html
+          for (const name of ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']) {
+            const expanded = probe.style.getPropertyValue(name)
+            if (expanded) declarations.push(`${name}: ${expanded}`)
+          }
         } else if (
           property === 'list-style-type' &&
           ((match[1].startsWith('ul.') && value === 'disc') ||
@@ -87,31 +70,29 @@ function expandCocoaStyles(html: string): string {
   }
   for (const stylesheet of styles) stylesheet.remove()
   // The normal import pipeline still sanitizes all markup and style values.
-  return document.documentElement.outerHTML
+  return document.body.innerHTML
 }
 
 /** Normalize new clipboard content into the editor's email-friendly vocabulary. */
-export function normalizeClipboardHtml(html: string, destination?: HTMLElement): string {
+export function normalizeClipboardHtml(html: string, plainText?: string): string {
   const expanded = expandCocoaStyles(html)
   const document = new DOMParser().parseFromString(expanded, 'text/html')
-  for (const element of document.querySelectorAll('iframe[src],video[src],audio[src]')) {
-    const link = document.createElement('a')
-    link.href = element.getAttribute('src') ?? ''
-    link.textContent = element.getAttribute('title') || 'Embedded content'
-    element.replaceWith(link)
+  // Only Cocoa's bounded text stylesheet is converted. Arbitrary CSS is not
+  // portable email formatting; retain editable text instead of emulating layout.
+  if (document.querySelector('style')) {
+    for (const node of document.querySelectorAll('style,script,template,noscript')) node.remove()
+    for (const node of document.querySelectorAll('br')) node.replaceWith(document.createTextNode('\n'))
+    for (const node of document.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,tr,blockquote'))
+      node.append(document.createTextNode('\n'))
+    const text = plainText ?? document.body.textContent ?? ''
+    const paragraph = document.createElement('p')
+    const lines = text.replace(/\r\n?/g, '\n').split('\n')
+    for (const [index, line] of lines.entries()) {
+      if (index) paragraph.append(document.createElement('br'))
+      paragraph.append(document.createTextNode(line))
+    }
+    return paragraph.outerHTML
   }
-  // Unknown stylesheets may carry meaningful layout; keep the preservation path.
-  if (
-    document.querySelector('style') ||
-    document.body.hasAttribute('lang') ||
-    document.documentElement.hasAttribute('lang') ||
-    document.body.hasAttribute('dir') ||
-    document.documentElement.hasAttribute('dir') ||
-    document.body.getAttribute('style')?.trim() ||
-    document.documentElement.getAttribute('style')?.trim() ||
-    /var\s*\(|:\s*(?:inherit|initial|unset|revert(?:-layer)?)\b/i.test(document.body.innerHTML)
-  )
-    snapshotClipboardStyles(document, destination)
   const supportedTags = new Set(
     'P DIV SPAN B STRONG I EM U S STRIKE A UL OL LI BLOCKQUOTE TABLE THEAD TBODY TFOOT TR TD TH IMG BR FONT H1 H2 H3 H4 H5 H6 MARK CODE PRE DETAILS SUMMARY FIGURE FIGCAPTION INPUT HR IFRAME VIDEO AUDIO'.split(
       ' '
@@ -149,7 +130,7 @@ export function normalizeClipboardHtml(html: string, destination?: HTMLElement):
       replacement.style.color ||= '#202124'
     }
     if (tag === 'code' || tag === 'pre') replacement.style.fontFamily ||= 'monospace'
-    if (tag === 'pre' && !replacement.style.whiteSpace) replacement.style.whiteSpace = 'pre-wrap'
+    if (tag === 'pre') replacement.style.whiteSpace = 'pre-wrap'
   }
   for (const callout of document.querySelectorAll('aside[data-block-id],aside.notion-callout'))
     if (!preserved.has(callout)) replace(callout, 'blockquote')
@@ -167,6 +148,13 @@ export function normalizeClipboardHtml(html: string, destination?: HTMLElement):
     if (preserved.has(element)) continue
     const paragraph = replace(element, 'p')
     paragraph.textContent = '—'
+  }
+  for (const element of document.querySelectorAll('iframe[src],video[src],audio[src]')) {
+    if (preserved.has(element)) continue
+    const link = document.createElement('a')
+    link.href = element.getAttribute('src') ?? ''
+    link.textContent = element.getAttribute('title') || 'Embedded content'
+    element.replaceWith(link)
   }
   for (const element of document.querySelectorAll<HTMLElement>('*')) {
     if (preserved.has(element)) continue
@@ -229,8 +217,7 @@ export function normalizeClipboardHtml(html: string, destination?: HTMLElement):
         ].includes(property)
       )
         continue
-      if (property === 'font') declarations.push(...expandFont(document, value))
-      else if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
+      if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
       else declarations.push(raw)
     }
     if (declarations.length) element.setAttribute('style', declarations.join('; '))

@@ -20,20 +20,18 @@ describe('composer HTML fidelity', () => {
     // into a text highlight, and the recipient sees a different mail.
     const html =
       '<table><tbody><tr><td style="background-color:#eee">Shaded</td></tr></tbody></table>' +
-      '<div style="background-color:#ffc; padding:12px">Highlight</div>'
-    expect(draftHtmlFidelityIssues(html)).toEqual(['div[block:background-color]'])
+      '<div style="background-color:#ffc;padding:12px">Highlight</div>'
+    expect(draftHtmlFidelityIssues(html)).toEqual([])
     const prepared = prepareHtmlForEditor(html)
 
-    expect(prepared.issues).toEqual(['div[block:background-color]'])
-    expect(prepared.html).toContain('data-attn-opaque')
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).not.toContain('data-attn-opaque')
     expect(prepared.html).toContain('<td style="background-color: #eee">Shaded</td>')
-    expect(restoreOpaqueHtml(prepared.html)).toContain(
-      '<div style="background-color:#ffc; padding:12px">Highlight</div>'
-    )
+    expect(prepared.html).toContain('<div style="background-color: #ffc; padding: 12px">Highlight</div>')
 
-    const outgoing = sanitizeOutgoingHtml(restoreOpaqueHtml(prepared.html))
+    const outgoing = sanitizeOutgoingHtml(prepared.html)
     expect(outgoing).toContain('<td style="background-color: #eee">Shaded</td>')
-    expect(outgoing).toContain('<div style="background-color:#ffc; padding:12px">Highlight</div>')
+    expect(outgoing).toContain('<div style="background-color: #ffc; padding: 12px">Highlight</div>')
   })
 
   it('keeps Gmail CID image metadata on the editable image path', () => {
@@ -98,7 +96,9 @@ describe('composer HTML fidelity', () => {
   })
 
   it('does not freeze formatting the import sanitizer removes on its own', () => {
-    for (const html of ['<div align="center">Centered</div>']) {
+    // `float` and `align` never reach the stored draft either way, so an opaque
+    // region would preserve nothing and only cost the user an editable line.
+    for (const html of ['<div style="float:left">Floated</div>', '<div align="center">Centered</div>']) {
       const prepared = prepareHtmlForEditor(html)
       expect(prepared.issues).toEqual([])
       expect(prepared.html).not.toContain('data-attn-opaque')
@@ -257,11 +257,4 @@ describe('composer HTML fidelity', () => {
     expect(restored).not.toContain('dir="sideways"')
     expect(restored).not.toContain('target="_top"')
   })
-})
-
-it('preserves floated content as an opaque region', () => {
-  const html = '<div style="float:left; clear:both">Floated</div>'
-  const prepared = prepareHtmlForEditor(html)
-  expect(prepared.issues).toHaveLength(1)
-  expect(restoreOpaqueHtml(prepared.html)).toBe(html)
 })

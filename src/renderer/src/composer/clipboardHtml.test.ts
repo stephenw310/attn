@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { normalizeClipboardHtml } from './clipboardHtml'
-import { prepareHtmlForEditor, restoreOpaqueHtml } from './preserve'
+import { prepareHtmlForEditor } from './preserve'
 
 const notesHtml = readFileSync('e2e/fixtures/notes-clipboard.html.txt', 'utf8')
 
@@ -34,6 +34,17 @@ describe('Cocoa clipboard text', () => {
     expect(prepared.html).toContain('color: blue')
     expect(prepared.html).toContain('color: green')
     expect(prepared.html).toContain('href="https://example.com"')
+  })
+
+  it('keeps ordinary HTML and simplifies unsupported stylesheets', () => {
+    const cases = [
+      '<style>.hero {color:red}</style><p class="hero">Text</p>',
+      cocoa('table {width:500px}', '<table><tr><td>Cell</td></tr></table>'),
+      cocoa('@media print {p.p1 {color:red}}', '<p class="p1">Text</p>'),
+      cocoa('p.p1 {min-height:100px}', '<p class="p1">Layout</p>'),
+      cocoa('p.p1 {position:absolute}', '<p class="p1">Positioned</p>')
+    ]
+    for (const html of cases) expect(normalizeClipboardHtml(html)).not.toContain('<style')
   })
 
   it('still sanitizes untrusted content and preserves unsupported tables', () => {
@@ -77,7 +88,7 @@ it('imports Cocoa list and table class names and sanitizes converted embed URLs'
     'li.li1 {font: 13px Helvetica} ul.ul1 {list-style-type:disc} td.td1 {border-width:1px}',
     '<ul class="ul1"><li class="li1">Item</li></ul><table><tr><td class="td1">Cell</td></tr></table>'
   )
-  expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues).toEqual(['td[table:border-width]'])
+  expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues).toEqual([])
   const unsafe = prepareHtmlForEditor(
     normalizeClipboardHtml(
       '<iframe src="javascript:alert(1)" title="Unsafe"></iframe><h2 onclick="alert(1)">Heading</h2>'
@@ -88,17 +99,18 @@ it('imports Cocoa list and table class names and sanitizes converted embed URLs'
   expect(unsafe.html).not.toContain('<iframe')
 })
 
-it('retains non-default Cocoa list markers on the preservation path', () => {
+it('falls back to editable text for unsupported Cocoa list styles', () => {
   for (const marker of ['circle', 'square', 'decimal']) {
     const html = cocoa(`ul.ul1 {list-style-type:${marker}}`, '<ul class="ul1"><li>Item</li></ul>')
-    const prepared = prepareHtmlForEditor(normalizeClipboardHtml(html))
-    expect(prepared.issues.length).toBeGreaterThan(0)
-    const restored = restoreOpaqueHtml(prepared.html)
-    const doc = new DOMParser().parseFromString(restored, 'text/html')
-    expect(doc.querySelector('ul')?.style.listStyleType).toBe(marker)
-    const reopened = restoreOpaqueHtml(prepareHtmlForEditor(restored).html)
-    expect(
-      new DOMParser().parseFromString(reopened, 'text/html').querySelector('ul')?.style.listStyleType
-    ).toBe(marker)
+    expect(normalizeClipboardHtml(html)).toContain('Item')
+    expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues).toEqual([])
   }
+})
+
+it('uses clipboard plain text for unsupported CSS without interpreting markup', () => {
+  const result = normalizeClipboardHtml(
+    '<style>p::before{content:"generated"}</style><p>HTML</p>',
+    '<b>literal</b>\nSecond line'
+  )
+  expect(result).toBe('<p>&lt;b&gt;literal&lt;/b&gt;<br>Second line</p>')
 })

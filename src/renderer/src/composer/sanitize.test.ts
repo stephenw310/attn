@@ -191,25 +191,3 @@ describe('the restore-after-sanitize trust boundary', () => {
     )
   })
 })
-
-it('preserves safe read-only presentation without admitting CSS resources or script values', () => {
-  const html =
-    '<p style="display:inline;opacity:.5;transform:rotate(5deg);letter-spacing:2px;box-shadow:url(https://example.com/leak);text-shadow:expression(alert(1))">Text</p>'
-  for (const sanitize of [sanitizeDraftHtmlForImport, sanitizeOutgoingHtml]) {
-    const result = sanitize(html)
-    expect(result).toContain('opacity:.5')
-    expect(result).toContain('transform:rotate(5deg)')
-    expect(result).toContain('letter-spacing:2px')
-    expect(result).not.toContain('url(')
-    expect(result).not.toContain('expression(')
-  }
-})
-
-it('preserves only the allowed accessible label through both sanitizer passes', () => {
-  for (const sanitize of [sanitizeDraftHtmlForImport, sanitizeOutgoingHtml]) {
-    const html = sanitize('<span role="img" aria-label="star" aria-hidden="true" onclick="alert(1)">★</span>')
-    expect(html).toContain('aria-label="star"')
-    expect(html).not.toContain('aria-hidden')
-    expect(html).not.toContain('onclick')
-  }
-})

@@ -60,7 +60,12 @@ it('retains CSS emphasis that format flags cannot fully represent through HTML e
       throw error
     }
   })
-  const styles = ['text-decoration: overline', 'font-weight: 500', 'font-style: oblique 10deg']
+  const styles = [
+    'text-decoration: overline',
+    'text-decoration: underline dotted red',
+    'font-weight: 500',
+    'font-style: oblique 10deg'
+  ]
   editor.update(
     () => {
       const html = prepareHtmlForEditor(
@@ -93,7 +98,7 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
   editor.update(
     () => {
       const html = prepareHtmlForEditor(
-        '<p><b><span style="font-weight:normal">Reset bold</span></b><i><span style="font-style:normal">Reset italic</span></i><u><span style="text-decoration:none">Keep underline</span></u><s><span style="text-decoration:none">Keep strike</span></s><u style="text-decoration:none">Reset own underline</u><s style="text-decoration:none">Reset own strike</s><u style="text-decoration:none solid rgb(0, 0, 0)">Reset computed underline</u><u style="text-decoration:red none">Reset unordered underline</u><u style="text-decoration:rgb(255, 0, 0)">Reset color-only underline</u></p><div style="text-decoration:underline"><p style="text-decoration:line-through">Combined</p></div><p></p><p style="font-weight:normal"><b>Keep bold</b></p>'
+        '<p><b><span style="font-weight:normal">Reset bold</span></b><i><span style="font-style:normal">Reset italic</span></i><u><span style="text-decoration:none">Reset underline</span></u></p><p style="font-weight:normal"><b>Keep bold</b></p>'
       ).html
       $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
       const nodes = $getRoot().getAllTextNodes()
@@ -101,18 +106,7 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
         expect(node.hasFormat('bold')).toBe(false)
         expect(node.hasFormat('italic')).toBe(false)
         expect(node.hasFormat('underline')).toBe(false)
-        expect(node.hasFormat('strikethrough')).toBe(false)
       }
-      expect(nodes.find((node) => node.getTextContent() === 'Keep underline')?.hasFormat('underline')).toBe(
-        true
-      )
-      expect(nodes.find((node) => node.getTextContent() === 'Keep strike')?.hasFormat('strikethrough')).toBe(
-        true
-      )
-      expect(nodes.find((node) => node.getTextContent() === 'Combined')?.hasFormat('underline')).toBe(true)
-      expect(nodes.find((node) => node.getTextContent() === 'Combined')?.hasFormat('strikethrough')).toBe(
-        true
-      )
       expect(nodes.at(-1)?.hasFormat('bold')).toBe(true)
       const output = $generateHtmlFromNodes(editor)
       expect(output).not.toMatch(/<strong[^>]*>Reset/)
@@ -157,27 +151,4 @@ it('keeps code typography on every preformatted line and tab', () => {
     },
     { discrete: true }
   )
-})
-
-it('preserves distinct decorations on nested inline ancestors', () => {
-  const html =
-    '<span style="text-decoration:underline"><span style="text-decoration:line-through dotted blue">X</span></span>'
-  const prepared = prepareHtmlForEditor(html)
-  expect(prepared.issues.length).toBeGreaterThan(0)
-  expect(restoreOpaqueHtml(prepared.html)).toBe(html)
-})
-
-it('keeps semantic and inherited styles around opaque children', () => {
-  for (const [open, close] of [
-    ['<strong>', '</strong>'],
-    ['<em>', '</em>'],
-    ['<a href="https://example.com" style="background-color:yellow">', '</a>'],
-    ['<span style="background-color:yellow">', '</span>'],
-    ['<span style="color:red; font-size:20px">', '</span>']
-  ]) {
-    const html = `${open}<span style="border:1px solid red">X</span>${close}`
-    const prepared = prepareHtmlForEditor(html)
-    expect(prepared.html).not.toContain(open)
-    expect(restoreOpaqueHtml(prepared.html)).toBe(html)
-  }
 })

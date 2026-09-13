@@ -109,7 +109,12 @@ export function PasteContentPlugin({
       event.stopPropagation()
       void (async () => {
         const prepared = prepareHtmlForEditor(
-          normalizeClipboardHtml(html, editor.getRootElement() ?? undefined)
+          normalizeClipboardHtml(
+            html,
+            event.clipboardData?.types.includes('text/plain')
+              ? event.clipboardData.getData('text/plain')
+              : undefined
+          )
         )
         if (prepared.issues.length > 0) onPreservedContent()
         const document = new DOMParser().parseFromString(prepared.html, 'text/html')

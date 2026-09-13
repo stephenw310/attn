@@ -130,8 +130,6 @@ const INHERITED_TEXT_STYLES = new Set([
   'font-family',
   'font-size',
   'font-style',
-  'font-variant',
-  'font-stretch',
   'font-weight',
   'line-height',
   'text-decoration',
@@ -145,20 +143,6 @@ const INHERITED_TEXT_STYLES = new Set([
  * erase those supported declarations.
  */
 function materializeInheritedTextStyles(document: Document): void {
-  // A declaration on the semantic element replaces its own default decoration.
-  // A descendant declaration cannot remove decoration propagated by an ancestor.
-  for (const element of document.querySelectorAll<HTMLElement>('u[style], s[style], strike[style]')) {
-    if (
-      element.style.textDecorationLine !== 'none' &&
-      (!element.style.textDecoration.trim() ||
-        /(?:^|\s)(?:underline|overline|line-through|blink)(?:\s|$)/.test(element.style.textDecoration))
-    )
-      continue
-    const span = document.createElement('span')
-    for (const attribute of element.attributes) span.setAttribute(attribute.name, attribute.value)
-    span.append(...element.childNodes)
-    element.replaceWith(span)
-  }
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   const textNodes: Text[] = []
   while (walker.nextNode()) textNodes.push(walker.currentNode as Text)
@@ -172,7 +156,6 @@ function materializeInheritedTextStyles(document: Document): void {
       ancestor = ancestor.parentElement
     }
     const inherited = new Map<string, string>()
-    const decorationLines = new Set<string>()
     for (const element of ancestors) {
       // Semantic emphasis participates in the cascade before the element's CSS.
       if (['B', 'STRONG'].includes(element.tagName)) inherited.set('font-weight', 'bold')
@@ -186,15 +169,7 @@ function materializeInheritedTextStyles(document: Document): void {
         )
           inherited.set(property, value)
       }
-      for (const line of (inherited.get('text-decoration') ?? '').split(/\s+/)) {
-        if (['underline', 'line-through', 'overline'].includes(line)) decorationLines.add(line)
-      }
     }
-    if (
-      decorationLines.size &&
-      /^(?:none|underline|line-through|overline|\s)*$/.test(inherited.get('text-decoration') ?? '')
-    )
-      inherited.set('text-decoration', [...decorationLines].join(' '))
     if (inherited.size === 0) continue
     const span = document.createElement('span')
     span.setAttribute('style', [...inherited].map(([property, value]) => `${property}: ${value}`).join('; '))
@@ -266,7 +241,6 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(values.get('class'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const { name, value } of attributes) {
-    if (name === 'dir' && value !== 'ltr') return `${tag}[dir]`
     if (name === 'class' && isInertClass(value, hasStylesheet)) continue
     if (
       !GLOBAL_ATTRIBUTES.has(name) &&
@@ -280,25 +254,6 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   }
   for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
-    if (property === 'text-decoration' && !/^(?:none|underline|line-through|overline|\s)*$/.test(value))
-      return `${tag}[text-decoration]`
-    if (property === 'white-space' && ['nowrap', 'pre'].includes(value)) return `${tag}[white-space]`
-    if (property === 'list-style-type' || property === 'font') return `${tag}[style:${property}]`
-    if (
-      ['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'].includes(tag) &&
-      !INHERITED_TEXT_STYLES.has(property) &&
-      !(['td', 'th'].includes(tag) && property === 'background-color')
-    )
-      return `${tag}[table:${property}]`
-    // Text styles are materialized on editable runs. Block paint and geometry
-    // are not serialized by the paragraph/list/quote nodes.
-    if (
-      ['p', 'div', 'blockquote', 'ul', 'ol', 'li'].includes(tag) &&
-      !INHERITED_TEXT_STYLES.has(property) &&
-      property !== 'text-align' &&
-      !(/^(margin|padding)/.test(property) && /^(?:0(?:\.0+)?(?:px)?\s*){1,4}$/.test(value))
-    )
-      return `${tag}[block:${property}]`
     if (
       tag === 'span' &&
       /^(border|padding|margin|width$|height$)/.test(property) &&
@@ -366,41 +321,26 @@ const TABLE_SCOPED_TAGS = new Set(['caption', 'col', 'colgroup', 'thead', 'tbody
 
 function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSourceRegion[] {
   const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
-  const promotedContainers = new Map<DefaultTreeAdapterTypes.Element, string>()
+  const promotedTables = new Map<DefaultTreeAdapterTypes.Element, string>()
   const promote = (
     node: DefaultTreeAdapterTypes.ChildNode,
-    table: DefaultTreeAdapterTypes.Element | null,
-    list: DefaultTreeAdapterTypes.Element | null,
-    decorated: DefaultTreeAdapterTypes.Element | null
+    table: DefaultTreeAdapterTypes.Element | null
   ): void => {
     if (!('tagName' in node)) return
     const tag = node.tagName.toLowerCase()
-    if (table && TABLE_SCOPED_TAGS.has(tag) && !promotedContainers.has(table)) {
+    if (table && TABLE_SCOPED_TAGS.has(tag) && !promotedTables.has(table)) {
       const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
-      if (reason) promotedContainers.set(table, reason)
+      if (reason) promotedTables.set(table, reason)
     }
-    if (list && tag === 'li' && !promotedContainers.has(list)) {
-      const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
-      if (reason) promotedContainers.set(list, reason)
-    }
-    const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
-    if (reason && decorated) promotedContainers.set(decorated, reason)
-    const inheritedFormatting =
-      cssDeclarations(node.attrs.find((attribute) => attribute.name === 'style')?.value ?? '').some(
-        ({ property }) => INHERITED_TEXT_STYLES.has(property) || COMPOSER_STYLE_PROPERTIES.has(property)
-      ) || ['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'font', 'code', 'pre'].includes(tag)
-    const formattingOwner =
-      decorated ?? (inheritedFormatting ? (TABLE_SCOPED_TAGS.has(tag) && table ? table : node) : null)
     const nearestTable = tag === 'table' ? node : table
-    const nearestList = tag === 'ul' || tag === 'ol' ? node : list
-    for (const child of node.childNodes) promote(child, nearestTable, nearestList, formattingOwner)
+    for (const child of node.childNodes) promote(child, nearestTable)
   }
-  for (const child of fragment.childNodes) promote(child, null, null, null)
+  for (const child of fragment.childNodes) promote(child, null)
 
   const regions: OpaqueSourceRegion[] = []
   const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
     if (!('tagName' in node)) return
-    const reason = promotedContainers.get(node) ?? unsupportedReason(sourceElementShape(node), hasStylesheet)
+    const reason = promotedTables.get(node) ?? unsupportedReason(sourceElementShape(node), hasStylesheet)
     let region = owner
     if (reason && !owner) {
       const location = node.sourceCodeLocation

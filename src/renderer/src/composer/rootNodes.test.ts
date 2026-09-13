@@ -1,21 +1,20 @@
 // @vitest-environment jsdom
 
 import { createHeadlessEditor } from '@lexical/headless'
-import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html'
+import { $generateNodesFromDOM } from '@lexical/html'
 import { LinkNode } from '@lexical/link'
 import { ListItemNode, ListNode } from '@lexical/list'
 import { QuoteNode } from '@lexical/rich-text'
 import { TableCellNode, TableNode, TableRowNode } from '@lexical/table'
 import { $getRoot, TextNode } from 'lexical'
 import { describe, expect, it } from 'vitest'
-import { normalizeClipboardHtml } from './clipboardHtml'
 import { GmailSignatureNode } from './nodes/GmailSignatureNode'
 import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { ImageNode } from './nodes/ImageNode'
 import { LegacyFontNode } from './nodes/LegacyFontNode'
 import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
 import { StyledTextNode } from './nodes/StyledTextNode'
-import { prepareHtmlForEditor, restoreOpaqueHtml } from './preserve'
+import { prepareHtmlForEditor } from './preserve'
 import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { editorStateToPlainText } from './serialize'
 
@@ -119,95 +118,4 @@ describe('root-level node normalization', () => {
       'Hi there,\nThis is a test of email format.\nHopefully it looks good\n\nBests,\nChao Wu\nhttps://chaowu.xyz'
     )
   })
-})
-
-it('preserves Cocoa paragraph geometry and inline background through save and reload', () => {
-  const source =
-    '<meta name="Generator" content="Cocoa HTML Writer">' +
-    '<style>p.p1 { padding-left: 40px }</style>' +
-    '<p class="p1" style="background-color:yellow">Text</p>'
-  let html = normalizeClipboardHtml(source)
-  for (let round = 0; round < 2; round++) {
-    const target = editor()
-    target.update(
-      () => {
-        const prepared = prepareHtmlForEditor(html)
-        const document = new DOMParser().parseFromString(prepared.html, 'text/html')
-        $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
-        html = restoreOpaqueHtml($generateHtmlFromNodes(target))
-        const restored = new DOMParser().parseFromString(html, 'text/html')
-        const paragraph = restored.querySelector<HTMLParagraphElement>('p.p1')
-        expect(paragraph?.style.paddingLeft).toBe('40px')
-        expect(paragraph?.style.backgroundColor).toBe('yellow')
-        expect(paragraph?.textContent).toBe('Text')
-      },
-      { discrete: true }
-    )
-  }
-})
-
-it.each(['small-caps 13px Helvetica', 'condensed 13px Helvetica', 'oblique 10deg 13px Helvetica'])(
-  'preserves unsupported font shorthand through save and reload: %s',
-  (font) => {
-    for (const source of [
-      `<meta name="Generator" content="Cocoa HTML Writer"><style>p.p1 {font:${font}}</style><p class="p1">Text</p>`,
-      `<span style="font:${font}">Text</span>`
-    ]) {
-      let html = normalizeClipboardHtml(source)
-      for (let round = 0; round < 2; round++) {
-        const target = editor()
-        target.update(
-          () => {
-            const prepared = prepareHtmlForEditor(html)
-            expect(prepared.issues.length).toBeGreaterThan(0)
-            const document = new DOMParser().parseFromString(prepared.html, 'text/html')
-            $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
-            html = restoreOpaqueHtml($generateHtmlFromNodes(target))
-            expect(html).toContain(`font: ${font}`)
-          },
-          { discrete: true }
-        )
-      }
-    }
-  }
-)
-
-it('imports supported inline font shorthand as editable text formatting', () => {
-  const target = editor()
-  target.update(
-    () => {
-      const prepared = prepareHtmlForEditor(
-        normalizeClipboardHtml('<span style="font:italic bold 16px/1.5 Georgia">Text</span>')
-      )
-      expect(prepared.issues).toEqual([])
-      const document = new DOMParser().parseFromString(prepared.html, 'text/html')
-      $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
-      const text = $getRoot().getAllTextNodes()[0]
-      expect(text.hasFormat('bold')).toBe(true)
-      expect(text.hasFormat('italic')).toBe(true)
-      expect(text.getStyle()).toContain('font-family: Georgia')
-      expect(text.getStyle()).toContain('font-size: 16px')
-      expect(text.getStyle()).toContain('line-height: 1.5')
-    },
-    { discrete: true }
-  )
-})
-
-it('preserves styled list items inside one valid enclosing list through Lexical export', () => {
-  const target = editor()
-  const source = '<ul><li style="list-style-type: square">Item</li><li>Other</li></ul>'
-  target.update(
-    () => {
-      const prepared = prepareHtmlForEditor(source)
-      const document = new DOMParser().parseFromString(prepared.html, 'text/html')
-      $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
-      const exported = restoreOpaqueHtml($generateHtmlFromNodes(target))
-      expect(exported).toContain(source)
-      expect(exported).not.toMatch(/<li[^>]*>\s*<li/)
-      const restored = new DOMParser().parseFromString(exported, 'text/html')
-      expect(restored.querySelectorAll('ul > li')).toHaveLength(2)
-      expect(restored.querySelector('li')?.style.listStyleType).toBe('square')
-    },
-    { discrete: true }
-  )
 })

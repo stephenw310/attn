@@ -43,16 +43,12 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
   'border-top',
   'border-width',
   'color',
-  'font',
   'font-family',
   'font-size',
   'font-style',
-  'font-variant',
-  'font-stretch',
   'font-weight',
   'height',
   'line-height',
-  'list-style-type',
   'margin',
   'margin-bottom',
   'margin-left',
@@ -70,89 +66,6 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
   'width'
 ])
 
-// Safe presentation that remains read-only because Lexical does not round-trip it.
-export const PRESERVED_STYLE_PROPERTIES = new Set([
-  'aspect-ratio',
-  'grid-template-areas',
-  'grid-auto-flow',
-  'grid-auto-columns',
-  'grid-auto-rows',
-  'inline-size',
-  'block-size',
-  'min-inline-size',
-  'max-inline-size',
-  'min-block-size',
-  'max-block-size',
-  'direction',
-  'unicode-bidi',
-  'float',
-  'table-layout',
-  'column-count',
-  'column-width',
-  'column-gap',
-  'column-rule-width',
-  'column-rule-style',
-  'column-rule-color',
-  'column-span',
-  'column-fill',
-  'break-before',
-  'break-after',
-  'break-inside',
-  'order',
-  'position',
-  'top',
-  'right',
-  'bottom',
-  'left',
-  'z-index',
-  'clear',
-  'display',
-  'opacity',
-  'visibility',
-  'transform',
-  'transform-origin',
-  'letter-spacing',
-  'word-spacing',
-  'text-transform',
-  'text-shadow',
-  'box-shadow',
-  'border-radius',
-  'overflow',
-  'overflow-x',
-  'overflow-y',
-  'max-width',
-  'min-width',
-  'max-height',
-  'min-height',
-  'box-sizing',
-  'text-overflow',
-  'word-break',
-  'writing-mode',
-  'text-orientation',
-  'text-indent',
-  'object-fit',
-  'object-position',
-  'flex',
-  'flex-direction',
-  'flex-wrap',
-  'flex-grow',
-  'flex-shrink',
-  'flex-basis',
-  'align-items',
-  'align-content',
-  'align-self',
-  'justify-content',
-  'justify-items',
-  'justify-self',
-  'gap',
-  'row-gap',
-  'column-gap',
-  'grid-template-columns',
-  'grid-template-rows',
-  'grid-column',
-  'grid-row'
-])
-
 const UNSAFE_STYLE_RESOURCE =
   /(?:url\s*\(|(?:-webkit-)?image-set\s*\(|(?:image|cross-fade|element|-moz-element|paint|src)\s*\(|expression\s*\(|javascript:|@import|behavior\s*:|(?:https?|data|cid|blob|file):|\/\/|\\|\/\*)/i
 
@@ -160,9 +73,7 @@ export function sanitizeComposerStyle(style: unknown): string {
   if (typeof style !== 'string') return ''
   return cssDeclarations(style)
     .filter(
-      ({ property, value }) =>
-        (COMPOSER_STYLE_PROPERTIES.has(property) || PRESERVED_STYLE_PROPERTIES.has(property)) &&
-        !UNSAFE_STYLE_RESOURCE.test(value)
+      ({ property, value }) => COMPOSER_STYLE_PROPERTIES.has(property) && !UNSAFE_STYLE_RESOURCE.test(value)
     )
     .map(({ raw }) => raw)
     .join('; ')
@@ -234,8 +145,6 @@ const TABLE_ELEMENTS = new Set(['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 
 // applied to every attribute value DOMPurify does not know is URI-free — which
 // is exactly how these were being stripped before #18a.
 const URI_SAFE_ATTRIBUTES = [
-  'lang',
-  'aria-label',
   'width',
   'height',
   'colspan',
@@ -334,12 +243,9 @@ export function sanitizeOutgoingHtml(html: string): string {
       'href',
       'src',
       'alt',
-      'aria-label',
-      'role',
       'title',
       'class',
       'dir',
-      'lang',
       'rel',
       'target',
       'width',
@@ -376,7 +282,7 @@ export function sanitizeDraftHtmlForImport(html: string): string {
   installLegacyTableAttributeHook(importPurifier)
   installDirectionAndTargetHook(importPurifier)
   return importPurifier.sanitize(html, {
-    ADD_ATTR: ['dir', 'target', 'aria-label'],
+    ADD_ATTR: ['dir', 'target'],
     FORBID_TAGS: ['script', 'style', 'form', 'input', 'button', 'select', 'textarea', 'iframe', 'object'],
     ADD_URI_SAFE_ATTR: URI_SAFE_ATTRIBUTES,
     ALLOWED_URI_REGEXP: SAFE_URI,
