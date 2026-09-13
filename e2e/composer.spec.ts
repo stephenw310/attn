@@ -3270,7 +3270,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     .attribute::before {content:attr(data-label)}
     .alternative::before {content:"★/" / "star"}
     .image-content::before {content:url("https://clipboard-resource.attn.test/icons/check.svg") / "check"}
-    .image-label::before {content:url(https://clipboard-resource.attn.test/icons/check.svg) "Label"}
+    .image-label::before {content:url(https://clipboard-resource.attn.test/icons/check.svg) "Label" / "mixed"}
     .numbered {counter-reset:item}
     .numbered p::before {counter-increment:item;content:counter(item) ". "}
     @counter-style thumbs {system:cyclic;symbols:"👍"}
@@ -3295,7 +3295,9 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     (html) => new DOMParser().parseFromString(html, 'text/html').body.textContent,
     saved?.bodyHtml ?? ''
   )
-  expect(saved?.bodyHtml).toMatch(/<img[^>]*alt="check"/)
+  expect(saved?.bodyHtml).toContain('aria-label="check"')
+  expect(saved?.bodyHtml).toContain('aria-label="mixed"')
+  expect(saved?.bodyHtml).not.toMatch(/<img[^>]*alt="check"/)
   expect(text).toContain('LabelTail')
   expect(text).not.toContain('icons/check.svg')
   expect(text).toContain('★/Symbol')
@@ -3312,7 +3314,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(text).toContain('1 Sibling A1 Sibling B')
   expect(text).toContain('✓ Marked')
   expect(saved?.bodyHtml).toContain('list-style-type: none')
-  await expect(composer.editor.locator('iframe')).toHaveCount(2)
+  await expect(composer.editor.locator('iframe')).toHaveCount(4)
   await page.mouse.move(0, 0)
   await page.screenshot({ path: join(__dirname, '.artifacts/clipboard-generated-content.png') })
 })
@@ -3414,7 +3416,10 @@ test('preserves clipboard CSS direction and wrapper language', async ({ page }) 
   await composer.subject.fill('Clipboard language')
   await composer.editor.click()
   await pasteHtml(composer, '<body lang="fr"><p>Bonjour</p></body>')
-  await pasteHtml(composer, '<style>p {direction:rtl;text-align:start}</style><p>مرحبا</p>')
+  await pasteHtml(
+    composer,
+    '<style>p {direction:rtl;text-align:start;float:right;clear:both}</style><p>مرحبا</p>'
+  )
   await composer.expectSaved()
   const html = await page.evaluate(async () => {
     const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Clipboard language')
@@ -3422,4 +3427,6 @@ test('preserves clipboard CSS direction and wrapper language', async ({ page }) 
   })
   expect(html).toContain('lang="fr"')
   expect(html).toMatch(/direction:\s*rtl/)
+  expect(html).toMatch(/float:\s*right/)
+  expect(html).toMatch(/clear:\s*both/)
 })

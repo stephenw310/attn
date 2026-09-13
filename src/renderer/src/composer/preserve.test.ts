@@ -98,9 +98,7 @@ describe('composer HTML fidelity', () => {
   })
 
   it('does not freeze formatting the import sanitizer removes on its own', () => {
-    // `float` and `align` never reach the stored draft either way, so an opaque
-    // region would preserve nothing and only cost the user an editable line.
-    for (const html of ['<div style="float:left">Floated</div>', '<div align="center">Centered</div>']) {
+    for (const html of ['<div align="center">Centered</div>']) {
       const prepared = prepareHtmlForEditor(html)
       expect(prepared.issues).toEqual([])
       expect(prepared.html).not.toContain('data-attn-opaque')
@@ -259,4 +257,11 @@ describe('composer HTML fidelity', () => {
     expect(restored).not.toContain('dir="sideways"')
     expect(restored).not.toContain('target="_top"')
   })
+})
+
+it('preserves floated content as an opaque region', () => {
+  const html = '<div style="float:left; clear:both">Floated</div>'
+  const prepared = prepareHtmlForEditor(html)
+  expect(prepared.issues).toHaveLength(1)
+  expect(restoreOpaqueHtml(prepared.html)).toBe(html)
 })

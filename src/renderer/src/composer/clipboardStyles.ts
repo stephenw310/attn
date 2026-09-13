@@ -154,7 +154,7 @@ export function snapshotClipboardStyles(source: Document): void {
         const parts = generated.get(element)?.[side] ?? []
         if (!parts.length || parts.every((part) => 'text' in part && !part.text)) continue
         const span = frame.createElement('span')
-        if (parts.every((part) => 'text' in part) && parts[0]?.alt !== undefined) {
+        if (parts[0]?.alt !== undefined) {
           span.setAttribute('role', 'img')
           span.setAttribute('aria-label', parts[0].alt)
         }
@@ -163,7 +163,7 @@ export function snapshotClipboardStyles(source: Document): void {
           else {
             const image = frame.createElement('img')
             image.setAttribute('src', part.src)
-            image.setAttribute('alt', part.alt ?? '')
+            image.setAttribute('alt', '')
             span.append(image)
           }
         }
