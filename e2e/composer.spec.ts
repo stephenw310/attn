@@ -3539,3 +3539,22 @@ test('preserves multicolumn clipboard layouts', async ({ page }) => {
   expect(html).toMatch(/column-gap:\s*20px/)
   expect(html).toMatch(/column-rule-style:\s*solid/)
 })
+
+test('preserves first-letter and first-line clipboard styling', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Text pseudos')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.letter::first-letter{color:red;font-size:30px}.line::first-line{color:blue}</style><p class="letter">Letter</p><p class="line">First<br>Second</p>'
+  )
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Text pseudos')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toContain('30px')
+  expect(html).toContain('rgb(255, 0, 0)')
+  expect(html).toContain('rgb(0, 0, 255)')
+})

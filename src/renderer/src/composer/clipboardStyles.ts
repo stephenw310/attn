@@ -1,5 +1,6 @@
 import createDOMPurify from 'dompurify'
 import { materializeGeneratedContent } from './clipboardGeneratedContent'
+import { snapshotTextPseudos } from './clipboardTextPseudos'
 import { COMPOSER_STYLE_PROPERTIES, PRESERVED_STYLE_PROPERTIES } from './sanitize'
 
 /** Resolve clipboard CSS in a scriptless frame whose CSP blocks all resource loads. */
@@ -81,6 +82,8 @@ export function snapshotClipboardStyles(source: Document): void {
     const rootBaseline = read(frame.documentElement)
     const baseline = elements.map((element) => read(element))
     const pseudoBaseline = elements.map((element) => ({
+      firstLine: read(element, '::first-line'),
+      firstLetter: read(element, '::first-letter'),
       marker: read(element, '::marker'),
       before: read(element, '::before'),
       after: read(element, '::after')
@@ -95,6 +98,8 @@ export function snapshotClipboardStyles(source: Document): void {
     // Read everything before changing the DOM so selectors and inheritance stay intact.
     const snapshots = elements.map((element) => ({
       style: read(element),
+      firstLine: read(element, '::first-line'),
+      firstLetter: read(element, '::first-letter'),
       marker: {
         content: view.getComputedStyle(element, '::marker').content,
         style: read(element, '::marker')
@@ -105,6 +110,18 @@ export function snapshotClipboardStyles(source: Document): void {
       },
       after: { content: view.getComputedStyle(element, '::after').content, style: read(element, '::after') }
     }))
+    const textPseudos = elements.map((element, index) => {
+      const changed = (side: 'firstLine' | 'firstLetter') =>
+        new Map(
+          [...snapshots[index][side]].filter(
+            ([name, value]) =>
+              value &&
+              value !== pseudoBaseline[index][side].get(name) &&
+              value !== snapshots[index].style.get(name)
+          )
+        )
+      return snapshotTextPseudos(element, changed('firstLine'), changed('firstLetter'))
+    })
     const rootStyle = read(frame.documentElement)
     const desired = new Map<Element, Map<string, string>>([
       [frame.documentElement, rootStyle],
@@ -197,6 +214,7 @@ export function snapshotClipboardStyles(source: Document): void {
         else element.append(span)
       }
     }
+    for (const materialize of textPseudos.reverse()) materialize()
     const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
     const direction = frame.body.dir || frame.documentElement.dir
     const language = frame.body.lang || frame.documentElement.lang
