@@ -3612,3 +3612,25 @@ test('measures first lines inside a narrow composer with a drop cap', async ({ p
   expect(result.text.length).toBeLessThan(35)
   expect(result.html).toMatch(/text-shadow:\s*none/)
 })
+
+test('ends first-line styling at a break after a drop cap', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Drop cap break')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>p::first-letter{font-size:60px;float:left}p::first-line{color:blue}</style><p>A<br>B</p>'
+  )
+  await composer.expectSaved()
+  const blue = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Drop cap break')
+    const html = draft ? ((await window.attn.draft.get(draft.id))?.bodyHtml ?? '') : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    return [...doc.querySelectorAll('span')]
+      .filter((span) => span.style.color === 'rgb(0, 0, 255)')
+      .map((span) => span.textContent)
+      .join('')
+  })
+  expect(blue).toBe('A')
+})

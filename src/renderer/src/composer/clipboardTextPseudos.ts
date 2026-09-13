@@ -4,7 +4,7 @@ type TextStyle = Map<string, string>
 export function snapshotTextPseudos(element: Element, line: TextStyle, letter: TextStyle): () => void {
   if (!line.size && !letter.size) return () => {}
   const document = element.ownerDocument
-  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
   const runs: { range: Range; style: TextStyle }[] = []
   let firstRect: DOMRect | undefined
   let letterState = 0
@@ -14,6 +14,13 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   let pastLine = false
   while (walker.nextNode()) {
+    if (walker.currentNode.nodeType === Node.ELEMENT_NODE) {
+      if ((walker.currentNode as Element).tagName === 'BR') {
+        pastLine = true
+        letterState = 2
+      }
+      continue
+    }
     const node = walker.currentNode as Text
     if (node.parentElement?.closest('style, script')) continue
     for (const { segment: character, index: offset } of segmenter.segment(node.data)) {
