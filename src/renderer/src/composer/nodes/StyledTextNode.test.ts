@@ -161,7 +161,7 @@ it('keeps code typography on every preformatted line and tab', () => {
 
 it('preserves distinct decorations on nested inline ancestors', () => {
   const html =
-    '<span style="text-decoration:underline solid red"><span style="text-decoration:line-through dotted blue">X</span></span>'
+    '<span style="text-decoration:underline"><span style="text-decoration:line-through dotted blue">X</span></span>'
   const prepared = prepareHtmlForEditor(html)
   expect(prepared.issues.length).toBeGreaterThan(0)
   expect(restoreOpaqueHtml(prepared.html)).toBe(html)

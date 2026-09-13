@@ -370,7 +370,8 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
   const promote = (
     node: DefaultTreeAdapterTypes.ChildNode,
     table: DefaultTreeAdapterTypes.Element | null,
-    list: DefaultTreeAdapterTypes.Element | null
+    list: DefaultTreeAdapterTypes.Element | null,
+    decorated: DefaultTreeAdapterTypes.Element | null
   ): void => {
     if (!('tagName' in node)) return
     const tag = node.tagName.toLowerCase()
@@ -382,11 +383,21 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
       const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
       if (reason) promotedContainers.set(list, reason)
     }
+    const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
+    if (reason && decorated) promotedContainers.set(decorated, reason)
+    const decoration = cssDeclarations(
+      node.attrs.find((attribute) => attribute.name === 'style')?.value ?? ''
+    ).find(({ property }) => property === 'text-decoration')?.value
+    const addsDecoration = decoration
+      ? /(?:underline|line-through|overline)/.test(decoration)
+      : ['u', 's', 'strike'].includes(tag)
+    const decoratedOwner =
+      decorated ?? (addsDecoration ? (TABLE_SCOPED_TAGS.has(tag) && table ? table : node) : null)
     const nearestTable = tag === 'table' ? node : table
     const nearestList = tag === 'ul' || tag === 'ol' ? node : list
-    for (const child of node.childNodes) promote(child, nearestTable, nearestList)
+    for (const child of node.childNodes) promote(child, nearestTable, nearestList, decoratedOwner)
   }
-  for (const child of fragment.childNodes) promote(child, null, null)
+  for (const child of fragment.childNodes) promote(child, null, null, null)
 
   const regions: OpaqueSourceRegion[] = []
   const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
