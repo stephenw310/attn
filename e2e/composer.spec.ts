@@ -3599,6 +3599,26 @@ test('keeps logical-size flex siblings responsive after paste', async ({ page })
   expect(sizes.second).toBe(400)
 })
 
+test('preserves automatic clipboard grid placement', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.grid{display:grid;grid-auto-flow:column;grid-auto-columns:100px;grid-auto-rows:50px}</style><div class="grid"><div>First</div><div>Second</div></div>'
+  )
+  const grid = composer.editor.frameLocator('iframe').locator('div[style*="grid-auto-flow"]')
+  await expect(grid).toHaveCSS('grid-auto-flow', 'column')
+  await expect(grid).toHaveCSS('grid-auto-columns', '100px')
+  await expect(grid).toHaveCSS('grid-auto-rows', '50px')
+  const geometry = await grid.evaluate((element) => {
+    const first = element.children[0].getBoundingClientRect()
+    const second = element.children[1].getBoundingClientRect()
+    return { offset: second.x - first.x, height: first.height, sameRow: first.y === second.y }
+  })
+  expect(geometry).toEqual({ offset: 100, height: 50, sameRow: true })
+})
+
 test('preserves multicolumn clipboard layouts', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

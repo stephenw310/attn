@@ -71,9 +71,9 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       const typed = !pseudo
         ? (
             element as Element & {
-              computedStyleMap(): { get(name: string): { toString(): string } | undefined }
+              computedStyleMap?(): { get(name: string): { toString(): string } | undefined }
             }
-          ).computedStyleMap()
+          ).computedStyleMap?.()
         : undefined
       return new Map(
         properties
