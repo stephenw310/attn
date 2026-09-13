@@ -3317,12 +3317,13 @@ test('preserves generated color resets and implicit ordered list counters', asyn
     ol li::marker {content:counter(list-item, lower-roman) ". "}
     .reset {counter-reset:list-item 9}
     .item-reset li {counter-reset:list-item 9}
+    u.plain {text-decoration:none}
     @counter-style hands {system:cyclic;symbols:"👍";prefix:"[";suffix:"] "}
     .hands {list-style-type:hands} .hands li::marker {content:normal}
     </style><div class="parent"><p class="child">Red</p></div>
     <ol><li>One</li><li>Two</li></ol>
     <ol start="3"><li>Three</li><li value="5">Five</li><li>Six</li></ol>
-    <ol reversed><li>Down two</li><li>Down one</li></ol><ol class="reset"><li>Ten</li><li>Eleven</li></ol><ol class="hands"><li>Hand</li></ol><ol class="item-reset"><li>Item ten</li></ol><iframe src="https://example.com" title="Demo"></iframe><p><u><span style="text-decoration:none">Underlined</span></u><s><span style="text-decoration:none">Struck</span></s></p>`
+    <ol reversed><li>Down two</li><li>Down one</li></ol><ol class="reset"><li>Ten</li><li>Eleven</li></ol><ol class="hands"><li>Hand</li></ol><ol class="item-reset"><li>Item ten</li></ol><iframe src="https://example.com" title="Demo"></iframe><p><u class="plain">Undecorated</u></p><p><u><span style="text-decoration:none">Underlined</span></u><s><span style="text-decoration:none">Struck</span></s></p>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3333,12 +3334,16 @@ test('preserves generated color resets and implicit ordered list counters', asyn
     const doc = new DOMParser().parseFromString(html, 'text/html')
     return {
       text: doc.body.textContent,
+      unwantedUnderline: [...doc.querySelectorAll('u')].some((element) =>
+        element.textContent?.includes('Undecorated')
+      ),
       black: [...doc.querySelectorAll('span')].some(
         (span) => span.textContent === 'X' && ['black', 'rgb(0, 0, 0)'].includes(span.style.color)
       )
     }
   })
   expect(saved.black).toBe(true)
+  expect(saved.unwantedUnderline).toBe(false)
   for (const label of [
     'i. One',
     'ii. Two',
