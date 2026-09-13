@@ -152,16 +152,18 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
         }
       }
       for (const sheet of frame.styleSheets) mirror(sheet.cssRules)
-      for (const element of elements)
+      for (const element of elements) {
+        const values = (
+          element as Element & {
+            computedStyleMap?(): { get(name: string): { toString(): string } | undefined }
+          }
+        ).computedStyleMap?.()
         for (const name of dimensions) {
-          const value = element.style.getPropertyValue(name)
-          if (value)
-            element.style.setProperty(
-              `--attn-snapshot-${name}`,
-              value,
-              element.style.getPropertyPriority(name)
-            )
+          // Read the winning physical/logical alias after cascade and writing-mode mapping.
+          const value = values?.get(name)?.toString() ?? element.style.getPropertyValue(name)
+          if (value) element.style.setProperty(`--attn-snapshot-${name}`, value, 'important')
         }
+      }
     }
     // Read everything before changing the DOM so selectors and inheritance stay intact.
     const snapshots = elements.map((element) => ({

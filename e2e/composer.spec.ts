@@ -3699,6 +3699,31 @@ test('preserves inherited inline sizes and generated grid tracks', async ({ page
   expect(result).toEqual({ width: '50%', tracks: '1fr 2fr', first: 200, second: 300 })
 })
 
+test('inherits winning logical aliases in generated widths', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.box::before{content:"A";display:grid;grid-template-columns:1fr;width:inherit;background:red}</style><div class="box" style="width:50%;inline-size:auto">Content</div>'
+  )
+  const generated = composer.editor.frameLocator('iframe').locator('span[style*="grid-template-columns"]')
+  const result = await generated.evaluate((element) => {
+    const box = element.parentElement as HTMLElement
+    box.style.width = '400px'
+    const first = element.getBoundingClientRect().width
+    box.style.width = '600px'
+    return {
+      width: (element as HTMLElement).style.width,
+      first,
+      second: element.getBoundingClientRect().width
+    }
+  })
+  expect(result.width).toMatch(/^(auto)?$/)
+  expect(result.first).toBe(400)
+  expect(result.second).toBe(600)
+})
+
 test('preserves automatic clipboard grid placement', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()
