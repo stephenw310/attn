@@ -200,6 +200,7 @@ const TABLE_ELEMENTS = new Set(['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 
 // applied to every attribute value DOMPurify does not know is URI-free — which
 // is exactly how these were being stripped before #18a.
 const URI_SAFE_ATTRIBUTES = [
+  'aria-label',
   'width',
   'height',
   'colspan',
@@ -298,6 +299,8 @@ export function sanitizeOutgoingHtml(html: string): string {
       'href',
       'src',
       'alt',
+      'aria-label',
+      'role',
       'title',
       'class',
       'dir',
@@ -337,7 +340,7 @@ export function sanitizeDraftHtmlForImport(html: string): string {
   installLegacyTableAttributeHook(importPurifier)
   installDirectionAndTargetHook(importPurifier)
   return importPurifier.sanitize(html, {
-    ADD_ATTR: ['dir', 'target'],
+    ADD_ATTR: ['dir', 'target', 'aria-label'],
     FORBID_TAGS: ['script', 'style', 'form', 'input', 'button', 'select', 'textarea', 'iframe', 'object'],
     ADD_URI_SAFE_ATTR: URI_SAFE_ATTRIBUTES,
     ALLOWED_URI_REGEXP: SAFE_URI,

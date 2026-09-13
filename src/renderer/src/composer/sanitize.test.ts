@@ -204,3 +204,12 @@ it('preserves safe read-only presentation without admitting CSS resources or scr
     expect(result).not.toContain('expression(')
   }
 })
+
+it('preserves only the allowed accessible label through both sanitizer passes', () => {
+  for (const sanitize of [sanitizeDraftHtmlForImport, sanitizeOutgoingHtml]) {
+    const html = sanitize('<span role="img" aria-label="star" aria-hidden="true" onclick="alert(1)">★</span>')
+    expect(html).toContain('aria-label="star"')
+    expect(html).not.toContain('aria-hidden')
+    expect(html).not.toContain('onclick')
+  }
+})

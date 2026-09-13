@@ -1,7 +1,7 @@
 import { createClipboardCounterFormatter } from './clipboardCounterStyles'
 
 type Counters = Map<string, { value: number; depth: number }[]>
-type ContentPart = { text: string } | { src: string; alt?: string }
+type ContentPart = { text: string; alt?: string } | { src: string; alt?: string }
 export type GeneratedContent = { marker: ContentPart[]; before: ContentPart[]; after: ContentPart[] }
 
 function unquote(value: string): string {
@@ -86,6 +86,8 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     let text = ''
     for (const token of tokens) {
       if (token === '/') {
+        if (text) parts.push({ text })
+        text = ''
         const alternative = contentText(
           tokens.slice(tokens.indexOf('/') + 1).join(' '),
           element,
@@ -94,7 +96,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
         )
           .map((part) => ('text' in part ? part.text : ''))
           .join('')
-        for (const part of parts) if ('src' in part) part.alt = alternative
+        for (const part of parts) part.alt = alternative
         break
       }
       if (/^url\(/i.test(token)) {

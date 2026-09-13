@@ -257,6 +257,7 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   const gmailSignaturePrefix = tag === 'span' && isGmailSignaturePrefixClass(values.get('class'))
   const tagAttributes = TAG_ATTRIBUTES[tag] ?? new Set<string>()
   for (const { name, value } of attributes) {
+    if (name === 'dir' && value !== 'ltr') return `${tag}[dir]`
     if (name === 'class' && isInertClass(value, hasStylesheet)) continue
     if (
       !GLOBAL_ATTRIBUTES.has(name) &&

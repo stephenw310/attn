@@ -103,6 +103,8 @@ export function normalizeClipboardHtml(html: string): string {
   // Unknown stylesheets may carry meaningful layout; keep the preservation path.
   if (
     document.querySelector('style') ||
+    document.body.hasAttribute('dir') ||
+    document.documentElement.hasAttribute('dir') ||
     document.body.getAttribute('style')?.trim() ||
     document.documentElement.getAttribute('style')?.trim() ||
     /var\s*\(|:\s*(?:inherit|initial|unset|revert(?:-layer)?)\b/i.test(document.body.innerHTML)

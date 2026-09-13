@@ -3300,6 +3300,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(text).not.toContain('icons/check.svg')
   expect(text).toContain('★/Symbol')
   expect(text).not.toContain('star')
+  expect(saved?.bodyHtml).toContain('aria-label="star"')
   expect(text).toContain('Prefix Attribute')
   expect(text).toContain('1. First')
   expect(text).toContain('2. Second')
@@ -3311,7 +3312,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(text).toContain('1 Sibling A1 Sibling B')
   expect(text).toContain('✓ Marked')
   expect(saved?.bodyHtml).toContain('list-style-type: none')
-  await expect(composer.editor.locator('iframe')).toHaveCount(1)
+  await expect(composer.editor.locator('iframe')).toHaveCount(2)
   await page.mouse.move(0, 0)
   await page.screenshot({ path: join(__dirname, '.artifacts/clipboard-generated-content.png') })
 })
@@ -3391,4 +3392,18 @@ test('uses the application viewport for clipboard media queries', async ({ page 
     return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
   })
   expect(html).toContain('rgb(0, 0, 255)')
+})
+
+test('retains unstyled clipboard body direction', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('RTL clipboard')
+  await composer.editor.click()
+  await pasteHtml(composer, '<body dir="rtl"><p>مرحبا</p></body>')
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'RTL clipboard')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toContain('dir="rtl"')
 })
