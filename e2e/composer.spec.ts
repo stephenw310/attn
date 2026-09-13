@@ -3675,6 +3675,30 @@ test('keeps reset pseudo widths and fractional grid tracks responsive', async ({
   expect(result).toEqual({ tracks: '1fr 2fr', before: 100, after: 200 })
 })
 
+test('preserves inherited inline sizes and generated grid tracks', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.box::before{content:"A";display:grid;width:inherit;grid-template-columns:1fr 2fr}</style><div class="box" style="width:50%">Content</div>'
+  )
+  const generated = composer.editor.frameLocator('iframe').locator('span[style*="grid-template-columns"]')
+  const result = await generated.evaluate((element) => {
+    const box = element.parentElement as HTMLElement
+    box.style.width = '400px'
+    const first = element.getBoundingClientRect().width
+    box.style.width = '600px'
+    return {
+      width: (element as HTMLElement).style.width,
+      tracks: (element as HTMLElement).style.gridTemplateColumns,
+      first,
+      second: element.getBoundingClientRect().width
+    }
+  })
+  expect(result).toEqual({ width: '50%', tracks: '1fr 2fr', first: 200, second: 300 })
+})
+
 test('preserves automatic clipboard grid placement', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

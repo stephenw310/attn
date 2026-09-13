@@ -128,7 +128,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
     // resolves the pseudo cascade and variables without converting percentages
     // to used pixels. These properties never enter the serialized output.
     const dimensions = properties.filter((name) =>
-      /^(?:min-|max-)?(?:width|height|(?:inline|block)-size)$/.test(name)
+      /^(?:(?:min-|max-)?(?:width|height|(?:inline|block)-size)|grid-template-(?:columns|rows))$/.test(name)
     )
     const cssApi = (view as Window & { CSS?: typeof CSS }).CSS
     if (cssApi?.registerProperty) {
@@ -137,7 +137,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
           name: `--attn-snapshot-${name}`,
           syntax: '*',
           inherits: false,
-          initialValue: name.startsWith('max-') ? 'none' : 'auto'
+          initialValue: name.startsWith('max-') || name.startsWith('grid-') ? 'none' : 'auto'
         })
       const mirror = (rules: CSSRuleList) => {
         for (const rule of rules) {
@@ -152,6 +152,16 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
         }
       }
       for (const sheet of frame.styleSheets) mirror(sheet.cssRules)
+      for (const element of elements)
+        for (const name of dimensions) {
+          const value = element.style.getPropertyValue(name)
+          if (value)
+            element.style.setProperty(
+              `--attn-snapshot-${name}`,
+              value,
+              element.style.getPropertyPriority(name)
+            )
+        }
     }
     // Read everything before changing the DOM so selectors and inheritance stay intact.
     const snapshots = elements.map((element) => ({
