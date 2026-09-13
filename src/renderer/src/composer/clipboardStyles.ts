@@ -4,7 +4,7 @@ import { snapshotTextPseudos } from './clipboardTextPseudos'
 import { COMPOSER_STYLE_PROPERTIES, PRESERVED_STYLE_PROPERTIES } from './sanitize'
 
 /** Resolve clipboard CSS in a scriptless frame whose CSP blocks all resource loads. */
-export function snapshotClipboardStyles(source: Document): void {
+export function snapshotClipboardStyles(source: Document, destination?: HTMLElement): void {
   const host = document.createElement('iframe')
   host.setAttribute('sandbox', 'allow-same-origin')
   host.setAttribute('aria-hidden', 'true')
@@ -79,6 +79,16 @@ export function snapshotClipboardStyles(source: Document): void {
           .map((property) => [property, computed.getPropertyValue(property)])
       )
     }
+    const destinationStyle = destination ? window.getComputedStyle(destination) : undefined
+    const applyDestination = () => {
+      if (!destination || !destinationStyle) return
+      if (!frame.body.style.width)
+        frame.body.style.width = `${destination.clientWidth - parseFloat(destinationStyle.paddingLeft) - parseFloat(destinationStyle.paddingRight)}px`
+      for (const name of ['font-family', 'font-size', 'line-height'])
+        if (!frame.body.style.getPropertyValue(name))
+          frame.body.style.setProperty(name, destinationStyle.getPropertyValue(name))
+    }
+    applyDestination()
     const rootBaseline = read(frame.documentElement)
     const baseline = elements.map((element) => read(element))
     const pseudoBaseline = elements.map((element) => ({
@@ -89,6 +99,7 @@ export function snapshotClipboardStyles(source: Document): void {
       after: read(element, '::after')
     }))
     for (let index = 0; index < elements.length; index++) elements[index].setAttribute('style', inline[index])
+    applyDestination()
     frame.documentElement.setAttribute('style', source.documentElement.getAttribute('style') ?? '')
     for (const css of sheets) {
       const style = frame.createElement('style')
@@ -118,6 +129,7 @@ export function snapshotClipboardStyles(source: Document): void {
     const inherited = new Set([
       'direction',
       'color',
+      'text-shadow',
       'font-family',
       'font-size',
       'font-weight',
@@ -202,6 +214,8 @@ export function snapshotClipboardStyles(source: Document): void {
         else element.append(span)
       }
     }
+    const serializedBodyStyle = frame.body.getAttribute('style') ?? ''
+    applyDestination()
     const hideGenerated = frame.createElement('style')
     hideGenerated.textContent = '*::before,*::after,*::marker{content:none!important}'
     frame.head.append(hideGenerated)
@@ -218,6 +232,7 @@ export function snapshotClipboardStyles(source: Document): void {
       return snapshotTextPseudos(element, changed('firstLine'), changed('firstLetter'))
     })
     for (const materialize of textPseudos.reverse()) materialize()
+    frame.body.setAttribute('style', serializedBodyStyle)
     const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
     const direction = frame.body.dir || frame.documentElement.dir
     const language = frame.body.lang || frame.documentElement.lang

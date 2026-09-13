@@ -91,7 +91,7 @@ function expandCocoaStyles(html: string): string {
 }
 
 /** Normalize new clipboard content into the editor's email-friendly vocabulary. */
-export function normalizeClipboardHtml(html: string): string {
+export function normalizeClipboardHtml(html: string, destination?: HTMLElement): string {
   const expanded = expandCocoaStyles(html)
   const document = new DOMParser().parseFromString(expanded, 'text/html')
   for (const element of document.querySelectorAll('iframe[src],video[src],audio[src]')) {
@@ -111,7 +111,7 @@ export function normalizeClipboardHtml(html: string): string {
     document.documentElement.getAttribute('style')?.trim() ||
     /var\s*\(|:\s*(?:inherit|initial|unset|revert(?:-layer)?)\b/i.test(document.body.innerHTML)
   )
-    snapshotClipboardStyles(document)
+    snapshotClipboardStyles(document, destination)
   const supportedTags = new Set(
     'P DIV SPAN B STRONG I EM U S STRIKE A UL OL LI BLOCKQUOTE TABLE THEAD TBODY TFOOT TR TD TH IMG BR FONT H1 H2 H3 H4 H5 H6 MARK CODE PRE DETAILS SUMMARY FIGURE FIGCAPTION INPUT HR IFRAME VIDEO AUDIO'.split(
       ' '

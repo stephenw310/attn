@@ -108,7 +108,9 @@ export function PasteContentPlugin({
       event.preventDefault()
       event.stopPropagation()
       void (async () => {
-        const prepared = prepareHtmlForEditor(normalizeClipboardHtml(html))
+        const prepared = prepareHtmlForEditor(
+          normalizeClipboardHtml(html, editor.getRootElement() ?? undefined)
+        )
         if (prepared.issues.length > 0) onPreservedContent()
         const document = new DOMParser().parseFromString(prepared.html, 'text/html')
         preserveBlankLineBlocks(document)

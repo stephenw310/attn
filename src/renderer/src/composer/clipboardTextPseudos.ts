@@ -25,7 +25,9 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
       if (!rect) {
         continue
       }
-      if (!firstRect && !/\s/u.test(character)) firstRect = rect
+      const isLetter = letterState < 2 && (letterState === 0 || /^\p{P}+$/u.test(character))
+      const dropCap = isLetter && (letter.has('font-size') || letter.has('float'))
+      if (!firstRect && !dropCap && !/\s/u.test(character)) firstRect = rect
       if (
         firstRect &&
         (vertical
@@ -33,7 +35,7 @@ export function snapshotTextPseudos(element: Element, line: TextStyle, letter: T
           : rect.top >= firstRect.bottom || rect.bottom <= firstRect.top)
       )
         pastLine = true
-      const style = new Map(!pastLine && firstRect ? line : [])
+      const style = new Map(!pastLine ? line : [])
       if (letterState === 1 && !/^\p{P}+$/u.test(character)) letterState = 2
       if (letterState < 2 && !/^\s+$/u.test(character)) {
         for (const [name, value] of letter) style.set(name, value)

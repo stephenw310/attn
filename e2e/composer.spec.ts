@@ -3585,3 +3585,30 @@ test('targets generated prefixes and complete first-letter graphemes', async ({ 
   expect(runs).toContainEqual({ text: 'Á”', color: 'rgb(255, 0, 0)' })
   expect(runs).toContainEqual({ text: '縦書き', color: 'rgb(128, 0, 128)' })
 })
+
+test('measures first lines inside a narrow composer with a drop cap', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Narrow first line')
+  await composer.editor.evaluate((root) => {
+    root.style.width = '200px'
+    root.style.fontSize = '16px'
+    root.style.lineHeight = '24px'
+  })
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>p{text-shadow:1px 1px red}p::first-line{color:blue;text-shadow:none}p::first-letter{float:left;font-size:60px}</style><p>A long paragraph with enough words to wrap across several lines in this narrow composer.</p>'
+  )
+  await composer.expectSaved()
+  const result = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Narrow first line')
+    const html = draft ? ((await window.attn.draft.get(draft.id))?.bodyHtml ?? '') : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const blue = [...doc.querySelectorAll('span')].filter((span) => span.style.color === 'rgb(0, 0, 255)')
+    return { text: blue.map((span) => span.textContent).join(''), html }
+  })
+  expect(result.text.length).toBeGreaterThan(1)
+  expect(result.text.length).toBeLessThan(35)
+  expect(result.html).toMatch(/text-shadow:\s*none/)
+})
