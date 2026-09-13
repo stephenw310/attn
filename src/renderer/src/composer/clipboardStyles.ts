@@ -110,18 +110,6 @@ export function snapshotClipboardStyles(source: Document): void {
       },
       after: { content: view.getComputedStyle(element, '::after').content, style: read(element, '::after') }
     }))
-    const textPseudos = elements.map((element, index) => {
-      const changed = (side: 'firstLine' | 'firstLetter') =>
-        new Map(
-          [...snapshots[index][side]].filter(
-            ([name, value]) =>
-              value &&
-              value !== pseudoBaseline[index][side].get(name) &&
-              value !== snapshots[index].style.get(name)
-          )
-        )
-      return snapshotTextPseudos(element, changed('firstLine'), changed('firstLetter'))
-    })
     const rootStyle = read(frame.documentElement)
     const desired = new Map<Element, Map<string, string>>([
       [frame.documentElement, rootStyle],
@@ -214,6 +202,21 @@ export function snapshotClipboardStyles(source: Document): void {
         else element.append(span)
       }
     }
+    const hideGenerated = frame.createElement('style')
+    hideGenerated.textContent = '*::before,*::after,*::marker{content:none!important}'
+    frame.head.append(hideGenerated)
+    const textPseudos = elements.map((element, index) => {
+      const changed = (side: 'firstLine' | 'firstLetter') =>
+        new Map(
+          [...snapshots[index][side]].filter(
+            ([name, value]) =>
+              value &&
+              (value !== pseudoBaseline[index][side].get(name) || inherited.has(name)) &&
+              value !== snapshots[index].style.get(name)
+          )
+        )
+      return snapshotTextPseudos(element, changed('firstLine'), changed('firstLetter'))
+    })
     for (const materialize of textPseudos.reverse()) materialize()
     const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
     const direction = frame.body.dir || frame.documentElement.dir

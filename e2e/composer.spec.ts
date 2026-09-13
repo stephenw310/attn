@@ -3547,7 +3547,7 @@ test('preserves first-letter and first-line clipboard styling', async ({ page })
   await composer.editor.click()
   await pasteHtml(
     composer,
-    '<style>.letter::first-letter{color:red;font-size:30px}.line::first-line{color:blue}</style><p class="letter">Letter</p><p class="line">First<br>Second</p>'
+    '<style>.letter::first-letter{color:red;font-size:30px}.line::first-line{color:blue}.reset{color:red}.reset::first-line{color:black}.prefix::before{content:"A"}.prefix::first-letter{color:green}.vertical{writing-mode:vertical-rl}.vertical::first-line{color:purple}</style><p class="letter">Letter</p><p class="line">First<br>Second</p><p class="reset">Reset</p><p class="prefix">Body</p><p class="vertical">縦書き</p><p class="letter">Á”fter</p>'
   )
   await composer.expectSaved()
   const html = await page.evaluate(async () => {
@@ -3555,6 +3555,33 @@ test('preserves first-letter and first-line clipboard styling', async ({ page })
     return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
   })
   expect(html).toContain('30px')
+  expect(html).toContain('rgb(0, 0, 0)')
+  expect(html).toContain('rgb(0, 128, 0)')
+  expect(html).toContain('Á')
   expect(html).toContain('rgb(255, 0, 0)')
   expect(html).toContain('rgb(0, 0, 255)')
+})
+
+test('targets generated prefixes and complete first-letter graphemes', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Pseudo ranges')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.prefix::before{content:"A"}.prefix::first-letter{color:green}.letter::first-letter{color:red}.vertical{writing-mode:vertical-rl}.vertical::first-line{color:purple}</style><p class="prefix">Body</p><p class="letter">Á”fter</p><p class="vertical">縦書き</p>'
+  )
+  await composer.expectSaved()
+  const runs = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Pseudo ranges')
+    const html = draft ? ((await window.attn.draft.get(draft.id))?.bodyHtml ?? '') : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    return [...doc.querySelectorAll('span')].map((span) => ({
+      text: span.textContent,
+      color: span.style.color
+    }))
+  })
+  expect(runs).toContainEqual({ text: 'A', color: 'rgb(0, 128, 0)' })
+  expect(runs).toContainEqual({ text: 'Á”', color: 'rgb(255, 0, 0)' })
+  expect(runs).toContainEqual({ text: '縦書き', color: 'rgb(128, 0, 128)' })
 })
