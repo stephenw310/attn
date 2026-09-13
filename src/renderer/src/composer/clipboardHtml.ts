@@ -1,5 +1,5 @@
 import { cssDeclarations } from '../../../shared/css'
-import { inlineClipboardStylesheets, resolveClipboardVariables } from '../mailSurface'
+import { snapshotClipboardStyles } from './clipboardStyles'
 import { COMPOSER_STYLE_PROPERTIES } from './sanitize'
 
 function expandFont(document: Document, value: string): string[] {
@@ -95,8 +95,11 @@ export function normalizeClipboardHtml(html: string): string {
   const expanded = expandCocoaStyles(html)
   const document = new DOMParser().parseFromString(expanded, 'text/html')
   // Unknown stylesheets may carry meaningful layout; keep the preservation path.
-  if (document.querySelector('style')) inlineClipboardStylesheets(document)
-  resolveClipboardVariables(document)
+  if (
+    document.querySelector('style') ||
+    /var\s*\(|:\s*(?:inherit|initial|unset|revert(?:-layer)?)\b/i.test(document.body.innerHTML)
+  )
+    snapshotClipboardStyles(document)
   const supportedTags = new Set(
     'P DIV SPAN B STRONG I EM U S STRIKE A UL OL LI BLOCKQUOTE TABLE THEAD TBODY TFOOT TR TD TH IMG BR FONT H1 H2 H3 H4 H5 H6 MARK CODE PRE DETAILS SUMMARY FIGURE FIGCAPTION INPUT HR IFRAME VIDEO AUDIO'.split(
       ' '

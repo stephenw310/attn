@@ -82,6 +82,12 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     const watchRenderer = (page: Page): void => {
       page.on('console', (msg) => {
         if (msg.type() !== 'error') return
+        // The clipboard isolation case deliberately probes its no-resource CSP.
+        if (
+          msg.text().includes('clipboard-resource.invalid/') &&
+          msg.text().includes('Content Security Policy')
+        )
+          return
         if (isFixtureHostUnreachable(msg.location().url)) return
         // A remote image cancelled by the T33 request filter logs
         // ERR_BLOCKED_BY_CLIENT from inside the mail frame. That is the

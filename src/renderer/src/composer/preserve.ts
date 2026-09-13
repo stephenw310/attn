@@ -130,6 +130,8 @@ const INHERITED_TEXT_STYLES = new Set([
   'font-family',
   'font-size',
   'font-style',
+  'font-variant',
+  'font-stretch',
   'font-weight',
   'line-height',
   'text-decoration',

@@ -47,6 +47,8 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
   'font-family',
   'font-size',
   'font-style',
+  'font-variant',
+  'font-stretch',
   'font-weight',
   'height',
   'line-height',

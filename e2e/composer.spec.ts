@@ -3031,3 +3031,192 @@ test('Drafts and Outbox display whitespace subjects without changing their store
   await page.getByTestId('outbox-open').click()
   await expect(composer.subject).toHaveValue('   ')
 })
+
+test('snapshots complex clipboard CSS with the browser cascade through save and reopen', async ({ page }) => {
+  test.setTimeout(180_000)
+  const cases: string[][] = [
+    [
+      '@scope (.outer) {.x {color:red}}',
+      '<div class="outer"><p class="x">Text</p></div>',
+      'span',
+      'color',
+      'red'
+    ],
+    [
+      '@layer outer {@layer second, first; @layer first {.x{color:red}} @layer second {.x{color:blue}}}',
+      '<p class="x">Text</p>',
+      'span',
+      'color',
+      'red'
+    ],
+    [
+      '',
+      '<div style="--accent:red;color:green"><span style="--accent:inherit;color:var(--accent)">Text</span></div>',
+      'span',
+      'color',
+      'red'
+    ],
+    [
+      '',
+      '<div style="--accent:red"><span style="--accent:initial;color:var(--accent,blue)">Text</span></div>',
+      'span',
+      'color',
+      'blue'
+    ],
+    ['.x {--Accent:red;color:var(--Accent)}', '<p class="x">Text</p>', 'span', 'color', 'red'],
+    [
+      '.parent {--accent:red}.x {color:var(--missing,var(--accent))}',
+      '<div class="parent"><p class="x">Text</p></div>',
+      'span',
+      'color',
+      'red'
+    ],
+    ['@layer base {.x {color:red}}', '<p class="x">Text</p>', 'span', 'color', 'red'],
+    ['@layer base {.x {color:red}} .x {color:blue}', '<p class="x">Text</p>', 'span', 'color', 'blue'],
+    [
+      '@layer base {.x {color:red!important}} .x {color:blue!important}',
+      '<p class="x">Text</p>',
+      'span',
+      'color',
+      'red'
+    ],
+    ['table {width:500px}', '<table><tr><td>Cell</td></tr></table>', 'table', 'width', '500px'],
+    [
+      '@media screen {table {width:400px}}',
+      '<table><tr><td>Cell</td></tr></table>',
+      'table',
+      'width',
+      '400px'
+    ],
+    [
+      'table {width:500px!important}',
+      '<table style="width:200px"><tr><td>Cell</td></tr></table>',
+      'table',
+      'width',
+      '500px'
+    ],
+    ['td.td1 {padding:8px}', '<table><tr><td class="td1">Cell</td></tr></table>', 'td', 'padding', '8px'],
+    [
+      'table.t1 {border-spacing:4px}',
+      '<table class="t1"><tr><td>Cell</td></tr></table>',
+      'table',
+      'border-spacing',
+      '4px'
+    ],
+    [
+      'tr.t1 {text-align:right}',
+      '<table><tr class="t1"><td>Cell</td></tr></table>',
+      'tr',
+      'text-align',
+      'right'
+    ]
+  ]
+  cases.push(
+    ['.x::before {content:"★";color:red}', '<p class="x">Text</p>', 'span', 'color', 'red'],
+    [
+      '@scope (.outer) {:scope > .x {color:red}}',
+      '<div class="outer"><p class="x">Text</p></div>',
+      'span',
+      'color',
+      'red'
+    ],
+    [
+      '@scope (.inner) {.x {color:red}} @scope (.outer) {.x {color:blue}}',
+      '<div class="outer"><div class="inner"><p class="x">Text</p></div></div>',
+      'span',
+      'color',
+      'red'
+    ],
+    [
+      '.parent {color:red}.child {color:inherit}',
+      '<div class="parent"><span class="child">Text</span></div>',
+      'span',
+      'color',
+      'red'
+    ],
+    [
+      '@layer base {.x{--c:red}} @layer theme {.x{--c:revert-layer}} .x{color:var(--c,blue)}',
+      '<p class="x">Text</p>',
+      'span',
+      'color',
+      'red'
+    ]
+  )
+  for (const [index, [css, body, selector, property, expected]] of cases.entries()) {
+    const composer = new ComposerPage(page)
+    await composer.openNew()
+    const subject = `CSS snapshot ${index}`
+    await composer.subject.fill(subject)
+    await composer.editor.click()
+    await pasteHtml(
+      composer,
+      `<meta name="Generator" content="Cocoa HTML Writer"><style>${css}</style>${body}`
+    )
+    await composer.expectSaved()
+    const check = async (): Promise<void> => {
+      const result = await page.evaluate(
+        async ({ subject, selector, property, expected }) => {
+          const draft = (await window.attn.draft.list()).find((item) => item.subject === subject)
+          const saved = draft ? await window.attn.draft.get(draft.id) : null
+          const document = new DOMParser().parseFromString(saved?.bodyHtml ?? '', 'text/html')
+          const probe = document.createElement('span')
+          probe.style.setProperty(property, expected)
+          const wanted = probe.style.getPropertyValue(property)
+          return {
+            html: saved?.bodyHtml,
+            matches: [...document.querySelectorAll<HTMLElement>(selector)].some(
+              (element) =>
+                element.style.getPropertyValue(property) === wanted ||
+                (property === 'color' &&
+                  element.style.color ===
+                    ({ red: 'rgb(255, 0, 0)', blue: 'rgb(0, 0, 255)' } as Record<string, string>)[expected])
+            )
+          }
+        },
+        { subject, selector, property, expected }
+      )
+      expect(result.matches, JSON.stringify({ css, ...result })).toBe(true)
+      if (css.includes('::before')) expect(result.html).toContain('★')
+    }
+    await check()
+    if (css.includes('::before')) {
+      await page.mouse.move(0, 0)
+      await page.screenshot({ path: join(__dirname, '.artifacts/clipboard-css-snapshot.png') })
+    }
+    await page.keyboard.press('Escape')
+    await goToDrafts(page)
+    await page
+      .getByTestId('draft-row')
+      .filter({ has: page.getByText(subject, { exact: true }) })
+      .click()
+    await expect(composer.root).toBeVisible()
+    await expect(composer.editor).toBeVisible()
+    await check()
+    await page.keyboard.press('Escape')
+    await expect(composer.root).toHaveCount(0)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('g')
+    await page.keyboard.press('i')
+    await expect(page.getByTestId('thread-list')).toBeVisible()
+  }
+})
+
+test('clipboard CSS snapshot cannot execute scripts or load CSS resources', async ({ page }) => {
+  const requests: string[] = []
+  await page.route('https://clipboard-resource.invalid/**', async (route) => {
+    requests.push(route.request().url())
+    await route.abort()
+  })
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('CSS isolation')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>@import url("https://clipboard-resource.invalid/import.css"); .x {color:red;background-image:url("https://clipboard-resource.invalid/image.png")}</style><p class="x" onclick="window.clipboardScriptRan=true">Safe text</p><script>window.clipboardScriptRan=true</script>'
+  )
+  await composer.expectSaved()
+  expect(await page.evaluate(() => 'clipboardScriptRan' in window)).toBe(false)
+  expect(requests).toEqual([])
+  expect(await page.locator('iframe[aria-hidden="true"]').count()).toBe(0)
+})
