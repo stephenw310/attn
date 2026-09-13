@@ -3520,6 +3520,26 @@ test('keeps ordinary lists editable with unrelated clipboard CSS', async ({ page
   await expect(composer.editor.locator('li')).toContainText('Editable')
 })
 
+test('preserves stylesheet aspect ratios on paste', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Clipboard aspect ratio')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.card{width:200px;aspect-ratio:2/1;background:red}</style><div class="card"></div>'
+  )
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Clipboard aspect ratio')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toMatch(/aspect-ratio:\s*2\s*\/\s*1/)
+  expect(html).toMatch(/width:\s*200px/)
+  const card = composer.editor.frameLocator('iframe').locator('div[style*="aspect-ratio"]')
+  await expect(card).toHaveCSS('height', '100px')
+})
+
 test('preserves multicolumn clipboard layouts', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

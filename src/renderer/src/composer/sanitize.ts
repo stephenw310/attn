@@ -72,6 +72,7 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
 
 // Safe presentation that remains read-only because Lexical does not round-trip it.
 export const PRESERVED_STYLE_PROPERTIES = new Set([
+  'aspect-ratio',
   'direction',
   'unicode-bidi',
   'float',
