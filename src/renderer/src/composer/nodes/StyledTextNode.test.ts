@@ -171,6 +171,7 @@ it('keeps semantic and inherited styles around opaque children', () => {
   for (const [open, close] of [
     ['<strong>', '</strong>'],
     ['<em>', '</em>'],
+    ['<a href="https://example.com" style="background-color:yellow">', '</a>'],
     ['<span style="background-color:yellow">', '</span>'],
     ['<span style="color:red; font-size:20px">', '</span>']
   ]) {

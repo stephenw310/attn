@@ -3468,7 +3468,7 @@ test('preserves differently styled propagated decorations from clipboard CSS', a
   await composer.editor.click()
   await pasteHtml(
     composer,
-    '<style>.outer{text-decoration:underline solid red}.inner{text-decoration:line-through dotted blue}</style><div class="outer"><p class="inner">Combined</p></div><span style="text-decoration:underline"><span class="inner">Inline</span></span><table class="outer"><tr><td class="inner">Cell</td></tr></table><strong><span style="border:1px solid red">Bold box</span></strong><span style="background-color:yellow"><span style="border:1px solid red">Highlight box</span></span>'
+    '<style>.outer{text-decoration:underline solid red}.inner{text-decoration:line-through dotted blue}</style><div class="outer"><p class="inner">Combined</p></div><span style="text-decoration:underline"><span class="inner">Inline</span></span><table class="outer"><tr><td class="inner">Cell</td></tr></table><strong><span style="border:1px solid red">Bold box</span></strong><a href="https://example.com" style="background-color:yellow"><span style="border:1px solid red">Highlight box</span></a>'
   )
   await composer.expectSaved()
   const html = await page.evaluate(async () => {
