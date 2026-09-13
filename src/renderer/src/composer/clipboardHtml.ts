@@ -149,7 +149,7 @@ export function normalizeClipboardHtml(html: string): string {
       replacement.style.color ||= '#202124'
     }
     if (tag === 'code' || tag === 'pre') replacement.style.fontFamily ||= 'monospace'
-    if (tag === 'pre') replacement.style.whiteSpace = 'pre-wrap'
+    if (tag === 'pre' && !replacement.style.whiteSpace) replacement.style.whiteSpace = 'pre-wrap'
   }
   for (const callout of document.querySelectorAll('aside[data-block-id],aside.notion-callout'))
     if (!preserved.has(callout)) replace(callout, 'blockquote')

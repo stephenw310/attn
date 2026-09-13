@@ -196,9 +196,7 @@ export function snapshotClipboardStyles(source: Document): void {
         else element.append(span)
       }
     }
-    const children = [...rootBefore, ...frame.body.childNodes, ...rootAfter].map((node) =>
-      source.importNode(node, true)
-    )
+    const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
     const direction = frame.body.dir || frame.documentElement.dir
     const language = frame.body.lang || frame.documentElement.lang
     if (frame.body.getAttribute('style')?.trim() || direction || language) {
@@ -209,6 +207,8 @@ export function snapshotClipboardStyles(source: Document): void {
       wrapper.append(...children)
       source.body.replaceChildren(wrapper)
     } else source.body.replaceChildren(...children)
+    source.body.prepend(...rootBefore.map((node) => source.importNode(node, true)))
+    source.body.append(...rootAfter.map((node) => source.importNode(node, true)))
     const rootChanges = [...rootStyle].filter(([name, value]) => value && value !== rootBaseline.get(name))
     if (rootChanges.length) {
       const wrapper = source.createElement('div')

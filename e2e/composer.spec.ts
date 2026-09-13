@@ -3482,3 +3482,29 @@ test('preserves differently styled propagated decorations from clipboard CSS', a
   expect(html).toMatch(/<strong[^>]*><span[^>]*>Bold box/)
   await expect(composer.editor.locator('iframe')).toHaveCount(5)
 })
+
+test('preserves pre whitespace overrides and root pseudo inheritance', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Root inheritance')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>body{color:red}html::before{content:"Banner"}</style><pre style="white-space:normal">A   B</pre>'
+  )
+  await composer.expectSaved()
+  const result = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Root inheritance')
+    const html = draft ? ((await window.attn.draft.get(draft.id))?.bodyHtml ?? '') : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const banner = [...doc.querySelectorAll('span')].find((node) => node.textContent === 'Banner')
+    let redAncestor = false
+    for (let node = banner?.parentElement; node; node = node.parentElement) {
+      if (node.style.color === 'red' || node.style.color === 'rgb(255, 0, 0)') redAncestor = true
+    }
+    return { text: doc.body.textContent, redAncestor }
+  })
+  expect(result.text).toContain('A B')
+  expect(result.text).not.toContain('A   B')
+  expect(result.redAncestor).toBe(false)
+})
