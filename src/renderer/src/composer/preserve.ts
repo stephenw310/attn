@@ -173,8 +173,22 @@ function materializeInheritedTextStyles(document: Document): void {
     if (inherited.size === 0) continue
     const span = document.createElement('span')
     span.setAttribute('style', [...inherited].map(([property, value]) => `${property}: ${value}`).join('; '))
-    textNode.replaceWith(span)
-    span.append(textNode)
+    if (['pre', 'pre-wrap', 'break-spaces'].includes(inherited.get('white-space') ?? '')) {
+      const fragment = document.createDocumentFragment()
+      for (const part of textNode.data.split(/(\r\n|\r|\n|\t)/)) {
+        if (!part) continue
+        if (/^[\r\n]+$/.test(part)) fragment.append(document.createElement('br'))
+        else {
+          const run = span.cloneNode() as HTMLElement
+          run.textContent = part
+          fragment.append(run)
+        }
+      }
+      textNode.replaceWith(fragment)
+    } else {
+      textNode.replaceWith(span)
+      span.append(textNode)
+    }
   }
 
   for (const element of document.body.querySelectorAll<HTMLElement>('[style]')) {
@@ -238,8 +252,14 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
       return `${tag}[${name}]`
     }
   }
-  for (const { property } of cssDeclarations(values.get('style') ?? '')) {
+  for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
+    if (
+      tag === 'span' &&
+      /^(border|padding|margin|width$|height$)/.test(property) &&
+      !/^(none|0(?:px)?|auto)$/.test(value)
+    )
+      return `span[box:${property}]`
   }
   return null
 }

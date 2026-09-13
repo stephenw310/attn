@@ -1874,6 +1874,14 @@ for (const source of ['docs', 'notion'] as const) {
       await expect(composer.editor).toContainText('☑ Done')
       await expect(composer.editor).toContainText('☐ Next task')
       await expect(composer.editor).toContainText('Expanded text')
+      await expect(composer.editor.getByText('first line', { exact: true })).toHaveCSS(
+        'font-family',
+        'monospace'
+      )
+      await expect(composer.editor.getByText('indented line', { exact: true })).toHaveCSS(
+        'font-family',
+        'monospace'
+      )
       await expect(composer.editor.getByRole('link', { name: 'Demo' })).toHaveAttribute(
         'href',
         'https://example.com/demo'
@@ -1956,6 +1964,30 @@ test('plain paste inherits styled caret formatting across lines', async ({ page 
   await expect(next).toHaveCSS('font-weight', '700')
   await expect(next).toHaveCSS('color', 'rgb(255, 0, 0)')
   await expect(next).toHaveCSS('font-family', 'Georgia')
+})
+
+test('clearing a collapsed caret keeps the existing link intact', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(composer, '<p><a href="https://example.com">Reference</a></p>')
+  const link = composer.editor.getByRole('link', { name: 'Reference', exact: true })
+  await link.evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+    const text = walker.nextNode()
+    if (!text) throw new Error('Missing link text')
+    const range = document.createRange()
+    range.setStart(text, 3)
+    range.collapse(true)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+  })
+  await page.keyboard.type('X')
+  await runPaletteCommand(page, 'Clear formatting')
+  await expect(composer.editor.getByRole('link', { name: 'RefXerence', exact: true })).toHaveAttribute(
+    'href',
+    'https://example.com'
+  )
 })
 
 test('plain paste leaves recipient and subject shortcuts native', async ({ page }) => {

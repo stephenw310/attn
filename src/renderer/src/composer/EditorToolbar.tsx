@@ -204,10 +204,10 @@ export function EditorToolbar(): React.JSX.Element {
         for (const node of selection.extract()) {
           if ($isTextNode(node)) node.setFormat(0).setStyle('')
         }
+        editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)
       }
       selection.setFormat(0)
       selection.setStyle('')
-      editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)
     })
   }, [editor, withSelection])
   const patchStyle = useCallback(

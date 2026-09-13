@@ -3,7 +3,8 @@ import { createHeadlessEditor } from '@lexical/headless'
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html'
 import { $getRoot, TextNode } from 'lexical'
 import { expect, it } from 'vitest'
-import { prepareHtmlForEditor } from '../preserve'
+import { normalizeClipboardHtml } from '../clipboardHtml'
+import { prepareHtmlForEditor, restoreOpaqueHtml } from '../preserve'
 import { StyledTextNode } from './StyledTextNode'
 
 it('imports CSS and semantic emphasis as editable formats without overriding toolbar changes', () => {
@@ -114,7 +115,16 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
   )
 })
 
-it('retains outer span borders and padding when materializing nested emphasis or highlights', () => {
+it('preserves a shared box as one opaque region instead of duplicating it over text runs', () => {
+  for (const contents of ['<b>A</b><i>B</i>C', 'Highlight']) {
+    const source = `<span style="background-color:yellow; border:2px solid red; padding:4px">${contents}</span>`
+    const prepared = prepareHtmlForEditor(`<p>${source}</p>`)
+    expect(prepared.issues).toHaveLength(1)
+    expect(restoreOpaqueHtml(prepared.html)).toBe(`<p>${source}</p>`)
+  }
+})
+
+it('keeps code typography on every preformatted line and tab', () => {
   const editor = createHeadlessEditor({
     nodes: [
       StyledTextNode,
@@ -130,19 +140,14 @@ it('retains outer span borders and padding when materializing nested emphasis or
   })
   editor.update(
     () => {
-      const html = prepareHtmlForEditor(
-        '<p><span style="border:2px solid red;padding:4px"><b>Badge</b></span></p><p><span style="background-color:yellow;border:1px solid blue;padding:3px">Highlight</span></p>'
-      ).html
+      const html = prepareHtmlForEditor(normalizeClipboardHtml('<pre>one\ntwo\tthree</pre>')).html
       $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
-      const [badge, highlight] = $getRoot().getAllTextNodes()
-      expect(badge.getStyle()).toContain('border: 2px solid red')
-      expect(badge.getStyle()).toContain('padding: 4px')
-      expect(badge.hasFormat('bold')).toBe(true)
-      expect(highlight.getStyle()).toContain('border: 1px solid blue')
-      expect(highlight.getStyle()).toContain('padding: 3px')
-      const exported = $generateHtmlFromNodes(editor)
-      expect(exported).toContain('border: 2px solid red')
-      expect(exported).toContain('padding: 3px')
+      expect($getRoot().getTextContent()).toBe('one\ntwo\tthree')
+      for (const node of $getRoot().getAllTextNodes()) expect(node.getStyle()).toContain('monospace')
+      const exported = new DOMParser().parseFromString($generateHtmlFromNodes(editor), 'text/html')
+      for (const span of exported.querySelectorAll('span')) {
+        if (span.textContent?.trim()) expect(span.style.fontFamily).toBe('monospace')
+      }
     },
     { discrete: true }
   )
