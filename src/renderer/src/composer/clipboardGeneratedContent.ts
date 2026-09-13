@@ -56,10 +56,11 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     ]
     const tokens =
       content.match(
-        /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:attr|counters?)\([^)]*\)|(?:no-)?(?:open|close)-quote/g
+        /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:attr|counters?)\([^)]*\)|(?:no-)?(?:open|close)-quote|\//g
       ) ?? []
     let text = ''
     for (const token of tokens) {
+      if (token === '/') break
       if (token[0] === '"' || token[0] === "'") text += unquote(token)
       else if (token.startsWith('attr(')) {
         const args = token.slice(5, -1).split(',')

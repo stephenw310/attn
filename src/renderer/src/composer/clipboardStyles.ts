@@ -7,7 +7,7 @@ export function snapshotClipboardStyles(source: Document): void {
   const host = document.createElement('iframe')
   host.setAttribute('sandbox', 'allow-same-origin')
   host.setAttribute('aria-hidden', 'true')
-  host.style.cssText = 'position:fixed;left:-100000px;top:0;width:800px;height:600px;visibility:hidden'
+  host.style.cssText = `position:fixed;left:-100000px;top:0;border:0;width:${window.innerWidth}px;height:${window.innerHeight}px;visibility:hidden`
   document.body.append(host)
   try {
     const frame = host.contentDocument

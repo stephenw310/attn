@@ -3268,6 +3268,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     composer,
     `<style>
     .attribute::before {content:attr(data-label)}
+    .alternative::before {content:"★/" / "star"}
     .numbered {counter-reset:item}
     .numbered p::before {counter-increment:item;content:counter(item) ". "}
     @counter-style thumbs {system:cyclic;symbols:"👍"}
@@ -3280,7 +3281,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     .quoted::before {content:open-quote}
     .quoted::after {content:close-quote}
     .markers li::marker {content:"✓ ";color:red}
-  </style><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
+  </style><p class="alternative">Symbol</p><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3291,6 +3292,8 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     (html) => new DOMParser().parseFromString(html, 'text/html').body.textContent,
     saved?.bodyHtml ?? ''
   )
+  expect(text).toContain('★/Symbol')
+  expect(text).not.toContain('star')
   expect(text).toContain('Prefix Attribute')
   expect(text).toContain('1. First')
   expect(text).toContain('2. Second')
@@ -3361,4 +3364,23 @@ test('preserves generated color resets and implicit ordered list counters', asyn
     'Demo'
   ])
     expect(saved.text).toContain(label)
+})
+
+test('uses the application viewport for clipboard media queries', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Clipboard media viewport')
+  const width = await page.evaluate(() => window.innerWidth)
+  const css =
+    width > 800
+      ? `@media (min-width:${width - 1}px) {p {color:blue}}`
+      : `@media (max-width:${width + 1}px) {p {color:blue}}`
+  await composer.editor.click()
+  await pasteHtml(composer, `<style>${css}</style><p>Viewport text</p>`)
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Clipboard media viewport')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toContain('rgb(0, 0, 255)')
 })
