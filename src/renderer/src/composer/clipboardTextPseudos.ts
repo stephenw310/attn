@@ -36,6 +36,7 @@ export function snapshotTextPseudos(
   })
   const runs: { range: Range; style: TextStyle }[] = []
   let firstRect: DOMRect | undefined
+  let firstIsAtomic = false
   let letterState = 0
   const vertical = /^(?:vertical|sideways)/.test(
     document.defaultView?.getComputedStyle(element).writingMode ?? ''
@@ -46,6 +47,7 @@ export function snapshotTextPseudos(
     if (walker.currentNode.nodeType === Node.ELEMENT_NODE) {
       if (atomic(walker.currentNode as Element) && (walker.currentNode as Element).getClientRects().length) {
         letterState = 2
+        if (!firstRect) firstIsAtomic = true
         firstRect ??= [...(walker.currentNode as Element).getClientRects()].find(
           (rect) => rect.width > 0 && rect.height > 0
         )
@@ -77,9 +79,15 @@ export function snapshotTextPseudos(
         firstRect &&
         (vertical
           ? rect.left >= firstRect.right || rect.right <= firstRect.left
-          : Math.abs(rect.bottom - firstRect.bottom) > Math.min(rect.height, firstRect.height) / 2)
+          : firstIsAtomic
+            ? rect.top >= firstRect.bottom || rect.bottom <= firstRect.top
+            : Math.abs(rect.bottom - firstRect.bottom) > Math.min(rect.height, firstRect.height) / 2)
       )
         pastLine = true
+      if (firstIsAtomic && !pastLine) {
+        firstRect = rect
+        firstIsAtomic = false
+      }
       const style = new Map(!pastLine ? line : [])
       if (node.parentElement && node.parentElement !== element) {
         const origin = document.defaultView?.getComputedStyle(element)

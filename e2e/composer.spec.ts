@@ -3821,6 +3821,29 @@ test('measures inherited first-line fonts through unstyled descendants', async (
   expect(text.trim()).toBe('One')
 })
 
+test('retains winning inheritance and vertically aligned first-line text', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Winning first line')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>p::first-line{color:red}.child{color:blue}#child{color:inherit}.box{display:inline-block;height:40px;vertical-align:top}</style><p><span class="child" id="child">Inherited</span></p><p><span class="box">Box</span>Tail</p>'
+  )
+  await composer.expectSaved()
+  const text = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Winning first line')
+    const html = draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+    const doc = new DOMParser().parseFromString(html ?? '', 'text/html')
+    return [...doc.querySelectorAll<HTMLElement>('span')]
+      .filter((span) => span.style.color === 'rgb(255, 0, 0)')
+      .map((span) => span.textContent)
+      .join('')
+  })
+  expect(text).toContain('Inherited')
+  expect(text).toContain('Tail')
+})
+
 test('preserves automatic clipboard grid placement', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

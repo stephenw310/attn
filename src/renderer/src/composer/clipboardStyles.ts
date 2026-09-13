@@ -219,37 +219,49 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       'text-orientation'
     ])
     const overrides = new Map<Element, Set<string>>()
-    for (const element of elements) {
-      const declared = new Set<string>()
-      const inspect = (style: CSSStyleDeclaration) => {
-        for (const name of inherited) {
-          const value = style.getPropertyValue(name)
-          if (value && !['inherit', 'unset'].includes(value)) declared.add(name)
-        }
+    const markDeclarations = (style: CSSStyleDeclaration) => {
+      for (const name of inherited) {
+        const value = style.getPropertyValue(name)
+        if (value)
+          style.setProperty(
+            `--attn-override-${name}`,
+            ['inherit', 'unset'].includes(value) ? 'inherited' : 'explicit',
+            style.getPropertyPriority(name)
+          )
       }
-      const visit = (rules: CSSRuleList) => {
+    }
+    if (cssApi?.registerProperty) {
+      for (const name of inherited)
+        cssApi.registerProperty({
+          name: `--attn-override-${name}`,
+          syntax: '*',
+          inherits: false,
+          initialValue: 'inherited'
+        })
+      const markRules = (rules: CSSRuleList) => {
         for (const rule of rules) {
-          if ('selectorText' in rule) {
-            try {
-              if (element.matches((rule as CSSStyleRule).selectorText)) inspect((rule as CSSStyleRule).style)
-            } catch {
-              /* Ignore selectors unavailable to matches(). */
-            }
-          }
-          if ('cssRules' in rule) {
-            if ('media' in rule && !view.matchMedia((rule as CSSMediaRule).conditionText).matches) continue
-            if (
-              rule.constructor.name === 'CSSSupportsRule' &&
-              !(view as Window & { CSS: typeof CSS }).CSS.supports((rule as CSSSupportsRule).conditionText)
-            )
-              continue
-            visit((rule as CSSGroupingRule).cssRules)
-          }
+          if ('selectorText' in rule) markDeclarations((rule as CSSStyleRule).style)
+          if ('cssRules' in rule) markRules((rule as CSSGroupingRule).cssRules)
         }
       }
-      for (const sheet of frame.styleSheets) visit(sheet.cssRules)
-      inspect(element.style)
-      overrides.set(element, declared)
+      for (const sheet of frame.styleSheets) markRules(sheet.cssRules)
+      const originalInline = elements.map((element) => element.getAttribute('style'))
+      for (const element of elements) if (element.hasAttribute('style')) markDeclarations(element.style)
+      for (const element of elements) {
+        const computed = view.getComputedStyle(element)
+        overrides.set(
+          element,
+          new Set(
+            [...inherited].filter(
+              (name) => computed.getPropertyValue(`--attn-override-${name}`).trim() === 'explicit'
+            )
+          )
+        )
+      }
+      for (let index = 0; index < elements.length; index++) {
+        const style = originalInline[index]
+        if (style !== null) elements[index].setAttribute('style', style)
+      }
     }
     const generated = materializeGeneratedContent(frame.documentElement, view)
     // Freeze the captured cascade before synthetic children can match source selectors.
