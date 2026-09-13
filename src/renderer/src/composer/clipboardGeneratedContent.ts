@@ -101,7 +101,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     const content: GeneratedContent = { marker: '', before: '', after: '' }
     result.set(element, content)
     const nested = new Map(counters)
-    if (element.matches('ol, ul')) {
+    if (element.matches('ol, ul') && !/\blist-item\b/.test(`${style.counterReset} ${style.counterSet}`)) {
       const reversed = element.hasAttribute('reversed')
       const start = element.getAttribute('start')
       const first =
@@ -117,6 +117,15 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     }
     const pseudo = (side: keyof GeneratedContent): void => {
       const style = view.getComputedStyle(element, `::${side}`)
+      if (side === 'marker' && style.content === 'normal') {
+        const values = nested.get('list-item')
+        content.marker = formatClipboardCounter(
+          values?.[values.length - 1]?.value ?? 1,
+          style.listStyleType,
+          true
+        )
+        return
+      }
       if (!style.content || ['none', 'normal'].includes(style.content) || style.display === 'none') return
       applyCounters(style, nested, depth + 1)
       content[side] = contentText(style.content, element, style, nested)

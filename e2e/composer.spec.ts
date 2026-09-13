@@ -3315,10 +3315,13 @@ test('preserves generated color resets and implicit ordered list counters', asyn
     `<style>
     .parent {color:red} .child::before {content:"X";color:black}
     ol li::marker {content:counter(list-item, lower-roman) ". "}
+    .reset {counter-reset:list-item 9}
+    @counter-style hands {system:cyclic;symbols:"👍";prefix:"[";suffix:"] "}
+    .hands {list-style-type:hands} .hands li::marker {content:normal}
     </style><div class="parent"><p class="child">Red</p></div>
     <ol><li>One</li><li>Two</li></ol>
     <ol start="3"><li>Three</li><li value="5">Five</li><li>Six</li></ol>
-    <ol reversed><li>Down two</li><li>Down one</li></ol>`
+    <ol reversed><li>Down two</li><li>Down one</li></ol><ol class="reset"><li>Ten</li><li>Eleven</li></ol><ol class="hands"><li>Hand</li></ol><p><u><span style="text-decoration:none">Underlined</span></u><s><span style="text-decoration:none">Struck</span></s></p>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3342,7 +3345,10 @@ test('preserves generated color resets and implicit ordered list counters', asyn
     'v. Five',
     'vi. Six',
     'ii. Down two',
-    'i. Down one'
+    'i. Down one',
+    'x. Ten',
+    'xi. Eleven',
+    '[👍] Hand'
   ])
     expect(saved.text).toContain(label)
 })

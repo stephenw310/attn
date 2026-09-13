@@ -107,7 +107,7 @@ export function formatClipboardCounter(value: number, style = 'decimal'): string
 /** Compile author-defined counter systems from the isolated frame's parsed CSS. */
 export function createClipboardCounterFormatter(
   document: Document
-): (value: number, style?: string) => string {
+): (value: number, style?: string, customMarker?: boolean) => string {
   const definitions = new Map<string, Map<string, string>>()
   const collect = (rules: CSSRuleList): void => {
     for (const rule of rules) {
@@ -187,5 +187,18 @@ export function createClipboardCounterFormatter(
     built.set(name, renderer)
     return renderer
   }
-  return (value, name = 'decimal') => build(name).renderCounter(value)
+  return (value, name = 'decimal', customMarker = false) => {
+    if (!customMarker) return build(name).renderCounter(value)
+    if (!definitions.has(name)) return ''
+    const descriptor = (key: string, current = name, visited = new Set<string>()): string | undefined => {
+      if (visited.has(current)) return undefined
+      visited.add(current)
+      const definition = definitions.get(current)
+      const value = definition?.get(key)
+      if (value !== undefined) return value
+      const system = definition?.get('system')?.split(/\s+/)
+      return system?.[0] === 'extends' ? descriptor(key, system[1], visited) : undefined
+    }
+    return `${symbols(descriptor('prefix') ?? '""').join('')}${build(name).renderCounter(value)}${symbols(descriptor('suffix') ?? '". "').join('')}`
+  }
 }
