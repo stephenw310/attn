@@ -1,6 +1,6 @@
 import { createClipboardCounterFormatter } from './clipboardCounterStyles'
 
-type Counters = Map<string, { value: number }[]>
+type Counters = Map<string, { value: number; depth: number }[]>
 export type GeneratedContent = { marker: string; before: string; after: string }
 
 function unquote(value: string): string {
@@ -16,7 +16,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
   const result = new Map<Element, GeneratedContent>()
   const formatClipboardCounter = createClipboardCounterFormatter(root.ownerDocument)
   let quoteDepth = 0
-  const applyCounters = (style: CSSStyleDeclaration, counters: Counters): void => {
+  const applyCounters = (style: CSSStyleDeclaration, counters: Counters, depth: number): void => {
     for (const [property, defaultValue] of [
       ['counter-reset', 0],
       ['counter-set', 0],
@@ -28,10 +28,11 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
         const name = match[1]
         const value = match[2] === undefined ? defaultValue : Number(match[2])
         const stack = counters.get(name) ?? []
-        if (property === 'counter-reset') counters.set(name, [...stack, { value }])
+        if (property === 'counter-reset')
+          counters.set(name, [...stack.filter((counter) => counter.depth < depth), { value, depth }])
         else {
           if (stack.length === 0) {
-            stack.push({ value: 0 })
+            stack.push({ value: 0, depth })
             counters.set(name, stack)
           }
           const counter = stack[stack.length - 1]
@@ -83,24 +84,24 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     }
     return text
   }
-  const visit = (element: Element, counters: Counters): void => {
+  const visit = (element: Element, counters: Counters, depth: number): void => {
     const style = view.getComputedStyle(element)
     if (style.display === 'none') return
-    applyCounters(style, counters)
+    applyCounters(style, counters, depth)
     const content: GeneratedContent = { marker: '', before: '', after: '' }
     result.set(element, content)
     const nested = new Map(counters)
     const pseudo = (side: keyof GeneratedContent): void => {
       const style = view.getComputedStyle(element, `::${side}`)
       if (!style.content || ['none', 'normal'].includes(style.content) || style.display === 'none') return
-      applyCounters(style, nested)
+      applyCounters(style, nested, depth + 1)
       content[side] = contentText(style.content, element, style, nested)
     }
     pseudo('marker')
     pseudo('before')
-    for (const child of element.children) visit(child, nested)
+    for (const child of element.children) visit(child, nested, depth + 1)
     pseudo('after')
   }
-  visit(root, new Map())
+  visit(root, new Map(), 0)
   return result
 }

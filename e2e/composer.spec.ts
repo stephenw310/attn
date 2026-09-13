@@ -3036,6 +3036,22 @@ test('snapshots complex clipboard CSS with the browser cascade through save and 
   test.setTimeout(180_000)
   await page.route('https://clipboard-resource.attn.test/**', (route) => route.abort())
   const cases: string[][] = [
+    ['', '<body style="background:red;padding:20px"><p>Text</p></body>', 'div', 'padding', '20px'],
+    [
+      '',
+      '<html style="background:red;padding:20px"><body><p>Text</p></body></html>',
+      'div',
+      'padding',
+      '20px'
+    ],
+    [
+      '.parent {color:red}.child {color:black}',
+      '<div class="parent"><span class="child">Text</span></div>',
+      'span',
+      'color',
+      'rgb(0, 0, 0)'
+    ],
+
     ['body.theme p {color:red}', '<body class="theme"><p>Text</p></body>', 'span', 'color', 'red'],
 
     ['body {background:red;padding:20px}', '<p>Text</p>', 'div', 'padding', '20px'],
@@ -3257,12 +3273,14 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     @counter-style thumbs {system:cyclic;symbols:"👍"}
     .thumbs {counter-reset:item}
     .thumbs::before {counter-increment:item;content:counter(item, thumbs) " "}
+    .sibling {counter-reset:x 1}
+    .sibling::before {content:counters(x, ".") " "}
     .greek {counter-reset:item}
     .greek::before {counter-increment:item;content:counter(item, lower-greek) " ";}
     .quoted::before {content:open-quote}
     .quoted::after {content:close-quote}
     .markers li::marker {content:"✓ ";color:red}
-  </style><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
+  </style><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3279,6 +3297,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(text).toContain('“Quoted”')
   expect(text).toContain('α Greek')
   expect(text).toContain('👍 Custom')
+  expect(text).toContain('1 Sibling A1 Sibling B')
   expect(text).toContain('✓ Marked')
   expect(saved?.bodyHtml).toContain('list-style-type: none')
   await expect(composer.editor.locator('iframe')).toHaveCount(1)

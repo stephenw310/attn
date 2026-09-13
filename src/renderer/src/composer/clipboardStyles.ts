@@ -77,6 +77,7 @@ export function snapshotClipboardStyles(source: Document): void {
           .map((property) => [property, computed.getPropertyValue(property)])
       )
     }
+    const rootBaseline = read(frame.documentElement)
     const baseline = elements.map((element) => read(element))
     const pseudoBaseline = elements.map((element) => ({
       marker: read(element, '::marker'),
@@ -84,6 +85,7 @@ export function snapshotClipboardStyles(source: Document): void {
       after: read(element, '::after')
     }))
     for (let index = 0; index < elements.length; index++) elements[index].setAttribute('style', inline[index])
+    frame.documentElement.setAttribute('style', source.documentElement.getAttribute('style') ?? '')
     for (const css of sheets) {
       const style = frame.createElement('style')
       style.textContent = css
@@ -102,6 +104,30 @@ export function snapshotClipboardStyles(source: Document): void {
       },
       after: { content: view.getComputedStyle(element, '::after').content, style: read(element, '::after') }
     }))
+    const rootStyle = read(frame.documentElement)
+    const desired = new Map<Element, Map<string, string>>([
+      [frame.documentElement, rootStyle],
+      ...elements.map((element, index) => [element, snapshots[index].style] as const)
+    ])
+    const inherited = new Set([
+      'color',
+      'font-family',
+      'font-size',
+      'font-weight',
+      'font-style',
+      'font-variant',
+      'font-stretch',
+      'line-height',
+      'white-space',
+      'text-align',
+      'visibility',
+      'letter-spacing',
+      'word-spacing',
+      'text-transform',
+      'text-indent',
+      'writing-mode',
+      'text-orientation'
+    ])
     const generated = materializeGeneratedContent(frame.body, view)
     for (let index = 0; index < elements.length; index++) {
       const element = elements[index]
@@ -115,7 +141,12 @@ export function snapshotClipboardStyles(source: Document): void {
           element.removeAttribute(name)
       }
       const style = [...snapshot.style].filter(
-        ([name, value]) => value && value !== baseline[index].get(name)
+        ([name, value]) =>
+          value &&
+          (value !== baseline[index].get(name) ||
+            (inherited.has(name) &&
+              element.parentElement &&
+              desired.get(element.parentElement)?.get(name) !== value))
       )
       element.setAttribute('style', style.map(([name, value]) => `${name}:${value}`).join(';'))
       for (const side of ['marker', 'before', 'after'] as const) {
@@ -149,6 +180,13 @@ export function snapshotClipboardStyles(source: Document): void {
       wrapper.append(...children)
       source.body.replaceChildren(wrapper)
     } else source.body.replaceChildren(...children)
+    const rootChanges = [...rootStyle].filter(([name, value]) => value && value !== rootBaseline.get(name))
+    if (rootChanges.length) {
+      const wrapper = source.createElement('div')
+      wrapper.setAttribute('style', rootChanges.map(([name, value]) => `${name}:${value}`).join(';'))
+      wrapper.append(...source.body.childNodes)
+      source.body.replaceChildren(wrapper)
+    }
     for (const style of source.querySelectorAll('style')) style.remove()
   } finally {
     host.remove()

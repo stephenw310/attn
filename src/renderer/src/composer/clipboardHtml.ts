@@ -87,7 +87,7 @@ function expandCocoaStyles(html: string): string {
   }
   for (const stylesheet of styles) stylesheet.remove()
   // The normal import pipeline still sanitizes all markup and style values.
-  return document.body.innerHTML
+  return document.documentElement.outerHTML
 }
 
 /** Normalize new clipboard content into the editor's email-friendly vocabulary. */
@@ -97,6 +97,8 @@ export function normalizeClipboardHtml(html: string): string {
   // Unknown stylesheets may carry meaningful layout; keep the preservation path.
   if (
     document.querySelector('style') ||
+    document.body.getAttribute('style')?.trim() ||
+    document.documentElement.getAttribute('style')?.trim() ||
     /var\s*\(|:\s*(?:inherit|initial|unset|revert(?:-layer)?)\b/i.test(document.body.innerHTML)
   )
     snapshotClipboardStyles(document)
