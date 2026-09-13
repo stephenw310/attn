@@ -3430,3 +3430,25 @@ test('preserves clipboard CSS direction and wrapper language', async ({ page }) 
   expect(html).toMatch(/float:\s*right/)
   expect(html).toMatch(/clear:\s*both/)
 })
+
+test('preserves empty generated layout and flex item order', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Clipboard layout boxes')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    `<style>
+    .clearfix::after {content:"";display:table;clear:both}
+    .floating {float:left} .row {display:flex} .second {order:-1}
+    </style><div class="clearfix"><div class="floating">Float</div></div><div class="row"><div>First</div><div class="second">Second</div></div>`
+  )
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Clipboard layout boxes')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toMatch(/clear:\s*both/)
+  expect(html).toMatch(/display:\s*table/)
+  expect(html).toMatch(/order:\s*-1/)
+})

@@ -74,6 +74,7 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
 export const PRESERVED_STYLE_PROPERTIES = new Set([
   'direction',
   'float',
+  'order',
   'clear',
   'display',
   'opacity',
