@@ -3407,3 +3407,19 @@ test('retains unstyled clipboard body direction', async ({ page }) => {
   })
   expect(html).toContain('dir="rtl"')
 })
+
+test('preserves clipboard CSS direction and wrapper language', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Clipboard language')
+  await composer.editor.click()
+  await pasteHtml(composer, '<body lang="fr"><p>Bonjour</p></body>')
+  await pasteHtml(composer, '<style>p {direction:rtl;text-align:start}</style><p>مرحبا</p>')
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Clipboard language')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toContain('lang="fr"')
+  expect(html).toMatch(/direction:\s*rtl/)
+})

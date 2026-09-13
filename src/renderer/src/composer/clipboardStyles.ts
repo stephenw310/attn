@@ -110,6 +110,7 @@ export function snapshotClipboardStyles(source: Document): void {
       ...elements.map((element, index) => [element, snapshots[index].style] as const)
     ])
     const inherited = new Set([
+      'direction',
       'color',
       'font-family',
       'font-size',

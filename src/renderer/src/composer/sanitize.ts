@@ -72,6 +72,7 @@ export const COMPOSER_STYLE_PROPERTIES = new Set([
 
 // Safe presentation that remains read-only because Lexical does not round-trip it.
 export const PRESERVED_STYLE_PROPERTIES = new Set([
+  'direction',
   'display',
   'opacity',
   'visibility',
@@ -200,6 +201,7 @@ const TABLE_ELEMENTS = new Set(['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 
 // applied to every attribute value DOMPurify does not know is URI-free — which
 // is exactly how these were being stripped before #18a.
 const URI_SAFE_ATTRIBUTES = [
+  'lang',
   'aria-label',
   'width',
   'height',
@@ -304,6 +306,7 @@ export function sanitizeOutgoingHtml(html: string): string {
       'title',
       'class',
       'dir',
+      'lang',
       'rel',
       'target',
       'width',
