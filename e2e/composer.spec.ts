@@ -1930,6 +1930,34 @@ test('pastes without formatting and clears selected formatting through commands'
   await composer.expectSaved()
 })
 
+test('plain paste inherits styled caret formatting across lines', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(composer, '<p><span style="font-weight:bold;color:red;font-family:Georgia">Seed</span></p>')
+  await composer.editor.getByText('Seed', { exact: true }).evaluate((element) => {
+    const range = document.createRange()
+    if (!element.firstChild) throw new Error('Missing styled text')
+    range.setStart(element.firstChild, 3)
+    range.collapse(true)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
+  await page.keyboard.type('X')
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { readText: async () => 'Styled\nNext' }
+    })
+  })
+  await page.keyboard.press('ControlOrMeta+Shift+v')
+  const next = composer.editor.getByText('Next', { exact: true })
+  await expect(next).toHaveCSS('font-weight', '700')
+  await expect(next).toHaveCSS('color', 'rgb(255, 0, 0)')
+  await expect(next).toHaveCSS('font-family', 'Georgia')
+})
+
 test('plain paste leaves recipient and subject shortcuts native', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

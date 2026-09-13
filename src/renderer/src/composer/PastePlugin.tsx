@@ -13,6 +13,7 @@ import { useEffect, useRef } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
 import { normalizeClipboardHtml } from './clipboardHtml'
+import { $insertPlainClipboardText } from './clipboardText'
 import { $createImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
 import { preserveBlankLineBlocks } from './rootNodes'
@@ -64,7 +65,7 @@ export function PasteContentPlugin({
               () => {
                 if (!$getNodeByKey(selection.anchor.key) || !$getNodeByKey(selection.focus.key)) return
                 $setSelection(selection)
-                selection.insertRawText(text.replace(/\r\n?/g, '\n'))
+                $insertPlainClipboardText(selection, text)
               },
               { tag: HISTORY_PUSH_TAG }
             )

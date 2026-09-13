@@ -14,18 +14,22 @@ function styleConversion(element: HTMLElement): DOMConversionOutput {
   const sanitized = sanitizeComposerStyle(element.getAttribute('style') ?? '')
   style.cssText = sanitized
   const formats: TextFormatType[] = []
+  const resets: TextFormatType[] = []
   const represented = new Set<string>()
   if (['normal', '400', 'bold', '700'].includes(style.fontWeight)) {
     represented.add('font-weight')
     if (['bold', '700'].includes(style.fontWeight)) formats.push('bold')
+    else resets.push('bold')
   }
   if (['normal', 'italic'].includes(style.fontStyle)) {
     represented.add('font-style')
     if (style.fontStyle === 'italic') formats.push('italic')
+    else resets.push('italic')
   }
   const decoration = style.textDecoration.trim().split(/\s+/)
   if (decoration.every((value) => ['none', 'underline', 'line-through'].includes(value))) {
     represented.add('text-decoration')
+    if (decoration.includes('none')) resets.push('underline', 'strikethrough')
     if (decoration.includes('underline')) formats.push('underline')
     if (decoration.includes('line-through')) formats.push('strikethrough')
   }
@@ -37,6 +41,9 @@ function styleConversion(element: HTMLElement): DOMConversionOutput {
   return {
     forChild: (child) => {
       if (!$isTextNode(child)) return child
+      for (const format of resets) {
+        if (child.hasFormat(format)) child.toggleFormat(format)
+      }
       for (const format of formats) {
         if (!child.hasFormat(format)) child.toggleFormat(format)
       }

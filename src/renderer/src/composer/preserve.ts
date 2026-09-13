@@ -157,6 +157,11 @@ function materializeInheritedTextStyles(document: Document): void {
     }
     const inherited = new Map<string, string>()
     for (const element of ancestors) {
+      // Semantic emphasis participates in the cascade before the element's CSS.
+      if (['B', 'STRONG'].includes(element.tagName)) inherited.set('font-weight', 'bold')
+      if (['I', 'EM'].includes(element.tagName)) inherited.set('font-style', 'italic')
+      if (element.tagName === 'U') inherited.set('text-decoration', 'underline')
+      if (['S', 'STRIKE'].includes(element.tagName)) inherited.set('text-decoration', 'line-through')
       for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
         if (
           INHERITED_TEXT_STYLES.has(property) ||

@@ -98,3 +98,11 @@ it('imports Cocoa list and table class names and sanitizes converted embed URLs'
   expect(unsafe.html).not.toContain('onclick')
   expect(unsafe.html).not.toContain('<iframe')
 })
+
+it('retains non-default Cocoa list markers on the preservation path', () => {
+  for (const marker of ['circle', 'square', 'decimal']) {
+    const html = cocoa(`ul.ul1 {list-style-type:${marker}}`, '<ul class="ul1"><li>Item</li></ul>')
+    expect(normalizeClipboardHtml(html)).toBe(html)
+    expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues.length).toBeGreaterThan(0)
+  }
+})

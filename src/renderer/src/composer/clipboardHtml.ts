@@ -28,7 +28,11 @@ function expandCocoaStyles(html: string): string {
             const expanded = probe.style.getPropertyValue(name)
             if (expanded) declarations.push(`${name}: ${expanded}`)
           }
-        } else if (property === 'list-style-type' && /^(disc|circle|square|decimal)$/.test(value)) {
+        } else if (
+          property === 'list-style-type' &&
+          ((match[1].startsWith('ul.') && value === 'disc') ||
+            (match[1].startsWith('ol.') && value === 'decimal'))
+        ) {
           // UL/OL carry the list structure into the editor.
         } else if (property === 'min-height' && /^\d+(?:\.\d+)?px$/.test(value)) {
           blankHeight = true

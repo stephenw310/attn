@@ -79,3 +79,37 @@ it('retains CSS emphasis that format flags cannot fully represent through HTML e
     { discrete: true }
   )
 })
+
+it('applies inner normal resets while preserving semantic emphasis inside a normal parent', () => {
+  const editor = createHeadlessEditor({
+    nodes: [
+      StyledTextNode,
+      {
+        replace: TextNode,
+        with: (node: TextNode) => new StyledTextNode(node.getTextContent()),
+        withKlass: StyledTextNode
+      }
+    ],
+    onError: (error) => {
+      throw error
+    }
+  })
+  editor.update(
+    () => {
+      const html = prepareHtmlForEditor(
+        '<p><b><span style="font-weight:normal">Reset bold</span></b><i><span style="font-style:normal">Reset italic</span></i><u><span style="text-decoration:none">Reset underline</span></u></p><p style="font-weight:normal"><b>Keep bold</b></p>'
+      ).html
+      $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
+      const nodes = $getRoot().getAllTextNodes()
+      for (const node of nodes.filter((node) => node.getTextContent().includes('Reset'))) {
+        expect(node.hasFormat('bold')).toBe(false)
+        expect(node.hasFormat('italic')).toBe(false)
+        expect(node.hasFormat('underline')).toBe(false)
+      }
+      expect(nodes.at(-1)?.hasFormat('bold')).toBe(true)
+      const output = $generateHtmlFromNodes(editor)
+      expect(output).not.toMatch(/<strong[^>]*>Reset/)
+    },
+    { discrete: true }
+  )
+})
