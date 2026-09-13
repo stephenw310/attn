@@ -147,6 +147,34 @@ it('preserves Cocoa paragraph geometry and inline background through save and re
 })
 
 it.each([
+  [
+    '@scope (.outer) {.x {color:red}}',
+    '<div class="outer"><p class="x">Text</p></div>',
+    'span',
+    'color',
+    'red'
+  ],
+  [
+    '@layer outer {@layer second, first; @layer first {.x{color:red}} @layer second {.x{color:blue}}}',
+    '<p class="x">Text</p>',
+    'span',
+    'color',
+    'red'
+  ],
+  [
+    '',
+    '<div style="--accent:red;color:green"><span style="--accent:inherit;color:var(--accent)">Text</span></div>',
+    'span',
+    'color',
+    'red'
+  ],
+  [
+    '',
+    '<div style="--accent:red"><span style="--accent:initial;color:var(--accent,blue)">Text</span></div>',
+    'span',
+    'color',
+    'blue'
+  ],
   ['.x {--Accent:red;color:var(--Accent)}', '<p class="x">Text</p>', 'span', 'color', 'red'],
   [
     '.parent {--accent:red}.x {color:var(--missing,var(--accent))}',

@@ -931,10 +931,11 @@ export function inlineClipboardStylesheets(document: Document): void {
     }
     matched.set(element, declarations)
   }
-  const visit = (css: string, layerName = ''): void => {
+  type Scope = { root: Element; limit: string | null }
+  const visit = (css: string, layerName = '', scopes: Scope[] = []): void => {
     const source = css.replace(CSS_COMMENT, '')
     for (const order of source.matchAll(/@layer\s+([^;{}]+);/g)) {
-      for (const name of order[1].split(',')) layerIndex(layerName + name.trim())
+      for (const name of order[1].split(',')) layerIndex((layerName ? `${layerName}.` : '') + name.trim())
     }
     let block = nextCssBlock(source, 0)
     while (block) {
@@ -951,13 +952,25 @@ export function inlineClipboardStylesheets(document: Document): void {
             ? window.matchMedia(condition).matches
             : lightScreenMediaCanApply(condition))
         )
-          visit(content, layerName)
+          visit(content, layerName, scopes)
         if (name === 'supports' && typeof CSS !== 'undefined' && CSS.supports(condition))
-          visit(content, layerName)
+          visit(content, layerName, scopes)
+        if (name === 'scope') {
+          const start = condition.startsWith('(') ? matchingDelimiterEnd(condition, 0, '(', ')') : -1
+          const rootSelector = start < 0 ? 'body' : condition.slice(1, start)
+          const tail = start < 0 ? condition : condition.slice(start + 1).trim()
+          const limit = /^to\s*\(([\s\S]*)\)$/.exec(tail)?.[1] ?? null
+          try {
+            for (const root of document.querySelectorAll(rootSelector))
+              visit(content, layerName, [...scopes, { root, limit }])
+          } catch {
+            /* Invalid selectors have no matching scope. */
+          }
+        }
         if (name === 'layer') {
           const childLayer = (layerName ? `${layerName}.` : '') + (condition || `anonymous-${layers.size}`)
           layerIndex(childLayer)
-          visit(content, childLayer)
+          visit(content, childLayer, scopes)
         }
       } else {
         for (const selector of splitCssList(block.prelude)) {
@@ -967,7 +980,19 @@ export function inlineClipboardStylesheets(document: Document): void {
           } catch {
             continue
           }
-          for (const element of elements)
+          for (const element of elements) {
+            if (
+              !scopes.every(({ root, limit }) => {
+                if (!root.contains(element)) return false
+                let ancestor: Element | null = element
+                while (ancestor && ancestor !== root) {
+                  if (limit && ancestor.matches(limit)) return false
+                  ancestor = ancestor.parentElement
+                }
+                return true
+              })
+            )
+              continue
             add(
               element,
               directDeclarations(content),
@@ -975,6 +1000,7 @@ export function inlineClipboardStylesheets(document: Document): void {
               false,
               layerName ? layerIndex(layerName) : Number.MAX_SAFE_INTEGER
             )
+          }
         }
       }
       block = nextCssBlock(source, close + 1)
@@ -1027,8 +1053,18 @@ export function resolveClipboardVariables(document: Document): void {
   for (const element of document.querySelectorAll('*')) {
     const variables = new Map(element.parentElement ? inherited.get(element.parentElement) : undefined)
     const declarations = cssDeclarations(element.getAttribute('style') ?? '')
-    for (const { property, value } of declarations)
-      if (property.startsWith('--')) variables.set(property, value)
+    for (const { property, value } of declarations) {
+      if (!property.startsWith('--')) continue
+      const keyword = value.replace(IMPORTANT, '').trim().toLowerCase()
+      if (keyword === 'initial') variables.delete(property)
+      else if (['inherit', 'unset', 'revert', 'revert-layer'].includes(keyword)) {
+        const parentValue = element.parentElement
+          ? inherited.get(element.parentElement)?.get(property)
+          : undefined
+        if (parentValue === undefined) variables.delete(property)
+        else variables.set(property, parentValue)
+      } else variables.set(property, value)
+    }
     const computedVariables = new Map<string, string>()
     for (const [name, value] of variables) {
       const computed = substitute(value, variables, new Set([name]))
