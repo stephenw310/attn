@@ -147,7 +147,8 @@ export function snapshotClipboardStyles(source: Document): void {
       const style = [...snapshot.style].filter(
         ([name, value]) =>
           value &&
-          (value !== baseline[index].get(name) ||
+          ((element.tagName === 'PRE' && name === 'white-space') ||
+            value !== baseline[index].get(name) ||
             (inherited.has(name) &&
               element.parentElement &&
               desired.get(element.parentElement)?.get(name) !== value))

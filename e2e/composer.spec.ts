@@ -3490,7 +3490,7 @@ test('preserves pre whitespace overrides and root pseudo inheritance', async ({ 
   await composer.editor.click()
   await pasteHtml(
     composer,
-    '<style>body{color:red}html::before{content:"Banner"}</style><pre style="white-space:normal">A   B</pre>'
+    '<style>body{color:red}html::before{content:"Banner"}</style><pre style="white-space:normal">A   B</pre><pre style="white-space:revert">Unwrapped</pre>'
   )
   await composer.expectSaved()
   const result = await page.evaluate(async () => {
@@ -3502,9 +3502,9 @@ test('preserves pre whitespace overrides and root pseudo inheritance', async ({ 
     for (let node = banner?.parentElement; node; node = node.parentElement) {
       if (node.style.color === 'red' || node.style.color === 'rgb(255, 0, 0)') redAncestor = true
     }
-    return { text: doc.body.textContent, redAncestor }
+    return { text: doc.body.textContent, redAncestor, html }
   })
-  expect(result.text).toContain('A B')
-  expect(result.text).not.toContain('A   B')
+  expect(result.html).toMatch(/white-space:\s*normal/)
   expect(result.redAncestor).toBe(false)
+  expect(result.html).toMatch(/white-space:\s*pre[;"]/)
 })

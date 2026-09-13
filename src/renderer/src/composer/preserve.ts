@@ -282,7 +282,7 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
     if (property === 'text-decoration' && !/^(?:none|underline|line-through|overline|\s)*$/.test(value))
       return `${tag}[text-decoration]`
-    if (property === 'white-space' && value === 'nowrap') return `${tag}[white-space]`
+    if (property === 'white-space' && ['nowrap', 'pre'].includes(value)) return `${tag}[white-space]`
     if (property === 'list-style-type' || property === 'font') return `${tag}[style:${property}]`
     if (
       ['table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th'].includes(tag) &&
