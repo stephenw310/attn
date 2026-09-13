@@ -322,26 +322,32 @@ const TABLE_SCOPED_TAGS = new Set(['caption', 'col', 'colgroup', 'thead', 'tbody
 
 function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSourceRegion[] {
   const fragment = parseFragment(html, { sourceCodeLocationInfo: true })
-  const promotedTables = new Map<DefaultTreeAdapterTypes.Element, string>()
+  const promotedContainers = new Map<DefaultTreeAdapterTypes.Element, string>()
   const promote = (
     node: DefaultTreeAdapterTypes.ChildNode,
-    table: DefaultTreeAdapterTypes.Element | null
+    table: DefaultTreeAdapterTypes.Element | null,
+    list: DefaultTreeAdapterTypes.Element | null
   ): void => {
     if (!('tagName' in node)) return
     const tag = node.tagName.toLowerCase()
-    if (table && TABLE_SCOPED_TAGS.has(tag) && !promotedTables.has(table)) {
+    if (table && TABLE_SCOPED_TAGS.has(tag) && !promotedContainers.has(table)) {
       const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
-      if (reason) promotedTables.set(table, reason)
+      if (reason) promotedContainers.set(table, reason)
+    }
+    if (list && tag === 'li' && !promotedContainers.has(list)) {
+      const reason = unsupportedReason(sourceElementShape(node), hasStylesheet)
+      if (reason) promotedContainers.set(list, reason)
     }
     const nearestTable = tag === 'table' ? node : table
-    for (const child of node.childNodes) promote(child, nearestTable)
+    const nearestList = tag === 'ul' || tag === 'ol' ? node : list
+    for (const child of node.childNodes) promote(child, nearestTable, nearestList)
   }
-  for (const child of fragment.childNodes) promote(child, null)
+  for (const child of fragment.childNodes) promote(child, null, null)
 
   const regions: OpaqueSourceRegion[] = []
   const visit = (node: DefaultTreeAdapterTypes.ChildNode, owner: OpaqueSourceRegion | null): void => {
     if (!('tagName' in node)) return
-    const reason = promotedTables.get(node) ?? unsupportedReason(sourceElementShape(node), hasStylesheet)
+    const reason = promotedContainers.get(node) ?? unsupportedReason(sourceElementShape(node), hasStylesheet)
     let region = owner
     if (reason && !owner) {
       const location = node.sourceCodeLocation

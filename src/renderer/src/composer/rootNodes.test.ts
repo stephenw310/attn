@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createHeadlessEditor } from '@lexical/headless'
-import { $generateNodesFromDOM } from '@lexical/html'
+import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html'
 import { LinkNode } from '@lexical/link'
 import { ListItemNode, ListNode } from '@lexical/list'
 import { QuoteNode } from '@lexical/rich-text'
@@ -14,7 +14,7 @@ import { ImageNode } from './nodes/ImageNode'
 import { LegacyFontNode } from './nodes/LegacyFontNode'
 import { OpaqueHtmlNode } from './nodes/OpaqueHtmlNode'
 import { StyledTextNode } from './nodes/StyledTextNode'
-import { prepareHtmlForEditor } from './preserve'
+import { prepareHtmlForEditor, restoreOpaqueHtml } from './preserve'
 import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { editorStateToPlainText } from './serialize'
 
@@ -118,4 +118,23 @@ describe('root-level node normalization', () => {
       'Hi there,\nThis is a test of email format.\nHopefully it looks good\n\nBests,\nChao Wu\nhttps://chaowu.xyz'
     )
   })
+})
+
+it('preserves styled list items inside one valid enclosing list through Lexical export', () => {
+  const target = editor()
+  const source = '<ul><li style="list-style-type: square">Item</li><li>Other</li></ul>'
+  target.update(
+    () => {
+      const prepared = prepareHtmlForEditor(source)
+      const document = new DOMParser().parseFromString(prepared.html, 'text/html')
+      $getRoot().append(...rootLevelNodes($generateNodesFromDOM(target, document)))
+      const exported = restoreOpaqueHtml($generateHtmlFromNodes(target))
+      expect(exported).toContain(source)
+      expect(exported).not.toMatch(/<li[^>]*>\s*<li/)
+      const restored = new DOMParser().parseFromString(exported, 'text/html')
+      expect(restored.querySelectorAll('ul > li')).toHaveLength(2)
+      expect(restored.querySelector('li')?.style.listStyleType).toBe('square')
+    },
+    { discrete: true }
+  )
 })
