@@ -3749,6 +3749,30 @@ test('preserves clipboard style attribute selectors', async ({ page }) => {
   expect(result).toContainEqual({ text: 'Present', color: 'rgb(0, 0, 255)' })
 })
 
+test('measures first lines before changing style attributes', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Style selector first line')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>p:not([style]){width:40px}p[style]{width:400px!important}p::first-line{color:red}</style><p>One two three four five six seven eight</p>'
+  )
+  await composer.expectSaved()
+  const redText = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (item) => item.subject === 'Style selector first line'
+    )
+    const html = draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+    const doc = new DOMParser().parseFromString(html ?? '', 'text/html')
+    return [...doc.querySelectorAll<HTMLElement>('span')]
+      .filter((span) => span.style.color === 'rgb(255, 0, 0)')
+      .map((span) => span.textContent)
+      .join('')
+  })
+  expect(redText.trim()).toBe('One')
+})
+
 test('preserves automatic clipboard grid placement', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

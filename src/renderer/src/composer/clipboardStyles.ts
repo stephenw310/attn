@@ -219,6 +219,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       'text-orientation'
     ])
     const generated = materializeGeneratedContent(frame.documentElement, view)
+    const finalizeStyles: (() => void)[] = []
     const rootBefore: Node[] = []
     const rootAfter: Node[] = []
     for (let index = 0; index < elements.length; index++) {
@@ -230,7 +231,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
           !name.startsWith('data-attn-') &&
           !['data-smartmail', 'data-surl'].includes(name)
         )
-          element.removeAttribute(name)
+          finalizeStyles.push(() => element.removeAttribute(name))
       }
       const style = [...snapshot.style].filter(
         ([name, value]) =>
@@ -241,7 +242,9 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
               element.parentElement &&
               desired.get(element.parentElement)?.get(name) !== value))
       )
-      element.setAttribute('style', style.map(([name, value]) => `${name}:${value}`).join(';'))
+      finalizeStyles.push(() =>
+        element.setAttribute('style', style.map(([name, value]) => `${name}:${value}`).join(';'))
+      )
       for (const side of ['marker', 'before', 'after'] as const) {
         const parts = generated.get(element)?.[side] ?? []
         if (
@@ -279,14 +282,14 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
         if (element === frame.documentElement) {
           ;(side === 'after' ? rootAfter : rootBefore).push(span)
         } else if (side === 'marker') {
-          element.style.listStyleType = 'none'
+          finalizeStyles.push(() => {
+            element.style.listStyleType = 'none'
+          })
           element.prepend(span)
         } else if (side === 'before') element.prepend(span)
         else element.append(span)
       }
     }
-    const serializedBodyStyle = frame.body.getAttribute('style') ?? ''
-    applyDestination()
     const hideGenerated = frame.createElement('style')
     hideGenerated.textContent = '*::before,*::after,*::marker{content:none!important}'
     frame.head.append(hideGenerated)
@@ -303,7 +306,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
       return snapshotTextPseudos(element, changed('firstLine'), changed('firstLetter'))
     })
     for (const materialize of textPseudos.reverse()) materialize()
-    frame.body.setAttribute('style', serializedBodyStyle)
+    for (const finalize of finalizeStyles) finalize()
     const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
     const direction = frame.body.dir || frame.documentElement.dir
     const language = frame.body.lang || frame.documentElement.lang
