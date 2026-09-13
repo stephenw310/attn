@@ -3276,6 +3276,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     @counter-style thumbs {system:cyclic;symbols:"👍"}
     .thumbs {counter-reset:item}
     .thumbs::before {counter-increment:item;content:counter(item, thumbs) " "}
+    .unicode {counter-reset:café} .unicode::before {counter-increment:café;content:counter(café) " "}
     .sibling {counter-reset:x 1}
     .sibling::before {content:counters(x, ".") " "}
     .greek {counter-reset:item}
@@ -3283,7 +3284,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     .quoted::before {content:open-quote}
     .quoted::after {content:close-quote}
     .markers li::marker {content:"✓ ";color:red}
-  </style><p class="image-content">Image</p><p class="image-label">Tail</p><p class="alternative">Symbol</p><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
+  </style><p class="image-content">Image</p><p class="image-label">Tail</p><p class="alternative">Symbol</p><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="thumbs">Custom</p><p class="unicode">Unicode</p><p class="sibling">Sibling A</p><p class="sibling">Sibling B</p><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3304,6 +3305,8 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(text).toContain('“Quoted”')
   expect(text).toContain('α Greek')
   expect(text).toContain('👍 Custom')
+  expect(text).toContain('1 Unicode')
+  expect(saved?.bodyHtml?.match(/<img[^>]+clipboard-resource\.attn\.test/g)).toHaveLength(2)
   expect(text).toContain('1 Sibling A1 Sibling B')
   expect(text).toContain('✓ Marked')
   expect(saved?.bodyHtml).toContain('list-style-type: none')

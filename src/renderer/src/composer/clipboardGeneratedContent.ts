@@ -1,7 +1,8 @@
 import { createClipboardCounterFormatter } from './clipboardCounterStyles'
 
 type Counters = Map<string, { value: number; depth: number }[]>
-export type GeneratedContent = { marker: string; before: string; after: string }
+type ContentPart = { text: string } | { src: string }
+export type GeneratedContent = { marker: ContentPart[]; before: ContentPart[]; after: ContentPart[] }
 
 function unquote(value: string): string {
   return value
@@ -24,8 +25,10 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     ] as const) {
       const declaration = style.getPropertyValue(property)
       if (!declaration || declaration === 'none') continue
-      for (const match of declaration.matchAll(/([\w-]+)(?:\s+(-?\d+))?/g)) {
-        const name = match[1]
+      for (const match of declaration.matchAll(
+        /((?:[\w\u0080-\uffff-]|\\(?:[0-9a-f]{1,6}\s?|.))+)(?:\s+(-?\d+))?/gi
+      )) {
+        const name = unquote(`"${match[1]}"`)
         const value = match[2] === undefined ? defaultValue : Number(match[2])
         const stack = counters.get(name) ?? []
         if (property === 'counter-reset')
@@ -47,7 +50,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
     element: Element,
     style: CSSStyleDeclaration,
     counters: Counters
-  ): string => {
+  ): ContentPart[] => {
     const quotePairs = style.quotes.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g)?.map(unquote) ?? [
       '“',
       '”',
@@ -79,9 +82,17 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
       } else token += character
     }
     if (token) tokens.push(token)
+    const parts: ContentPart[] = []
     let text = ''
     for (const token of tokens) {
       if (token === '/') break
+      if (/^url\(/i.test(token)) {
+        if (text) parts.push({ text })
+        text = ''
+        const value = token.slice(4, -1).trim()
+        parts.push({ src: /^["']/.test(value) ? unquote(value) : unquote(`"${value}"`) })
+        continue
+      }
       if (token[0] === '"' || token[0] === "'") text += unquote(token)
       else if (token.startsWith('attr(')) {
         const args = token.slice(5, -1).split(',')
@@ -91,7 +102,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
         const plural = token.startsWith('counters(')
         const args =
           token.slice(token.indexOf('(') + 1, -1).match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s]+/g) ?? []
-        const values = counters.get(args[0] ?? '')?.map(({ value }) => value) ?? [0]
+        const values = counters.get(unquote(`"${args[0] ?? ''}"`))?.map(({ value }) => value) ?? [0]
         const style = args[plural ? 2 : 1] ?? 'decimal'
         text += plural
           ? values.map((value) => formatClipboardCounter(value, style)).join(args[1] ? unquote(args[1]) : '')
@@ -104,7 +115,8 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
         if (opening) quoteDepth++
       }
     }
-    return text
+    if (text) parts.push({ text })
+    return parts
   }
   const visit = (element: Element, counters: Counters, depth: number): void => {
     const style = view.getComputedStyle(element)
@@ -120,7 +132,7 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
       if (explicit !== null && /^[-+]?\d+$/.test(explicit.trim())) counter.value = Number(explicit)
       else if (!/\blist-item\b/.test(style.counterIncrement)) counter.value += step
     }
-    const content: GeneratedContent = { marker: '', before: '', after: '' }
+    const content: GeneratedContent = { marker: [], before: [], after: [] }
     result.set(element, content)
     const nested = new Map(counters)
     if (element.matches('ol, ul') && !/\blist-item\b/.test(`${style.counterReset} ${style.counterSet}`)) {
@@ -142,11 +154,9 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
       if (side === 'marker' && view.getComputedStyle(element).display !== 'list-item') return
       if (side === 'marker' && style.content === 'normal') {
         const values = nested.get('list-item')
-        content.marker = formatClipboardCounter(
-          values?.[values.length - 1]?.value ?? 1,
-          style.listStyleType,
-          true
-        )
+        content.marker = [
+          { text: formatClipboardCounter(values?.[values.length - 1]?.value ?? 1, style.listStyleType, true) }
+        ]
         return
       }
       if (!style.content || ['none', 'normal'].includes(style.content) || style.display === 'none') return

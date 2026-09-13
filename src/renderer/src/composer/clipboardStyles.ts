@@ -150,10 +150,18 @@ export function snapshotClipboardStyles(source: Document): void {
       )
       element.setAttribute('style', style.map(([name, value]) => `${name}:${value}`).join(';'))
       for (const side of ['marker', 'before', 'after'] as const) {
-        const text = generated.get(element)?.[side] ?? ''
-        if (!text) continue
+        const parts = generated.get(element)?.[side] ?? []
+        if (!parts.length || parts.every((part) => 'text' in part && !part.text)) continue
         const span = frame.createElement('span')
-        span.textContent = text
+        for (const part of parts) {
+          if ('text' in part) span.append(frame.createTextNode(part.text))
+          else {
+            const image = frame.createElement('img')
+            image.setAttribute('src', part.src)
+            image.setAttribute('alt', '')
+            span.append(image)
+          }
+        }
         span.setAttribute(
           'style',
           [...snapshot[side].style]
