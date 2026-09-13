@@ -3508,3 +3508,34 @@ test('preserves pre whitespace overrides and root pseudo inheritance', async ({ 
   expect(result.redAncestor).toBe(false)
   expect(result.html).toMatch(/white-space:\s*pre[;"]/)
 })
+
+test('keeps ordinary lists editable with unrelated clipboard CSS', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Native clipboard list')
+  await composer.editor.click()
+  await pasteHtml(composer, '<style>p{color:red}</style><ul><li>Editable</li></ul>')
+  await composer.expectSaved()
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+  await expect(composer.editor.locator('li')).toContainText('Editable')
+})
+
+test('preserves multicolumn clipboard layouts', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Clipboard columns')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.columns{columns:2 100px;column-gap:20px;column-rule:1px solid red}</style><div class="columns">Column content</div>'
+  )
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Clipboard columns')
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  expect(html).toMatch(/column-count:\s*2/)
+  expect(html).toMatch(/column-width:\s*100px/)
+  expect(html).toMatch(/column-gap:\s*20px/)
+  expect(html).toMatch(/column-rule-style:\s*solid/)
+})
