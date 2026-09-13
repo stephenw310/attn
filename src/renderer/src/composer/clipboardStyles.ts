@@ -29,6 +29,21 @@ export function snapshotClipboardStyles(source: Document): void {
       ADD_TAGS: ['style'],
       FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form']
     })
+    // FORCE_BODY sanitization flattens document wrappers. Keep their safe
+    // attributes in the frame so selectors still see the original context.
+    for (const [original, target] of [
+      [source.documentElement, frame.documentElement],
+      [source.body, frame.body]
+    ]) {
+      const probe = source.createElement('div')
+      for (const attribute of [...original.attributes]) probe.setAttribute(attribute.name, attribute.value)
+      const clean = new DOMParser().parseFromString(purifier.sanitize(probe.outerHTML), 'text/html').body
+        .firstElementChild
+      if (clean)
+        for (const attribute of [...clean.attributes]) {
+          if (attribute.name !== 'style') target.setAttribute(attribute.name, attribute.value)
+        }
+    }
     const parsed = new DOMParser().parseFromString(safe, 'text/html')
     const sheets = [...parsed.querySelectorAll('style')].map((style) => style.textContent ?? '')
     for (const style of parsed.querySelectorAll('style')) style.remove()
@@ -124,9 +139,13 @@ export function snapshotClipboardStyles(source: Document): void {
       }
     }
     const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
-    if (frame.body.getAttribute('style')?.trim()) {
+    const direction = frame.body.dir || frame.documentElement.dir
+    const language = frame.body.lang || frame.documentElement.lang
+    if (frame.body.getAttribute('style')?.trim() || direction || language) {
       const wrapper = source.createElement('div')
       wrapper.setAttribute('style', frame.body.getAttribute('style') ?? '')
+      if (direction) wrapper.dir = direction
+      if (language) wrapper.lang = language
       wrapper.append(...children)
       source.body.replaceChildren(wrapper)
     } else source.body.replaceChildren(...children)

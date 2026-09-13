@@ -1,4 +1,4 @@
-import { formatClipboardCounter } from './clipboardCounterStyles'
+import { createClipboardCounterFormatter } from './clipboardCounterStyles'
 
 type Counters = Map<string, { value: number }[]>
 export type GeneratedContent = { marker: string; before: string; after: string }
@@ -14,6 +14,7 @@ function unquote(value: string): string {
 /** Convert text-producing CSS content while the original counter scopes still exist. */
 export function materializeGeneratedContent(root: Element, view: Window): Map<Element, GeneratedContent> {
   const result = new Map<Element, GeneratedContent>()
+  const formatClipboardCounter = createClipboardCounterFormatter(root.ownerDocument)
   let quoteDepth = 0
   const applyCounters = (style: CSSStyleDeclaration, counters: Counters): void => {
     for (const [property, defaultValue] of [

@@ -45,6 +45,7 @@ import upperAlpha from '@jsamr/counter-style/presets/upperAlpha'
 import upperArmenian from '@jsamr/counter-style/presets/upperArmenian'
 import upperLatin from '@jsamr/counter-style/presets/upperLatin'
 import upperRoman from '@jsamr/counter-style/presets/upperRoman'
+import { cssDeclarations } from '../../../shared/css'
 
 // The CSS alphabet omits final sigma, so it is not a contiguous Unicode range.
 const lowerGreek = CounterStyle.alphabetic(...'αβγδεζηθικλμνξοπρστυφχψω')
@@ -101,4 +102,90 @@ const presets: Record<string, CounterStyleRenderer> = {
 
 export function formatClipboardCounter(value: number, style = 'decimal'): string {
   return (presets[style] ?? decimal).renderCounter(value)
+}
+
+/** Compile author-defined counter systems from the isolated frame's parsed CSS. */
+export function createClipboardCounterFormatter(
+  document: Document
+): (value: number, style?: string) => string {
+  const definitions = new Map<string, Map<string, string>>()
+  const collect = (rules: CSSRuleList): void => {
+    for (const rule of rules) {
+      if (rule.type === 4 && !document.defaultView?.matchMedia((rule as CSSMediaRule).conditionText).matches)
+        continue
+      if (rule.type === 12 && !CSS.supports((rule as CSSSupportsRule).conditionText)) continue
+      if (rule.type === 11) {
+        const named = rule as CSSRule & { name: string }
+        const body = rule.cssText.slice(rule.cssText.indexOf('{') + 1, rule.cssText.lastIndexOf('}'))
+        definitions.set(
+          named.name,
+          new Map(cssDeclarations(body).map(({ property, value }) => [property, value]))
+        )
+      } else if ('cssRules' in rule) collect((rule as CSSGroupingRule).cssRules)
+    }
+  }
+  for (const sheet of document.styleSheets) collect(sheet.cssRules)
+  const symbols = (value: string): string[] =>
+    (value.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,]+/g) ?? []).map((token) => {
+      const text = /^['"]/.test(token) ? token.slice(1, -1) : token
+      return text.replace(
+        /\\([0-9a-f]{1,6})\s?|\\(.)/gi,
+        (_match, hex: string | undefined, character: string) =>
+          hex ? String.fromCodePoint(Math.min(parseInt(hex, 16) || 0xfffd, 0x10ffff)) : character
+      )
+    })
+  const built = new Map<string, CounterStyleRenderer>()
+  const build = (name: string, visiting = new Set<string>()): CounterStyleRenderer => {
+    if (built.has(name)) return built.get(name) ?? decimal
+    const definition = definitions.get(name)
+    if (!definition || visiting.has(name)) return presets[name] ?? decimal
+    const next = new Set(visiting).add(name)
+    const [system, argument] = (definition.get('system') ?? 'symbolic').split(/\s+/)
+    const values = symbols(definition.get('symbols') ?? '')
+    let renderer: CounterStyleRenderer = decimal
+    if (system === 'extends') renderer = build(argument, next)
+    else if (system === 'additive') {
+      const tuples: Record<number, string> = {}
+      for (const tuple of (definition.get('additive-symbols') ?? '').split(',')) {
+        const [weight, symbol] = symbols(tuple)
+        if (symbol !== undefined && Number.isFinite(Number(weight))) tuples[Number(weight)] = symbol
+      }
+      if (Object.keys(tuples).length) renderer = CounterStyle.additive(tuples)
+    } else if (values.length) {
+      if (system === 'fixed') {
+        const start = argument === undefined ? 1 : Number(argument)
+        renderer = CounterStyle.raw((value) => values[value - start]).withRange(
+          start,
+          start + values.length - 1
+        )
+      } else if (['cyclic', 'symbolic', 'alphabetic', 'numeric'].includes(system)) {
+        renderer = CounterStyle[system as 'cyclic' | 'symbolic' | 'alphabetic' | 'numeric'](...values)
+      }
+    }
+    const negative = symbols(definition.get('negative') ?? '')
+    if (negative.length) renderer = renderer.withNegative(negative[0], negative[1])
+    const pad = symbols(definition.get('pad') ?? '')
+    if (pad.length === 2) renderer = renderer.withPadLeft(Number(pad[0]), pad[1])
+    const fallback = definition.get('fallback')
+    if (fallback) renderer = renderer.withFallback(build(fallback, next))
+    const range = definition.get('range')
+    if (range && range !== 'auto') {
+      const ranges = range.split(',').map((pair) =>
+        pair
+          .trim()
+          .split(/\s+/)
+          .map((part) => (part === 'infinite' ? Infinity : part === '-infinite' ? -Infinity : Number(part)))
+      )
+      const original = renderer
+      const alternative = build(fallback ?? 'decimal', next)
+      renderer = Object.create(original) as CounterStyleRenderer
+      renderer.renderCounter = (value) =>
+        ranges.some(([min, max]) => value >= min && value <= max)
+          ? original.renderCounter(value)
+          : alternative.renderCounter(value)
+    }
+    built.set(name, renderer)
+    return renderer
+  }
+  return (value, name = 'decimal') => build(name).renderCounter(value)
 }
