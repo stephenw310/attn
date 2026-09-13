@@ -387,7 +387,8 @@ function opaqueSourceRegions(html: string, hasStylesheet: boolean): OpaqueSource
     if (reason && decorated) promotedContainers.set(decorated, reason)
     const inheritedFormatting =
       cssDeclarations(node.attrs.find((attribute) => attribute.name === 'style')?.value ?? '').some(
-        ({ property }) => INHERITED_TEXT_STYLES.has(property)
+        ({ property }) =>
+          INHERITED_TEXT_STYLES.has(property) || (tag === 'span' && COMPOSER_STYLE_PROPERTIES.has(property))
       ) || ['b', 'strong', 'i', 'em', 'u', 's', 'strike', 'font', 'code', 'pre'].includes(tag)
     const formattingOwner =
       decorated ?? (inheritedFormatting ? (TABLE_SCOPED_TAGS.has(tag) && table ? table : node) : null)
