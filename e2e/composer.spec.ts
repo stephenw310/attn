@@ -3540,6 +3540,36 @@ test('preserves stylesheet aspect ratios on paste', async ({ page }) => {
   await expect(card).toHaveCSS('height', '100px')
 })
 
+test('preserves logical clipboard dimensions', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Logical clipboard dimensions')
+  await composer.editor.click()
+  await pasteHtml(
+    composer,
+    '<style>.card{inline-size:200px;block-size:100px;min-inline-size:150px;max-inline-size:250px;min-block-size:80px;max-block-size:120px;background:red}</style><div class="card"></div>'
+  )
+  await composer.expectSaved()
+  const html = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find(
+      (item) => item.subject === 'Logical clipboard dimensions'
+    )
+    return draft ? (await window.attn.draft.get(draft.id))?.bodyHtml : ''
+  })
+  for (const [property, value] of Object.entries({
+    'inline-size': 200,
+    'block-size': 100,
+    'min-inline-size': 150,
+    'max-inline-size': 250,
+    'min-block-size': 80,
+    'max-block-size': 120
+  }))
+    expect(html).toMatch(new RegExp(`${property}:\\s*${value}px`))
+  const card = composer.editor.frameLocator('iframe').locator('div[style*="inline-size"]')
+  await expect(card).toHaveCSS('width', '200px')
+  await expect(card).toHaveCSS('height', '100px')
+})
+
 test('preserves multicolumn clipboard layouts', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

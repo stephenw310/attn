@@ -60,7 +60,7 @@ export function snapshotClipboardStyles(source: Document, destination?: HTMLElem
     const properties = [...COMPOSER_STYLE_PROPERTIES, ...PRESERVED_STYLE_PROPERTIES]
       .filter(
         (property) =>
-          (property !== 'font' && !['width', 'height'].includes(property)) ||
+          (property !== 'font' && !/^(width|height|(?:min-|max-)?(?:inline|block)-size)$/.test(property)) ||
           new RegExp(`(?:^|[;{\\s])${property}\\s*:`, 'i').test(css)
       )
       .filter((property) => property !== 'font')
