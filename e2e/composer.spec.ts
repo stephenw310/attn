@@ -3036,6 +3036,10 @@ test('snapshots complex clipboard CSS with the browser cascade through save and 
   test.setTimeout(180_000)
   await page.route('https://clipboard-resource.attn.test/**', (route) => route.abort())
   const cases: string[][] = [
+    ['body {background:red;padding:20px}', '<p>Text</p>', 'div', 'padding', '20px'],
+    ['body {background:red;padding:20px}', '<p>Text</p>', 'div', 'background-color', 'rgb(255, 0, 0)'],
+    ['.secret {visibility:hidden}', '<p class="secret">Text</p>', 'p', 'visibility', 'hidden'],
+
     [
       '.x {display:inline;opacity:.5;transform:rotate(5deg);letter-spacing:2px}',
       '<p class="x">Text</p>',
@@ -3248,10 +3252,12 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     .attribute::before {content:attr(data-label)}
     .numbered {counter-reset:item}
     .numbered p::before {counter-increment:item;content:counter(item) ". "}
+    .greek {counter-reset:item}
+    .greek::before {counter-increment:item;content:counter(item, lower-greek) " ";}
     .quoted::before {content:open-quote}
     .quoted::after {content:close-quote}
     .markers li::marker {content:"✓ ";color:red}
-  </style><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
+  </style><p class="attribute" data-label="Prefix ">Attribute</p><div class="numbered"><p>First</p><p>Second</p></div><p class="greek">Greek</p><p class="quoted">Quoted</p><ul class="markers"><li>Marked</li></ul>`
   )
   await composer.expectSaved()
   const saved = await page.evaluate(async () => {
@@ -3266,6 +3272,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
   expect(text).toContain('1. First')
   expect(text).toContain('2. Second')
   expect(text).toContain('“Quoted”')
+  expect(text).toContain('α Greek')
   expect(text).toContain('✓ Marked')
   expect(saved?.bodyHtml).toContain('list-style-type: none')
   await expect(composer.editor.locator('iframe')).toHaveCount(1)

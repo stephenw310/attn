@@ -1,3 +1,5 @@
+import { formatClipboardCounter } from './clipboardCounterStyles'
+
 type Counters = Map<string, { value: number }[]>
 export type GeneratedContent = { marker: string; before: string; after: string }
 
@@ -7,44 +9,6 @@ function unquote(value: string): string {
     .replace(/\\([0-9a-f]{1,6})\s?|\\(.)/gi, (_match, hex: string | undefined, character: string) =>
       hex ? String.fromCodePoint(Math.min(parseInt(hex, 16) || 0xfffd, 0x10ffff)) : character
     )
-}
-
-function formatCounter(value: number, style = 'decimal'): string {
-  if (style === 'decimal-leading-zero') return String(value).padStart(2, '0')
-  if (['lower-alpha', 'lower-latin', 'upper-alpha', 'upper-latin'].includes(style) && value > 0) {
-    let text = ''
-    while (value > 0) {
-      value--
-      text = String.fromCharCode(97 + (value % 26)) + text
-      value = Math.floor(value / 26)
-    }
-    return style.startsWith('upper') ? text.toUpperCase() : text
-  }
-  if (['lower-roman', 'upper-roman'].includes(style) && value > 0 && value < 4000) {
-    let text = ''
-    for (const [number, symbol] of [
-      [1000, 'M'],
-      [900, 'CM'],
-      [500, 'D'],
-      [400, 'CD'],
-      [100, 'C'],
-      [90, 'XC'],
-      [50, 'L'],
-      [40, 'XL'],
-      [10, 'X'],
-      [9, 'IX'],
-      [5, 'V'],
-      [4, 'IV'],
-      [1, 'I']
-    ] as const) {
-      while (value >= number) {
-        text += symbol
-        value -= number
-      }
-    }
-    return style === 'lower-roman' ? text.toLowerCase() : text
-  }
-  return String(value)
 }
 
 /** Convert text-producing CSS content while the original counter scopes still exist. */
@@ -106,8 +70,8 @@ export function materializeGeneratedContent(root: Element, view: Window): Map<El
         const values = counters.get(args[0] ?? '')?.map(({ value }) => value) ?? [0]
         const style = args[plural ? 2 : 1] ?? 'decimal'
         text += plural
-          ? values.map((value) => formatCounter(value, style)).join(args[1] ? unquote(args[1]) : '')
-          : formatCounter(values[values.length - 1], style)
+          ? values.map((value) => formatClipboardCounter(value, style)).join(args[1] ? unquote(args[1]) : '')
+          : formatClipboardCounter(values[values.length - 1], style)
       } else {
         const opening = token.endsWith('open-quote')
         if (!opening) quoteDepth = Math.max(0, quoteDepth - 1)

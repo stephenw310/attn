@@ -32,11 +32,13 @@ export function snapshotClipboardStyles(source: Document): void {
     const parsed = new DOMParser().parseFromString(safe, 'text/html')
     const sheets = [...parsed.querySelectorAll('style')].map((style) => style.textContent ?? '')
     for (const style of parsed.querySelectorAll('style')) style.remove()
-    const originalElements = [...parsed.body.querySelectorAll<HTMLElement>('*')]
-    const inline = originalElements.map((element) => element.getAttribute('style') ?? '')
+    const originalElements = [parsed.body, ...parsed.body.querySelectorAll<HTMLElement>('*')]
+    const inline = originalElements.map(
+      (element, index) => (index === 0 ? source.body : element).getAttribute('style') ?? ''
+    )
     for (const element of originalElements) element.removeAttribute('style')
     frame.body.append(...[...parsed.body.childNodes].map((node) => frame.importNode(node, true)))
-    const elements = [...frame.body.querySelectorAll<HTMLElement>('*')]
+    const elements = [frame.body, ...frame.body.querySelectorAll<HTMLElement>('*')]
     const css = sheets.join('\n') + inline.join(';')
     const properties = [...COMPOSER_STYLE_PROPERTIES, ...PRESERVED_STYLE_PROPERTIES]
       .filter(
@@ -66,7 +68,6 @@ export function snapshotClipboardStyles(source: Document): void {
       before: read(element, '::before'),
       after: read(element, '::after')
     }))
-    frame.body.setAttribute('style', source.body.getAttribute('style') ?? '')
     for (let index = 0; index < elements.length; index++) elements[index].setAttribute('style', inline[index])
     for (const css of sheets) {
       const style = frame.createElement('style')
@@ -122,7 +123,13 @@ export function snapshotClipboardStyles(source: Document): void {
         else element.append(span)
       }
     }
-    source.body.replaceChildren(...[...frame.body.childNodes].map((node) => source.importNode(node, true)))
+    const children = [...frame.body.childNodes].map((node) => source.importNode(node, true))
+    if (frame.body.getAttribute('style')?.trim()) {
+      const wrapper = source.createElement('div')
+      wrapper.setAttribute('style', frame.body.getAttribute('style') ?? '')
+      wrapper.append(...children)
+      source.body.replaceChildren(wrapper)
+    } else source.body.replaceChildren(...children)
     for (const style of source.querySelectorAll('style')) style.remove()
   } finally {
     host.remove()
