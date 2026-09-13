@@ -3295,6 +3295,7 @@ test('materializes clipboard attributes, counters, quotes, and list markers', as
     (html) => new DOMParser().parseFromString(html, 'text/html').body.textContent,
     saved?.bodyHtml ?? ''
   )
+  expect(saved?.bodyHtml).toMatch(/<img[^>]*alt="check"/)
   expect(text).toContain('LabelTail')
   expect(text).not.toContain('icons/check.svg')
   expect(text).toContain('★/Symbol')

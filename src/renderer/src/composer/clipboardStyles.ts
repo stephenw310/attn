@@ -158,7 +158,7 @@ export function snapshotClipboardStyles(source: Document): void {
           else {
             const image = frame.createElement('img')
             image.setAttribute('src', part.src)
-            image.setAttribute('alt', '')
+            image.setAttribute('alt', part.alt ?? '')
             span.append(image)
           }
         }
