@@ -147,6 +147,15 @@ it('preserves Cocoa paragraph geometry and inline background through save and re
 })
 
 it.each([
+  ['table {width:500px}', '<table><tr><td>Cell</td></tr></table>', 'table', 'width', '500px'],
+  ['@media screen {table {width:400px}}', '<table><tr><td>Cell</td></tr></table>', 'table', 'width', '400px'],
+  [
+    'table {width:500px!important}',
+    '<table style="width:200px"><tr><td>Cell</td></tr></table>',
+    'table',
+    'width',
+    '500px'
+  ],
   ['td.td1 {padding:8px}', '<table><tr><td class="td1">Cell</td></tr></table>', 'td', 'padding', '8px'],
   [
     'table.t1 {border-spacing:4px}',

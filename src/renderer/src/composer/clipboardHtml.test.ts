@@ -36,15 +36,18 @@ describe('Cocoa clipboard text', () => {
     expect(prepared.html).toContain('href="https://example.com"')
   })
 
-  it('leaves ordinary HTML and complex Cocoa layouts unchanged', () => {
+  it('inlines complex stylesheet rules before removing stylesheets', () => {
     const cases = [
-      '<style>.hero {color:red}</style><p class="hero">Text</p>',
-      cocoa('table {width:500px}', '<table><tr><td>Cell</td></tr></table>'),
-      cocoa('@media print {p.p1 {color:red}}', '<p class="p1">Text</p>'),
-      cocoa('p.p1 {min-height:100px}', '<p class="p1">Layout</p>'),
-      cocoa('p.p1 {position:absolute}', '<p class="p1">Positioned</p>')
+      ['<style>.hero {color:red}</style><p class="hero">Text</p>', 'color: red'],
+      [cocoa('table {width:500px}', '<table><tr><td>Cell</td></tr></table>'), 'width: 500px'],
+      [cocoa('@media screen {p.p1 {color:red}}', '<p class="p1">Text</p>'), 'color: red'],
+      [cocoa('p.p1 {color:red!important}', '<p class="p1" style="color:blue">Text</p>'), 'color: red']
     ]
-    for (const html of cases) expect(normalizeClipboardHtml(html)).toBe(html)
+    for (const [html, style] of cases) {
+      const normalized = normalizeClipboardHtml(html)
+      expect(normalized).not.toContain('<style')
+      expect(normalized).toContain(style)
+    }
   })
 
   it('still sanitizes untrusted content and preserves unsupported tables', () => {

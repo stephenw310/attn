@@ -896,3 +896,67 @@ export function mailPresentationForHtml(html: string | null): MailPresentation {
 export function forceLightMailCss(css: string): string {
   return css.replace(EVERY_DARK_COLOR_SCHEME, ALWAYS_FALSE_LIGHT_MEDIA_FEATURE)
 }
+
+/** Snapshot applicable stylesheet declarations before a clipboard import removes stylesheets. */
+export function inlineClipboardStylesheets(document: Document): void {
+  type Declaration = { text: string; important: boolean; inline: boolean; specificity: Specificity }
+  const matched = new Map<Element, Declaration[]>()
+  const add = (element: Element, css: string, specificity: Specificity, inline = false): void => {
+    const declarations = matched.get(element) ?? []
+    for (const { property, value } of cssDeclarations(css)) {
+      declarations.push({
+        text: `${property}: ${value.replace(IMPORTANT, '')}`,
+        important: IMPORTANT.test(value),
+        inline,
+        specificity
+      })
+    }
+    matched.set(element, declarations)
+  }
+  const visit = (css: string): void => {
+    const source = css.replace(CSS_COMMENT, '')
+    let block = nextCssBlock(source, 0)
+    while (block) {
+      const close = matchingBlockEnd(source, block.open)
+      if (close < 0) break
+      const content = source.slice(block.open + 1, close)
+      const atRule = /^@([\w-]+)\b([\s\S]*)$/i.exec(block.prelude)
+      if (atRule) {
+        const name = atRule[1].toLowerCase()
+        const condition = atRule[2].trim()
+        if (
+          name === 'media' &&
+          (typeof window.matchMedia === 'function'
+            ? window.matchMedia(condition).matches
+            : lightScreenMediaCanApply(condition))
+        )
+          visit(content)
+        if (name === 'supports' && typeof CSS !== 'undefined' && CSS.supports(condition)) visit(content)
+      } else {
+        for (const selector of splitCssList(block.prelude)) {
+          let elements: NodeListOf<Element>
+          try {
+            elements = document.querySelectorAll(selector)
+          } catch {
+            continue
+          }
+          for (const element of elements)
+            add(element, directDeclarations(content), selectorSpecificity(selector))
+        }
+      }
+      block = nextCssBlock(source, close + 1)
+    }
+  }
+  for (const style of document.querySelectorAll('style')) visit(style.textContent ?? '')
+  for (const [element, declarations] of matched) {
+    add(element, element.getAttribute('style') ?? '', [0, 0, 0], true)
+    declarations.sort(
+      (left, right) =>
+        Number(left.important) - Number(right.important) ||
+        Number(left.inline) - Number(right.inline) ||
+        compareSpecificity(left.specificity, right.specificity)
+    )
+    element.setAttribute('style', declarations.map(({ text }) => text).join('; '))
+  }
+  for (const style of document.querySelectorAll('style')) style.remove()
+}
