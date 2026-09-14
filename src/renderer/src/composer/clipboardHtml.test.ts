@@ -144,8 +144,14 @@ it('drops other stylesheets but keeps links, images, tables, and Docs list marku
   expect(list.issues).toEqual([])
   expect(list.html).toContain('<li')
   expect(list.html).not.toContain('aria-level')
-  // Only a `content` property generates text; flex alignment and comments do not.
-  for (const css of ['.x{justify-content:center}', '/* content: legacy note */']) {
+  // Only a `content` declaration generates text; flex alignment, comments, and
+  // a pseudo-element rule without one do not.
+  for (const css of [
+    '.x{justify-content:center}',
+    '/* content: legacy note */',
+    '.x::before{color:red}',
+    'p::after{content:normal}'
+  ]) {
     expect(normalizeClipboardHtml(`<style>${css}</style><p><b>Bold</b></p>`)).toContain('<b>')
   }
 })
@@ -173,4 +179,11 @@ it('expands inline font shorthand while respecting later longhands', () => {
   expect(result.html).toContain('font-family: Arial')
   expect(result.html).toContain('font-size: 18px')
   expect(result.html).toContain('font-style: italic')
+  // An inline priority flag is dropped rather than losing the whole shorthand.
+  const important = prepareHtmlForEditor(
+    normalizeClipboardHtml('<p><span style="font: italic 16px Arial !important">Sample</span></p>')
+  )
+  expect(important.issues).toEqual([])
+  expect(important.html).toContain('font-size: 16px')
+  expect(important.html).toContain('font-style: italic')
 })

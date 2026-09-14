@@ -37,10 +37,14 @@ const INERT_PROPERTIES = new Set([
   'word-wrap'
 ])
 
-/** Expand ordinary font shorthands using the browser's CSS parser. */
+/**
+ * Expand ordinary font shorthands using the browser's CSS parser. An inline
+ * priority is dropped: an inline declaration already wins over any stylesheet
+ * the paste keeps, and the CSS parser rejects the flag inside a value.
+ */
 function expandFont(document: Document, value: string): string[] | null {
   const probe = document.createElement('span')
-  probe.style.font = value
+  probe.style.font = value.replace(/\s*!\s*important\s*$/i, '')
   if (!probe.style.fontSize || !probe.style.fontFamily) return null
   return ['font-family', 'font-size', 'font-weight', 'font-style', 'line-height']
     .map((name) => [name, probe.style.getPropertyValue(name)])
@@ -149,9 +153,11 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
   // Only Cocoa's bounded text stylesheet is converted. Other CSS is dropped and
   // the markup stays editable, unless the stylesheet generates content the
   // markup alone would misrepresent; then the clipboard text is the honest paste.
+  // Only a `content` declaration generates anything; a pseudo-element rule
+  // that sets color or spacing draws nothing without one.
   if (
     stylesheets.some((sheet) =>
-      /::?(?:before|after|marker)\b|(?:^|[^\w-])content\s*:/i.test(
+      /(?:^|[^\w-])content\s*:\s*(?!normal\b|none\b|inherit\b|initial\b|unset\b)/i.test(
         (sheet.textContent ?? '').replace(/\/\*[\s\S]*?\*\//g, '')
       )
     )
