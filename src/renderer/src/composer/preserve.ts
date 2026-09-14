@@ -156,7 +156,12 @@ function materializeInheritedTextStyles(document: Document): void {
       ancestor = ancestor.parentElement
     }
     const inherited = new Map<string, string>()
+    // Decoration lines propagate from every ancestor and a descendant cannot
+    // cancel one; a declaration on the decorated element itself replaces only
+    // that element's own line.
     const decorations = new Set<string>()
+    const tagDecorations = new Set<string>()
+    let exoticDecoration: string | null = null
     // Emphasis an element establishes (table headers included) survives the
     // style stripping below, so only there must a later `normal` stay in the
     // text style to cancel it. Elsewhere it is a default the toolbar may change.
@@ -169,24 +174,33 @@ function materializeInheritedTextStyles(document: Document): void {
         inherited.set('font-style', 'italic')
         emphasis.add('font-style')
       }
-      if (element.tagName === 'U') decorations.add('underline')
-      if (['S', 'STRIKE'].includes(element.tagName)) decorations.add('line-through')
+      const own = new Set<string>()
+      if (element.tagName === 'U') own.add('underline')
+      if (['S', 'STRIKE'].includes(element.tagName)) own.add('line-through')
+      for (const line of own) tagDecorations.add(line)
+      let declared: string | null = null
       for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
-        if (
+        if (property === 'text-decoration') declared = value.trim()
+        else if (
           INHERITED_TEXT_STYLES.has(property) ||
           (element.tagName === 'SPAN' && COMPOSER_STYLE_PROPERTIES.has(property))
         )
           inherited.set(property, value)
       }
-      for (const line of (element as HTMLElement).style.textDecoration.split(/\s+/))
-        if (['underline', 'line-through'].includes(line)) decorations.add(line)
+      if (declared !== null) {
+        const lines = declared.toLowerCase().split(/\s+/)
+        if (lines.every((line) => ['none', 'underline', 'line-through'].includes(line))) {
+          own.clear()
+          for (const line of lines) if (line !== 'none') own.add(line)
+          exoticDecoration = null
+        } else exoticDecoration = declared
+      }
+      for (const line of own) decorations.add(line)
     }
-    if (
-      decorations.size &&
-      /^(?:none|underline|line-through|\s)*$/.test(inherited.get('text-decoration') ?? '')
-    )
-      inherited.set('text-decoration', [...decorations].join(' '))
+    if (exoticDecoration) inherited.set('text-decoration', exoticDecoration)
+    else if (decorations.size) inherited.set('text-decoration', [...decorations].join(' '))
     const resets: string[] = []
+    if ([...tagDecorations].some((line) => !decorations.has(line))) resets.push('text-decoration')
     for (const [property, defaults] of Object.entries({
       'font-weight': ['normal', '400'],
       'font-style': ['normal']
@@ -195,10 +209,15 @@ function materializeInheritedTextStyles(document: Document): void {
       if (emphasis.has(property)) resets.push(property)
       else inherited.delete(property)
     }
-    if (inherited.size === 0) continue
+    if (inherited.size === 0 && resets.length === 0) continue
     const span = document.createElement('span')
     if (resets.length) span.setAttribute('data-attn-reset', resets.join(' '))
-    span.setAttribute('style', [...inherited].map(([property, value]) => `${property}: ${value}`).join('; '))
+    if (inherited.size) {
+      span.setAttribute(
+        'style',
+        [...inherited].map(([property, value]) => `${property}: ${value}`).join('; ')
+      )
+    }
     if (['pre', 'pre-wrap', 'break-spaces'].includes(inherited.get('white-space') ?? '')) {
       const fragment = document.createDocumentFragment()
       for (const part of textNode.data.split(/(\r\n|\r|\n|\t)/)) {

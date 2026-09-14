@@ -120,6 +120,28 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
   )
 })
 
+it('honors decoration overrides on the decorated element and unions nested block lines', () => {
+  const editor = createHeadlessEditor({
+    nodes: editorConfig.nodes,
+    onError: (error) => {
+      throw error
+    }
+  })
+  editor.update(
+    () => {
+      const html = prepareHtmlForEditor(
+        '<p><u style="text-decoration:none">Plain</u><s style="text-decoration:underline">Swapped</s></p><div style="text-decoration:underline"><p style="text-decoration:line-through">Both</p></div>'
+      ).html
+      $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
+      const [plain, swapped, both] = $getRoot().getAllTextNodes()
+      expect([plain.hasFormat('underline'), plain.hasFormat('strikethrough')]).toEqual([false, false])
+      expect([swapped.hasFormat('underline'), swapped.hasFormat('strikethrough')]).toEqual([true, false])
+      expect([both.hasFormat('underline'), both.hasFormat('strikethrough')]).toEqual([true, true])
+    },
+    { discrete: true }
+  )
+})
+
 it('preserves a box shared by several text runs as one opaque region', () => {
   const box = 'background-color:yellow; border:2px solid red; padding:4px'
   const shared = `<p><span style="${box}"><b>A</b><i>B</i>C</span></p>`

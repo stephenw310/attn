@@ -1,3 +1,4 @@
+import { TOGGLE_LINK_COMMAND } from '@lexical/link'
 import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lexical/list'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $createQuoteNode } from '@lexical/rich-text'
@@ -8,15 +9,64 @@ import {
   $getRoot,
   $getSelection,
   $isRangeSelection,
+  $isTextNode,
   FORMAT_TEXT_COMMAND,
   HISTORY_PUSH_TAG,
   type LexicalEditor,
+  type LexicalNode,
   REDO_COMMAND,
   UNDO_COMMAND
 } from 'lexical'
 import { useCallback, useEffect, useLayoutEffect } from 'react'
 import { createCommand, registerCommands } from '../commands'
+import { LegacyFontNode } from './nodes/LegacyFontNode'
 import { $authoredChildCount, $isProtectedComposerNode, $topLevelComposerNode } from './nodes/protected'
+
+/** Move the cleared run out of its legacy font wrapper; untouched neighbours keep the font. */
+function $liftFromLegacyFont(font: LegacyFontNode, cleared: Set<string>): void {
+  const children = font.getChildren()
+  const first = children.findIndex((child) => cleared.has(child.getKey()))
+  if (first < 0) return
+  let last = first
+  while (last + 1 < children.length && cleared.has(children[last + 1].getKey())) last += 1
+  let anchor: LexicalNode = font
+  for (const child of children.slice(first, last + 1)) {
+    anchor.insertAfter(child)
+    anchor = child
+  }
+  const tail = children.slice(last + 1)
+  if (tail.length) {
+    const latest = font.getLatest()
+    const rest = new LegacyFontNode(latest.__attributes, latest.__autoDirection).setStyle(font.getStyle())
+    anchor.insertAfter(rest)
+    rest.append(...tail)
+  }
+  if (font.getChildrenSize() === 0) font.remove()
+}
+
+/**
+ * Clear formatting: the formatting menu button and the palette command are the
+ * same action. Text formats, styles, and links go, and a legacy font wrapper is
+ * split so the cleared text leaves it. A collapsed caret clears what is typed next.
+ */
+export function $clearSelectionFormatting(editor: LexicalEditor): void {
+  $addUpdateTag(HISTORY_PUSH_TAG)
+  const selection = $getSelection()
+  if (!$isRangeSelection(selection)) return
+  if (!selection.isCollapsed()) {
+    const extracted = selection.extract()
+    const cleared = new Set(extracted.map((node) => node.getKey()))
+    for (const node of extracted) {
+      if ($isTextNode(node)) node.setFormat(0).setStyle('')
+      for (let parent = node.getParent(); parent instanceof LegacyFontNode; parent = node.getParent()) {
+        $liftFromLegacyFont(parent, cleared)
+      }
+    }
+    editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)
+  }
+  selection.setFormat(0)
+  selection.setStyle('')
+}
 
 /**
  * Block-quoting the selection. The toolbar button and the palette command are

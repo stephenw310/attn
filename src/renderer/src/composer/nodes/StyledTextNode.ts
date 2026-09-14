@@ -36,6 +36,12 @@ function styleConversion(element: HTMLElement): DOMConversionOutput {
     if (decoration.includes('underline')) formats.push('underline')
     if (decoration.includes('line-through')) formats.push('strikethrough')
   }
+  // A declaration on the decorated element itself replaced the tag's own line.
+  if (kept.has('text-decoration')) {
+    for (const format of ['underline', 'strikethrough'] as const) {
+      if (!formats.includes(format)) resets.push(format)
+    }
+  }
   // Keep CSS whenever flags cannot reproduce the complete presentation.
   const cleanStyle = cssDeclarations(sanitized)
     .filter(({ property }) => !represented.has(property))

@@ -136,6 +136,10 @@ it('drops other stylesheets but keeps links, images, tables, and Docs list marku
   expect(list.issues).toEqual([])
   expect(list.html).toContain('<li')
   expect(list.html).not.toContain('aria-level')
+  // Only a `content` property generates text; flex alignment does not.
+  expect(normalizeClipboardHtml('<style>.x{justify-content:center}</style><p><b>Bold</b></p>')).toContain(
+    '<b>'
+  )
 })
 
 it('derives fallback text from the markup without inflating blank lines', () => {

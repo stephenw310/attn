@@ -3,16 +3,13 @@ import { INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_LIST_COMMAND } from '@lex
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { $patchStyleText } from '@lexical/selection'
 import {
-  $addUpdateTag,
   $getNodeByKey,
   $getSelection,
   $isDecoratorNode,
   $isRangeSelection,
-  $isTextNode,
   $setSelection,
   FORMAT_ELEMENT_COMMAND,
   FORMAT_TEXT_COMMAND,
-  HISTORY_PUSH_TAG,
   type LexicalNode,
   type RangeSelection,
   type TextFormatType
@@ -23,7 +20,7 @@ import { safeUrl } from '../../../shared/html'
 import { createCommand, registerCommands } from '../commands'
 import { MailIcon } from '../components/MailIcon'
 import { modKeyLabel } from '../platform'
-import { toggleComposerQuoteBlock } from './bodyEditing'
+import { $clearSelectionFormatting, toggleComposerQuoteBlock } from './bodyEditing'
 import { $isProtectedComposerNode, $topLevelComposerNode } from './nodes/protected'
 import { COMPOSER_LINK_SCHEMES } from './sanitize'
 
@@ -196,19 +193,7 @@ export function EditorToolbar(): React.JSX.Element {
     [editor, withSelection]
   )
   const clearFormatting = useCallback(() => {
-    withSelection(() => {
-      $addUpdateTag(HISTORY_PUSH_TAG)
-      const selection = $getSelection()
-      if (!$isRangeSelection(selection)) return
-      if (!selection.isCollapsed()) {
-        for (const node of selection.extract()) {
-          if ($isTextNode(node)) node.setFormat(0).setStyle('')
-        }
-        editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)
-      }
-      selection.setFormat(0)
-      selection.setStyle('')
-    })
+    withSelection(() => $clearSelectionFormatting(editor))
   }, [editor, withSelection])
   const patchStyle = useCallback(
     (property: string, value: string) => {
