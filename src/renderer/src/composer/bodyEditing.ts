@@ -68,13 +68,18 @@ export function $clearSelectionFormatting(editor: LexicalEditor): void {
     const cleared = new Set(extracted.map((node) => node.getKey()))
     for (const node of extracted) {
       if ($isTextNode(node)) node.setFormat(0).setStyle('')
-      // The font may sit above a link or another wrapper; lift the wrapper as a whole.
+    }
+    // Unlink first: a partly selected link keeps unselected leaves, and only
+    // once its selected text stands on its own can the font lift move it.
+    editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)
+    for (const node of extracted) {
+      if (!node.isAttached()) continue
+      // The font may sit above another wrapper; lift the wrapper as a whole.
       let font = node.getParents().find((parent) => parent instanceof LegacyFontNode)
       while (font instanceof LegacyFontNode && $liftFromLegacyFont(font, cleared)) {
         font = node.getParents().find((parent) => parent instanceof LegacyFontNode)
       }
     }
-    editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)
   }
   selection.setFormat(0)
   selection.setStyle('')

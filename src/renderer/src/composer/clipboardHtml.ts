@@ -151,7 +151,9 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
   // markup alone would misrepresent; then the clipboard text is the honest paste.
   if (
     stylesheets.some((sheet) =>
-      /::?(?:before|after|marker)\b|(?:^|[^\w-])content\s*:/i.test(sheet.textContent ?? '')
+      /::?(?:before|after|marker)\b|(?:^|[^\w-])content\s*:/i.test(
+        (sheet.textContent ?? '').replace(/\/\*[\s\S]*?\*\//g, '')
+      )
     )
   ) {
     for (const sheet of stylesheets) sheet.remove()
