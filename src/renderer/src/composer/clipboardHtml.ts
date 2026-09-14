@@ -1,4 +1,4 @@
-import { cssDeclarations } from '../../../shared/css'
+import { cssDeclarations, resolveCssDeclarations } from '../../../shared/css'
 import { REPRESENTABLE_TAGS } from './preserve'
 import { COMPOSER_STYLE_PROPERTIES } from './sanitize'
 
@@ -38,9 +38,8 @@ const INERT_PROPERTIES = new Set([
 ])
 
 /**
- * Expand ordinary font shorthands using the browser's CSS parser. An inline
- * priority is dropped: an inline declaration already wins over any stylesheet
- * the paste keeps, and the CSS parser rejects the flag inside a value.
+ * Expand ordinary font shorthands using the browser's CSS parser. The parser
+ * rejects a priority flag inside a value; the caller carries it to the longhands.
  */
 function expandFont(document: Document, value: string): string[] | null {
   const probe = document.createElement('span')
@@ -134,6 +133,26 @@ function clipboardTextContent(document: Document): string {
     .replace(/^\n+|\n+$/g, '')
 }
 
+/** Whether a rule with a generating `content` declaration matches an element in the paste. */
+function generatesContent(document: Document, css: string): boolean {
+  const generating = (value: string): boolean => !/^(?:normal|none|inherit|initial|unset)\b/i.test(value)
+  for (const [, selectors, block] of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const declarations = resolveCssDeclarations(cssDeclarations(block))
+    if (!declarations.some(({ property, value }) => property === 'content' && generating(value))) continue
+    for (const selector of selectors.split(',')) {
+      const base = selector.replace(/::?(?:before|after|marker|first-letter|first-line)\b/gi, '').trim()
+      if (!base) return true
+      try {
+        if (document.querySelector(base)) return true
+      } catch {
+        // A selector this parser cannot read may still apply; keep the honest fallback.
+        return true
+      }
+    }
+  }
+  return false
+}
+
 function plainTextParagraph(document: Document, text: string): string {
   const paragraph = document.createElement('p')
   const lines = text.replace(/\r\n?/g, '\n').split('\n')
@@ -153,15 +172,7 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
   // Only Cocoa's bounded text stylesheet is converted. Other CSS is dropped and
   // the markup stays editable, unless the stylesheet generates content the
   // markup alone would misrepresent; then the clipboard text is the honest paste.
-  // Only a `content` declaration generates anything; a pseudo-element rule
-  // that sets color or spacing draws nothing without one.
-  if (
-    stylesheets.some((sheet) =>
-      /(?:^|[^\w-])content\s*:\s*(?!normal\b|none\b|inherit\b|initial\b|unset\b)/i.test(
-        (sheet.textContent ?? '').replace(/\/\*[\s\S]*?\*\//g, '')
-      )
-    )
-  ) {
+  if (stylesheets.some((sheet) => generatesContent(document, sheet.textContent ?? ''))) {
     for (const sheet of stylesheets) sheet.remove()
     return plainTextParagraph(document, plainText || clipboardTextContent(document))
   }
@@ -242,13 +253,17 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
         element.removeAttribute(attribute.name)
       }
     }
-    const declarations: string[] = []
+    const expanded: string[] = []
     for (const { property, value, raw } of cssDeclarations(element.getAttribute('style') ?? '')) {
       if (INERT_PROPERTIES.has(property)) continue
-      if (property === 'font') declarations.push(...(expandFont(document, value) ?? []))
-      else if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
-      else declarations.push(raw)
+      if (property === 'font') {
+        // The shorthand's priority carries to each longhand it expands into.
+        const priority = /!\s*important\s*$/i.test(value) ? ' !important' : ''
+        expanded.push(...(expandFont(document, value) ?? []).map((longhand) => `${longhand}${priority}`))
+      } else if (property === 'text-decoration-line') expanded.push(`text-decoration: ${value}`)
+      else expanded.push(raw)
     }
+    const declarations = resolveCssDeclarations(cssDeclarations(expanded.join('; '))).map(({ raw }) => raw)
     if (declarations.length) element.setAttribute('style', declarations.join('; '))
     else element.removeAttribute('style')
   }

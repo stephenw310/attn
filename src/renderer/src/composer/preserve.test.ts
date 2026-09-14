@@ -4,6 +4,12 @@ import { describe, expect, it } from 'vitest'
 import { draftHtmlFidelityIssues, prepareHtmlForEditor, restoreOpaqueHtml } from './preserve'
 import { sanitizeOutgoingHtml } from './sanitize'
 
+it('materializes the declaration the cascade picks, not the last one written', () => {
+  const prepared = prepareHtmlForEditor('<p style="color:red!important;color:blue">Sample</p>')
+  expect(prepared.html).toContain('color: red')
+  expect(prepared.html).not.toContain('blue')
+})
+
 describe('composer HTML fidelity', () => {
   it('recognizes Gmail rich content as editable', () => {
     const html =

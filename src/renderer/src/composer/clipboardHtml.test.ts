@@ -150,7 +150,8 @@ it('drops other stylesheets but keeps links, images, tables, and Docs list marku
     '.x{justify-content:center}',
     '/* content: legacy note */',
     '.x::before{color:red}',
-    'p::after{content:normal}'
+    'p::after{content:normal}',
+    '.unused::before{content:"X"}'
   ]) {
     expect(normalizeClipboardHtml(`<style>${css}</style><p><b>Bold</b></p>`)).toContain('<b>')
   }
@@ -161,6 +162,12 @@ it('derives fallback text from the markup without inflating blank lines', () => 
     '<style>p::before{content:"x"}</style><p class="p1">A</p>\n<p class="p1"><br></p>\n<p class="p1">B<br>\nC</p>'
   expect(normalizeClipboardHtml(html)).toBe('<p>A<br><br>B<br>C</p>')
   expect(normalizeClipboardHtml(html, '')).toBe('<p>A<br><br>B<br>C</p>')
+})
+
+it('falls back to plain text only when a generating rule matches pasted content', () => {
+  const rule = '<style>.note::before{content:"Note: "}</style>'
+  expect(normalizeClipboardHtml(`${rule}<p class="note"><b>Bold</b></p>`, 'Bold')).toBe('<p>Bold</p>')
+  expect(normalizeClipboardHtml(`${rule}<p class="other"><b>Bold</b></p>`)).toContain('<b>')
 })
 
 it('uses clipboard plain text for unsupported CSS without interpreting markup', () => {
@@ -181,9 +188,12 @@ it('expands inline font shorthand while respecting later longhands', () => {
   expect(result.html).toContain('font-style: italic')
   // An inline priority flag is dropped rather than losing the whole shorthand.
   const important = prepareHtmlForEditor(
-    normalizeClipboardHtml('<p><span style="font: italic 16px Arial !important">Sample</span></p>')
+    normalizeClipboardHtml(
+      '<p><span style="font: italic 16px Arial !important; font-size: 18px">Sample</span></p>'
+    )
   )
   expect(important.issues).toEqual([])
   expect(important.html).toContain('font-size: 16px')
+  expect(important.html).not.toContain('18px')
   expect(important.html).toContain('font-style: italic')
 })

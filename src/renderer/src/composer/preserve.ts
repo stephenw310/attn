@@ -1,5 +1,5 @@
 import { type DefaultTreeAdapterTypes, parseFragment } from 'parse5'
-import { cssDeclarations } from '../../../shared/css'
+import { cssDeclarations, resolveCssDeclarations } from '../../../shared/css'
 import {
   COMPOSER_STYLE_PROPERTIES,
   isGmailSignatureAttributes,
@@ -179,7 +179,9 @@ function materializeInheritedTextStyles(document: Document): void {
       if (['S', 'STRIKE'].includes(element.tagName)) own.add('line-through')
       for (const line of own) tagDecorations.add(line)
       let declared: string | null = null
-      for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
+      for (const { property, value } of resolveCssDeclarations(
+        cssDeclarations(element.getAttribute('style') ?? '')
+      )) {
         if (property === 'text-decoration') declared = value.trim()
         else if (
           INHERITED_TEXT_STYLES.has(property) ||
