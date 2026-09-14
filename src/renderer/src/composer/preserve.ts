@@ -189,16 +189,21 @@ function materializeInheritedTextStyles(document: Document): void {
       }
       if (declared !== null) {
         const lines = declared.toLowerCase().split(/\s+/)
-        if (lines.every((line) => ['none', 'underline', 'line-through'].includes(line))) {
-          own.clear()
-          for (const line of lines) if (line !== 'none') own.add(line)
-          exoticDecoration = null
-        } else exoticDecoration = declared
+        own.clear()
+        for (const line of lines) if (['underline', 'line-through'].includes(line)) own.add(line)
+        exoticDecoration = lines.every((line) => ['none', 'underline', 'line-through'].includes(line))
+          ? null
+          : declared
       }
       for (const line of own) decorations.add(line)
     }
-    if (exoticDecoration) inherited.set('text-decoration', exoticDecoration)
-    else if (decorations.size) inherited.set('text-decoration', [...decorations].join(' '))
+    // Lines from every ancestor render together, so an exotic declaration
+    // (an overline, a style, a color) keeps the propagated lines beside it.
+    const decorationTokens = exoticDecoration ? exoticDecoration.split(/\s+/) : []
+    for (const line of decorations) {
+      if (!decorationTokens.map((token) => token.toLowerCase()).includes(line)) decorationTokens.push(line)
+    }
+    if (decorationTokens.length) inherited.set('text-decoration', decorationTokens.join(' '))
     const resets: string[] = []
     if ([...tagDecorations].some((line) => !decorations.has(line))) resets.push('text-decoration')
     for (const [property, defaults] of Object.entries({

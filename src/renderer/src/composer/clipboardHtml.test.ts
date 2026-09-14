@@ -119,6 +119,14 @@ it('keeps Cocoa output with tabs, kerning, stroke, styled blank lines, and table
   expect(prepared.html).toContain('href="https://example.com"')
   expect(prepared.html).toContain('font-weight: bold')
   expect(prepared.html).toMatch(/<td[^>]*>[\s\S]*Cell/)
+  // Presentation the editor cannot reproduce keeps the preservation path.
+  const padded = prepareHtmlForEditor(
+    normalizeClipboardHtml(
+      '<table cellpadding="12" cellspacing="8"><tr><td valign="bottom">A</td></tr></table>'
+    )
+  )
+  expect(padded.issues).not.toEqual([])
+  expect(padded.html).toContain('data-attn-opaque')
 })
 
 it('drops other stylesheets but keeps links, images, tables, and Docs list markup editable', () => {

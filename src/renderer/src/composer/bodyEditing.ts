@@ -8,6 +8,7 @@ import {
   $createParagraphNode,
   $getRoot,
   $getSelection,
+  $isElementNode,
   $isRangeSelection,
   $isTextNode,
   FORMAT_TEXT_COMMAND,
@@ -22,13 +23,21 @@ import { createCommand, registerCommands } from '../commands'
 import { LegacyFontNode } from './nodes/LegacyFontNode'
 import { $authoredChildCount, $isProtectedComposerNode, $topLevelComposerNode } from './nodes/protected'
 
+/** A node the clear covered entirely: an extracted leaf, or a link or wrapper whose leaves all were. */
+function $isCleared(node: LexicalNode, cleared: Set<string>): boolean {
+  if (cleared.has(node.getKey())) return true
+  if (!$isElementNode(node)) return false
+  const children = node.getChildren()
+  return children.length > 0 && children.every((child) => $isCleared(child, cleared))
+}
+
 /** Move the cleared run out of its legacy font wrapper; untouched neighbours keep the font. */
-function $liftFromLegacyFont(font: LegacyFontNode, cleared: Set<string>): void {
+function $liftFromLegacyFont(font: LegacyFontNode, cleared: Set<string>): boolean {
   const children = font.getChildren()
-  const first = children.findIndex((child) => cleared.has(child.getKey()))
-  if (first < 0) return
+  const first = children.findIndex((child) => $isCleared(child, cleared))
+  if (first < 0) return false
   let last = first
-  while (last + 1 < children.length && cleared.has(children[last + 1].getKey())) last += 1
+  while (last + 1 < children.length && $isCleared(children[last + 1], cleared)) last += 1
   let anchor: LexicalNode = font
   for (const child of children.slice(first, last + 1)) {
     anchor.insertAfter(child)
@@ -42,6 +51,7 @@ function $liftFromLegacyFont(font: LegacyFontNode, cleared: Set<string>): void {
     rest.append(...tail)
   }
   if (font.getChildrenSize() === 0) font.remove()
+  return true
 }
 
 /**
@@ -58,8 +68,10 @@ export function $clearSelectionFormatting(editor: LexicalEditor): void {
     const cleared = new Set(extracted.map((node) => node.getKey()))
     for (const node of extracted) {
       if ($isTextNode(node)) node.setFormat(0).setStyle('')
-      for (let parent = node.getParent(); parent instanceof LegacyFontNode; parent = node.getParent()) {
-        $liftFromLegacyFont(parent, cleared)
+      // The font may sit above a link or another wrapper; lift the wrapper as a whole.
+      let font = node.getParents().find((parent) => parent instanceof LegacyFontNode)
+      while (font instanceof LegacyFontNode && $liftFromLegacyFont(font, cleared)) {
+        font = node.getParents().find((parent) => parent instanceof LegacyFontNode)
       }
     }
     editor.dispatchCommand(TOGGLE_LINK_COMMAND, null)

@@ -10,7 +10,7 @@ const CONVERTED_TAGS =
     ' '
   )
 const SUPPORTED_TAGS = new Set([...EDITABLE_TAGS, ...CONVERTED_TAGS])
-/** Editor metadata and table presentation the sanitizer keeps but the editor cannot represent. */
+/** Editor metadata the sanitizer keeps but the editor cannot represent. */
 const INERT_ATTRIBUTES = new Set([
   'id',
   'role',
@@ -20,11 +20,14 @@ const INERT_ATTRIBUTES = new Set([
   'data-placeholder',
   'contenteditable',
   'spellcheck',
-  'tabindex',
-  'valign',
-  'cellspacing',
-  'cellpadding'
+  'tabindex'
 ])
+/** Table presentation the editor's own cells already reproduce. Other values keep the preservation path. */
+const INERT_TABLE_ATTRIBUTES: Record<string, string[]> = {
+  valign: ['top'],
+  cellspacing: ['0'],
+  cellpadding: ['0']
+}
 const INERT_PROPERTIES = new Set([
   '-webkit-text-size-adjust',
   '-webkit-user-select',
@@ -223,7 +226,11 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
   for (const element of document.querySelectorAll<HTMLElement>('*')) {
     if (preserved.has(element) || !EDITABLE_TAGS.has(element.tagName)) continue
     for (const attribute of [...element.attributes]) {
-      if (INERT_ATTRIBUTES.has(attribute.name) || attribute.name.startsWith('aria-')) {
+      if (
+        INERT_ATTRIBUTES.has(attribute.name) ||
+        attribute.name.startsWith('aria-') ||
+        INERT_TABLE_ATTRIBUTES[attribute.name]?.includes(attribute.value.trim())
+      ) {
         element.removeAttribute(attribute.name)
       }
     }

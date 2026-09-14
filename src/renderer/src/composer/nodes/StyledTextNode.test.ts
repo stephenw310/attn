@@ -130,13 +130,16 @@ it('honors decoration overrides on the decorated element and unions nested block
   editor.update(
     () => {
       const html = prepareHtmlForEditor(
-        '<p><u style="text-decoration:none">Plain</u><s style="text-decoration:underline">Swapped</s></p><div style="text-decoration:underline"><p style="text-decoration:line-through">Both</p></div>'
+        '<p><u style="text-decoration:none">Plain</u><s style="text-decoration:underline">Swapped</s></p><div style="text-decoration:underline"><p style="text-decoration:line-through">Both</p><p><span style="text-decoration:overline">Mixed</span></p></div>'
       ).html
       $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
-      const [plain, swapped, both] = $getRoot().getAllTextNodes()
+      const [plain, swapped, both, mixed] = $getRoot().getAllTextNodes()
       expect([plain.hasFormat('underline'), plain.hasFormat('strikethrough')]).toEqual([false, false])
       expect([swapped.hasFormat('underline'), swapped.hasFormat('strikethrough')]).toEqual([true, false])
       expect([both.hasFormat('underline'), both.hasFormat('strikethrough')]).toEqual([true, true])
+      // An exotic declaration keeps the propagated line beside it.
+      expect(mixed.getStyle()).toContain('overline')
+      expect(mixed.getStyle()).toContain('underline')
     },
     { discrete: true }
   )

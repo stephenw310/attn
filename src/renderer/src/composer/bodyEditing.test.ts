@@ -33,3 +33,30 @@ it('clear formatting lifts the cleared text out of a legacy font wrapper', () =>
     { discrete: true }
   )
 })
+
+it('clear formatting lifts a linked run out of its legacy font wrapper', () => {
+  const editor = createHeadlessEditor({
+    nodes: editorConfig.nodes,
+    onError: (error) => {
+      throw error
+    }
+  })
+  editor.update(
+    () => {
+      const html = prepareHtmlForEditor(
+        '<p><font color="red">Before <a href="https://x.test">Linked</a> after</font></p>'
+      ).html
+      $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
+      const linked = $getRoot()
+        .getAllTextNodes()
+        .find((node) => node.getTextContent() === 'Linked')
+      if (!linked) throw new Error('Missing link text')
+      linked.select(0, 6)
+      $clearSelectionFormatting(editor)
+      const output = $generateHtmlFromNodes(editor)
+      expect(output).toMatch(/<\/font>(?:<a[^>]*>)?<span[^>]*>Linked<\/span>(?:<\/a>)?<font/)
+      expect($getRoot().getTextContent()).toBe('Before Linked after')
+    },
+    { discrete: true }
+  )
+})
