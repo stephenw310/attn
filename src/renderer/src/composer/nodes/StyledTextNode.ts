@@ -16,15 +16,18 @@ function styleConversion(element: HTMLElement): DOMConversionOutput {
   const formats: TextFormatType[] = []
   const resets: TextFormatType[] = []
   const represented = new Set<string>()
+  // The import pass marks a `normal` that cancels emphasis the exported HTML
+  // still carries (a bold-by-default table header); that CSS must stay.
+  const kept = new Set((element.getAttribute('data-attn-reset') ?? '').split(/\s+/))
   if (['normal', '400', 'bold', '700'].includes(style.fontWeight)) {
-    represented.add('font-weight')
     if (['bold', '700'].includes(style.fontWeight)) formats.push('bold')
     else resets.push('bold')
+    if (formats.includes('bold') || !kept.has('font-weight')) represented.add('font-weight')
   }
   if (['normal', 'italic'].includes(style.fontStyle)) {
-    represented.add('font-style')
     if (style.fontStyle === 'italic') formats.push('italic')
     else resets.push('italic')
+    if (formats.includes('italic') || !kept.has('font-style')) represented.add('font-style')
   }
   const decoration = style.textDecoration.trim().split(/\s+/)
   if (decoration.every((value) => ['none', 'underline', 'line-through'].includes(value))) {

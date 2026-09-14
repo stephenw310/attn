@@ -4,17 +4,21 @@ import {
   $getNodeByKey,
   $getSelection,
   $insertNodes,
+  $isDecoratorNode,
+  $isElementNode,
   $isRangeSelection,
+  $isTextNode,
   $setSelection,
   HISTORY_PUSH_TAG,
-  type RangeSelection
+  type LexicalNode
 } from 'lexical'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import type { Draft } from '../../../shared/drafts'
 import { createCommand, registerCommands } from '../commands'
 import { normalizeClipboardHtml } from './clipboardHtml'
 import { $insertPlainClipboardText } from './clipboardText'
 import { $createImageNode } from './nodes/ImageNode'
+import { $isProtectedComposerNode, $topLevelComposerNode } from './nodes/protected'
 import { prepareHtmlForEditor } from './preserve'
 import { preserveBlankLineBlocks } from './rootNodes'
 
@@ -45,25 +49,48 @@ export function PasteContentPlugin({
   onPreservedContent: () => void
 }): null {
   const [editor] = useLexicalComposerContext()
-  const selectionRef = useRef<RangeSelection | null>(null)
   useEffect(() => {
     let disposed = false
-    const unregisterSelection = editor.registerUpdateListener(({ editorState }) => {
-      editorState.read(() => {
-        const selection = $getSelection()
-        if ($isRangeSelection(selection)) selectionRef.current = selection.clone()
-      })
-    })
+    // The same boundary the formatting toolbar refuses to act across.
+    const isReadOnlyNode = (node: LexicalNode): boolean => {
+      if ($isDecoratorNode(node)) return true
+      const top = $topLevelComposerNode(node)
+      if (!$isProtectedComposerNode(top)) return false
+      return (
+        top.getType() !== 'gmail-signature' ||
+        editor.getElementByKey(top.getKey())?.getAttribute('contenteditable') !== null
+      )
+    }
     const unregisterCommand = registerCommands([
       createCommand('composer.pastePlainText', () => {
-        const selection = selectionRef.current?.clone()
+        // Lexical keeps the last range selection while the palette has focus.
+        const selection = editor.getEditorState().read(() => {
+          const current = $getSelection()
+          if (!$isRangeSelection(current) || current.getNodes().some(isReadOnlyNode)) return null
+          return current.clone()
+        })
+        if (!selection) return
         void navigator.clipboard
           .readText()
           .then((text) => {
-            if (disposed || !selection || !text) return
+            if (disposed || !text) return
             editor.update(
               () => {
-                if (!$getNodeByKey(selection.anchor.key) || !$getNodeByKey(selection.focus.key)) return
+                const anchor = $getNodeByKey(selection.anchor.key)
+                const focus = $getNodeByKey(selection.focus.key)
+                if (!anchor || !focus) return
+                // Text may have changed while the clipboard was read.
+                for (const [point, node] of [
+                  [selection.anchor, anchor],
+                  [selection.focus, focus]
+                ] as const) {
+                  const size = $isTextNode(node)
+                    ? node.getTextContentSize()
+                    : $isElementNode(node)
+                      ? node.getChildrenSize()
+                      : 0
+                  point.set(point.key, Math.min(point.offset, size), point.type)
+                }
                 $setSelection(selection)
                 $insertPlainClipboardText(selection, text)
               },
@@ -151,7 +178,6 @@ export function PasteContentPlugin({
     return () => {
       disposed = true
       unregisterRoot()
-      unregisterSelection()
       unregisterCommand()
     }
   }, [draftId, editor, onAttachment, onError, onPreservedContent])

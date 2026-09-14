@@ -4,6 +4,7 @@ import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html'
 import { $getRoot, TextNode } from 'lexical'
 import { expect, it } from 'vitest'
 import { normalizeClipboardHtml } from '../clipboardHtml'
+import { editorConfig } from '../editorConfig'
 import { prepareHtmlForEditor, restoreOpaqueHtml } from '../preserve'
 import { StyledTextNode } from './StyledTextNode'
 
@@ -119,13 +120,42 @@ it('applies inner normal resets while preserving semantic emphasis inside a norm
   )
 })
 
-it('preserves a shared box as one opaque region instead of duplicating it over text runs', () => {
-  for (const contents of ['<b>A</b><i>B</i>C', 'Highlight']) {
-    const source = `<span style="background-color:yellow; border:2px solid red; padding:4px">${contents}</span>`
-    const prepared = prepareHtmlForEditor(`<p>${source}</p>`)
-    expect(prepared.issues).toHaveLength(1)
-    expect(restoreOpaqueHtml(prepared.html)).toBe(`<p>${source}</p>`)
+it('preserves a box shared by several text runs as one opaque region', () => {
+  const box = 'background-color:yellow; border:2px solid red; padding:4px'
+  const shared = `<p><span style="${box}"><b>A</b><i>B</i>C</span></p>`
+  const prepared = prepareHtmlForEditor(shared)
+  expect(prepared.issues).toHaveLength(1)
+  expect(restoreOpaqueHtml(prepared.html)).toBe(shared)
+  // A single run keeps its box editable: stored drafts and Gmail's own
+  // signature separator (`margin-left: 2px`) rely on it.
+  for (const style of [box, 'white-space: nowrap; margin-left: 2px']) {
+    const single = prepareHtmlForEditor(`<p><span style="${style}">Highlight</span></p>`)
+    expect(single.issues).toEqual([])
+    expect(single.html).not.toContain('data-attn-opaque')
   }
+})
+
+it('keeps a normal weight that cancels emphasis the exported HTML still carries', () => {
+  const editor = createHeadlessEditor({
+    nodes: editorConfig.nodes,
+    onError: (error) => {
+      throw error
+    }
+  })
+  editor.update(
+    () => {
+      const html = prepareHtmlForEditor(
+        '<table><tr><th><span style="font-weight:normal">Header</span></th></tr></table><p><span style="font-size:14px"><b><span style="font-weight:normal">Nested</span></b></span></p><p><span style="font-weight:normal">Plain</span></p>'
+      ).html
+      $getRoot().append(...$generateNodesFromDOM(editor, new DOMParser().parseFromString(html, 'text/html')))
+      const output = $generateHtmlFromNodes(editor)
+      expect(output).toMatch(/font-weight: normal[^>]*>Header/)
+      expect(output).toMatch(/font-weight: normal[^>]*>Nested/)
+      // A default weight with nothing to cancel stays out of the way of the toolbar.
+      expect(output).toMatch(/<span style="white-space: pre-wrap;">Plain/)
+    },
+    { discrete: true }
+  )
 })
 
 it('keeps code typography on every preformatted line and tab', () => {

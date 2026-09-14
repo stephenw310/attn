@@ -8,7 +8,7 @@ import {
   sanitizeDraftHtmlForImport
 } from './sanitize'
 
-const REPRESENTABLE_TAGS = new Set([
+export const REPRESENTABLE_TAGS = new Set([
   'p',
   'div',
   'br',
@@ -157,10 +157,18 @@ function materializeInheritedTextStyles(document: Document): void {
     }
     const inherited = new Map<string, string>()
     const decorations = new Set<string>()
+    // Emphasis an element establishes (table headers included) survives the
+    // style stripping below, so only there must a later `normal` stay in the
+    // text style to cancel it. Elsewhere it is a default the toolbar may change.
+    const emphasis = new Set<string>()
     for (const element of ancestors) {
       // Semantic emphasis participates in the cascade before the element's CSS.
       if (['B', 'STRONG'].includes(element.tagName)) inherited.set('font-weight', 'bold')
-      if (['I', 'EM'].includes(element.tagName)) inherited.set('font-style', 'italic')
+      if (['B', 'STRONG', 'TH'].includes(element.tagName)) emphasis.add('font-weight')
+      if (['I', 'EM'].includes(element.tagName)) {
+        inherited.set('font-style', 'italic')
+        emphasis.add('font-style')
+      }
       if (element.tagName === 'U') decorations.add('underline')
       if (['S', 'STRIKE'].includes(element.tagName)) decorations.add('line-through')
       for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
@@ -178,8 +186,18 @@ function materializeInheritedTextStyles(document: Document): void {
       /^(?:none|underline|line-through|\s)*$/.test(inherited.get('text-decoration') ?? '')
     )
       inherited.set('text-decoration', [...decorations].join(' '))
+    const resets: string[] = []
+    for (const [property, defaults] of Object.entries({
+      'font-weight': ['normal', '400'],
+      'font-style': ['normal']
+    })) {
+      if (!defaults.includes(inherited.get(property)?.trim().toLowerCase() ?? '')) continue
+      if (emphasis.has(property)) resets.push(property)
+      else inherited.delete(property)
+    }
     if (inherited.size === 0) continue
     const span = document.createElement('span')
+    if (resets.length) span.setAttribute('data-attn-reset', resets.join(' '))
     span.setAttribute('style', [...inherited].map(([property, value]) => `${property}: ${value}`).join('; '))
     if (['pre', 'pre-wrap', 'break-spaces'].includes(inherited.get('white-space') ?? '')) {
       const fragment = document.createDocumentFragment()
@@ -223,24 +241,50 @@ function materializeInheritedTextStyles(document: Document): void {
 interface ElementShape {
   tag: string
   attributes: { name: string; value: string }[]
+  /** Non-blank text nodes below the element. A box shared by several runs cannot be edited per run. */
+  textRuns: number
+}
+
+function domTextRuns(element: Element): number {
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  let runs = 0
+  while (walker.nextNode()) if ((walker.currentNode as Text).data.trim()) runs += 1
+  return runs
+}
+
+function sourceTextRuns(node: DefaultTreeAdapterTypes.ParentNode): number {
+  let runs = 0
+  for (const child of node.childNodes) {
+    if ('value' in child) {
+      if (child.value.trim()) runs += 1
+    } else if ('childNodes' in child) runs += sourceTextRuns(child)
+  }
+  return runs
 }
 
 function domElementShape(element: Element): ElementShape {
   return {
     tag: element.tagName.toLowerCase(),
-    attributes: element.getAttributeNames().map((name) => ({ name, value: element.getAttribute(name) ?? '' }))
+    attributes: element
+      .getAttributeNames()
+      .map((name) => ({ name, value: element.getAttribute(name) ?? '' })),
+    textRuns: domTextRuns(element)
   }
 }
 
 function sourceElementShape(element: DefaultTreeAdapterTypes.Element): ElementShape {
   return {
     tag: element.tagName.toLowerCase(),
-    attributes: element.attrs.map(({ name, value }) => ({ name, value }))
+    attributes: element.attrs.map(({ name, value }) => ({ name, value })),
+    textRuns: sourceTextRuns(element)
   }
 }
 
 /** Why the editor cannot represent this element losslessly, or null. */
-function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boolean): string | null {
+function unsupportedReason(
+  { tag, attributes, textRuns }: ElementShape,
+  hasStylesheet: boolean
+): string | null {
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
   const values = new Map(attributes.map(({ name, value }) => [name, value]))
   const gmailSignature =
@@ -262,8 +306,11 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
   }
   for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
+    // One run keeps its box editable; a box around several runs would be
+    // duplicated onto each of them, so it is preserved as a unit instead.
     if (
       tag === 'span' &&
+      textRuns > 1 &&
       /^(border|padding|margin|width$|height$)/.test(property) &&
       !/^(none|0(?:px)?|auto)$/.test(value)
     )

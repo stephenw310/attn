@@ -50,7 +50,7 @@ describe('Cocoa clipboard text', () => {
   it('still sanitizes untrusted content and preserves unsupported tables', () => {
     const html = cocoa(
       'p.p1 {background: url(https://example.com/image)}',
-      '<p class="p1" onclick="alert(1)">Text<script>alert(1)</script></p><table cellpadding="8"><tr><td>Cell</td></tr></table>'
+      '<p class="p1" onclick="alert(1)">Text<script>alert(1)</script></p><table><tr><td><aside>Cell</aside></td></tr></table>'
     )
     const prepared = prepareHtmlForEditor(normalizeClipboardHtml(html))
     expect(prepared.html).not.toContain('onclick')
@@ -99,12 +99,50 @@ it('imports Cocoa list and table class names and sanitizes converted embed URLs'
   expect(unsafe.html).not.toContain('<iframe')
 })
 
-it('falls back to editable text for unsupported Cocoa list styles', () => {
+it('keeps list structure for every Cocoa list marker, including nested lists', () => {
   for (const marker of ['circle', 'square', 'decimal']) {
     const html = cocoa(`ul.ul1 {list-style-type:${marker}}`, '<ul class="ul1"><li>Item</li></ul>')
-    expect(normalizeClipboardHtml(html)).toContain('Item')
-    expect(prepareHtmlForEditor(normalizeClipboardHtml(html)).issues).toEqual([])
+    const prepared = prepareHtmlForEditor(normalizeClipboardHtml(html))
+    expect(prepared.issues).toEqual([])
+    expect(prepared.html).toMatch(/<ul[^>]*><li[^>]*>Item<\/li><\/ul>/)
   }
+})
+
+it('keeps Cocoa output with tabs, kerning, stroke, styled blank lines, and table cells editable', () => {
+  const html = cocoa(
+    'p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 13.0px Helvetica; -webkit-text-stroke: #000000} p.p2 {font: 13.0px Helvetica; min-height: 16.0px} span.s1 {font-kerning: none} span.Apple-tab-span {white-space:pre} table.t1 {border-collapse: collapse} td.td1 {width: 100px; padding: 1px 5px}',
+    '<p class="p1"><span class="s1">Hello<span class="Apple-tab-span">\t</span><b>bold</b> <a href="https://example.com">link</a></span></p><p class="p2"><b></b><br></p><table cellspacing="0" cellpadding="0" class="t1"><tbody><tr><td valign="top" class="td1"><p class="p1">Cell</p></td></tr></tbody></table>'
+  )
+  const prepared = prepareHtmlForEditor(normalizeClipboardHtml(html, 'Hello\tbold link\n\nCell'))
+  expect(prepared.issues).toEqual([])
+  expect(prepared.html).not.toContain('data-attn-opaque')
+  expect(prepared.html).toContain('href="https://example.com"')
+  expect(prepared.html).toContain('font-weight: bold')
+  expect(prepared.html).toMatch(/<td[^>]*>[\s\S]*Cell/)
+})
+
+it('drops other stylesheets but keeps links, images, tables, and Docs list markup editable', () => {
+  const word =
+    '<style>p.MsoNormal{margin:0}</style><p class="MsoNormal"><b>Bold</b> <a href="https://x.test/doc">link</a> <img src="https://x.test/a.png"></p><table><colgroup><col width="312"></colgroup><tbody><tr><td>A</td></tr></tbody></table>'
+  const prepared = prepareHtmlForEditor(normalizeClipboardHtml(word, 'Bold link \nA'))
+  expect(prepared.issues).toEqual([])
+  expect(prepared.html).toContain('href="https://x.test/doc"')
+  expect(prepared.html).toContain('<img')
+  expect(prepared.html).toContain('<td>A</td>')
+  expect(prepared.html).not.toContain('colgroup')
+  const docs =
+    '<b id="docs-internal-guid-abc" style="font-weight:normal"><ul><li dir="ltr" style="list-style-type:disc" aria-level="1"><p dir="ltr" role="presentation"><span>Item</span></p></li></ul></b>'
+  const list = prepareHtmlForEditor(normalizeClipboardHtml(docs))
+  expect(list.issues).toEqual([])
+  expect(list.html).toContain('<li')
+  expect(list.html).not.toContain('aria-level')
+})
+
+it('derives fallback text from the markup without inflating blank lines', () => {
+  const html =
+    '<style>p::before{content:"x"}</style><p class="p1">A</p>\n<p class="p1"><br></p>\n<p class="p1">B<br>\nC</p>'
+  expect(normalizeClipboardHtml(html)).toBe('<p>A<br><br>B<br>C</p>')
+  expect(normalizeClipboardHtml(html, '')).toBe('<p>A<br><br>B<br>C</p>')
 })
 
 it('uses clipboard plain text for unsupported CSS without interpreting markup', () => {

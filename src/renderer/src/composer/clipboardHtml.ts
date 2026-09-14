@@ -1,5 +1,38 @@
 import { cssDeclarations } from '../../../shared/css'
+import { REPRESENTABLE_TAGS } from './preserve'
 import { COMPOSER_STYLE_PROPERTIES } from './sanitize'
+
+/** Tags the editor edits in place, in the DOM's uppercase spelling. */
+const EDITABLE_TAGS = new Set([...REPRESENTABLE_TAGS].map((tag) => tag.toUpperCase()))
+/** Tags this pass rewrites into editable ones. Everything else stays on the preservation path. */
+const CONVERTED_TAGS =
+  'H1 H2 H3 H4 H5 H6 MARK CODE PRE DETAILS SUMMARY FIGURE FIGCAPTION INPUT HR IFRAME VIDEO AUDIO COLGROUP COL'.split(
+    ' '
+  )
+const SUPPORTED_TAGS = new Set([...EDITABLE_TAGS, ...CONVERTED_TAGS])
+/** Editor metadata and table presentation the sanitizer keeps but the editor cannot represent. */
+const INERT_ATTRIBUTES = new Set([
+  'id',
+  'role',
+  'data-block-id',
+  'data-content-editable-leaf',
+  'data-is-empty',
+  'data-placeholder',
+  'contenteditable',
+  'spellcheck',
+  'tabindex',
+  'valign',
+  'cellspacing',
+  'cellpadding'
+])
+const INERT_PROPERTIES = new Set([
+  '-webkit-text-size-adjust',
+  '-webkit-user-select',
+  'user-select',
+  'caret-color',
+  'overflow-wrap',
+  'word-wrap'
+])
 
 /** Expand ordinary font shorthands using the browser's CSS parser. */
 function expandFont(document: Document, value: string): string[] | null {
@@ -25,7 +58,7 @@ function expandCocoaStyles(html: string): string {
     let remaining = stylesheet.textContent?.trim() ?? ''
     while (remaining) {
       // Decline selectors, at-rules, and syntax outside Cocoa's simple text export.
-      const match = /^((?:p|span|li|ul|ol|table|tr|td|th)\.[a-z]+\d+)\s*\{([^{}]*)\}\s*/.exec(remaining)
+      const match = /^((?:p|span|li|ul|ol|table|tr|td|th)\.[A-Za-z][\w-]*)\s*\{([^{}]*)\}\s*/.exec(remaining)
       if (!match) return html
       const declarations: string[] = []
       let blankHeight = false
@@ -35,17 +68,13 @@ function expandCocoaStyles(html: string): string {
           const expanded = expandFont(document, value)
           if (!expanded) return html
           declarations.push(...expanded)
-        } else if (
-          property === 'list-style-type' &&
-          ((match[1].startsWith('ul.') && value === 'disc') ||
-            (match[1].startsWith('ol.') && value === 'decimal'))
-        ) {
-          // UL/OL carry the list structure into the editor.
         } else if (property === 'min-height' && /^\d+(?:\.\d+)?px$/.test(value)) {
           blankHeight = true
         } else if (COMPOSER_STYLE_PROPERTIES.has(property)) {
           declarations.push(raw)
-        } else return html
+        }
+        // List markers, kerning, and stroke are dropped: the editor draws its
+        // own markers and cannot represent the rest, but the text stays editable.
       }
       rules.push({ selector: match[1], style: declarations.join('; '), blankHeight })
       remaining = remaining.slice(match[0].length)
@@ -59,8 +88,7 @@ function expandCocoaStyles(html: string): string {
         rule.blankHeight &&
         (element.tagName !== 'P' ||
           element.textContent?.trim() ||
-          element.children.length === 0 ||
-          [...element.children].some((child) => child.tagName !== 'BR'))
+          [...element.children].some((child) => child.tagName !== 'BR' && child.textContent))
       ) {
         return html
       }
@@ -80,36 +108,56 @@ function expandCocoaStyles(html: string): string {
   return document.body.innerHTML
 }
 
+/** The text a browser derives from the markup: one line per block, without source indentation. */
+function clipboardTextContent(document: Document): string {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  const texts: Text[] = []
+  while (walker.nextNode()) texts.push(walker.currentNode as Text)
+  for (const text of texts) {
+    if (!text.parentElement?.closest('pre')) text.data = text.data.replace(/\s+/g, ' ')
+  }
+  for (const node of document.querySelectorAll('br')) node.replaceWith(document.createTextNode('\n'))
+  for (const node of document.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,tr,blockquote,pre')) {
+    if (!node.textContent?.endsWith('\n')) node.append(document.createTextNode('\n'))
+  }
+  return (document.body.textContent ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .replace(/^\n+|\n+$/g, '')
+}
+
+function plainTextParagraph(document: Document, text: string): string {
+  const paragraph = document.createElement('p')
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  for (const [index, line] of lines.entries()) {
+    if (index) paragraph.append(document.createElement('br'))
+    paragraph.append(document.createTextNode(line))
+  }
+  return paragraph.outerHTML
+}
+
 /** Normalize new clipboard content into the editor's email-friendly vocabulary. */
 export function normalizeClipboardHtml(html: string, plainText?: string): string {
   const expanded = expandCocoaStyles(html)
   const document = new DOMParser().parseFromString(expanded, 'text/html')
-  // Only Cocoa's bounded text stylesheet is converted. Arbitrary CSS is not
-  // portable email formatting; retain editable text instead of emulating layout.
-  if (document.querySelector('style')) {
-    for (const node of document.querySelectorAll('style,script,template,noscript')) node.remove()
-    for (const node of document.querySelectorAll('br')) node.replaceWith(document.createTextNode('\n'))
-    for (const node of document.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,tr,blockquote'))
-      node.append(document.createTextNode('\n'))
-    const text = plainText ?? document.body.textContent ?? ''
-    const paragraph = document.createElement('p')
-    const lines = text.replace(/\r\n?/g, '\n').split('\n')
-    for (const [index, line] of lines.entries()) {
-      if (index) paragraph.append(document.createElement('br'))
-      paragraph.append(document.createTextNode(line))
-    }
-    return paragraph.outerHTML
+  for (const node of document.querySelectorAll('script,template,noscript')) node.remove()
+  const stylesheets = [...document.querySelectorAll('style')]
+  // Only Cocoa's bounded text stylesheet is converted. Other CSS is dropped and
+  // the markup stays editable, unless the stylesheet generates content the
+  // markup alone would misrepresent; then the clipboard text is the honest paste.
+  if (
+    stylesheets.some((sheet) => /::?(?:before|after|marker)\b|\bcontent\s*:/i.test(sheet.textContent ?? ''))
+  ) {
+    for (const sheet of stylesheets) sheet.remove()
+    return plainTextParagraph(document, plainText || clipboardTextContent(document))
   }
-  const supportedTags = new Set(
-    'P DIV SPAN B STRONG I EM U S STRIKE A UL OL LI BLOCKQUOTE TABLE THEAD TBODY TFOOT TR TD TH IMG BR FONT H1 H2 H3 H4 H5 H6 MARK CODE PRE DETAILS SUMMARY FIGURE FIGCAPTION INPUT HR IFRAME VIDEO AUDIO'.split(
-      ' '
-    )
-  )
+  for (const sheet of stylesheets) sheet.remove()
   const preserved = new WeakSet<Element>()
   for (const element of document.body.querySelectorAll('*')) {
     if (
       (element.parentElement && preserved.has(element.parentElement)) ||
-      (!supportedTags.has(element.tagName) && !element.matches('aside[data-block-id],aside.notion-callout'))
+      (!SUPPORTED_TAGS.has(element.tagName) && !element.matches('aside[data-block-id],aside.notion-callout'))
     )
       preserved.add(element)
   }
@@ -120,6 +168,9 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
     element.replaceWith(replacement)
     return replacement
   }
+  // Column widths are not representable; the cells carry the table.
+  for (const element of document.querySelectorAll('colgroup,col'))
+    if (!preserved.has(element)) element.remove()
   for (const element of document.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
     if (preserved.has(element)) continue
     const level = Number(element.tagName.slice(1))
@@ -163,67 +214,20 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
     link.textContent = element.getAttribute('title') || 'Embedded content'
     element.replaceWith(link)
   }
-  for (const element of document.querySelectorAll<HTMLElement>('*')) {
-    if (preserved.has(element)) continue
-    // Docs wraps the entire fragment in a normal-weight B element.
-    if (element.tagName === 'B' && element.id.startsWith('docs-internal-guid-')) replace(element, 'span')
+  // Docs wraps the entire fragment in a normal-weight B element.
+  for (const element of document.querySelectorAll('b[id^="docs-internal-guid-"]')) {
+    if (!preserved.has(element)) replace(element, 'span')
   }
-  const editableTags = new Set([
-    'P',
-    'DIV',
-    'SPAN',
-    'B',
-    'STRONG',
-    'I',
-    'EM',
-    'U',
-    'S',
-    'STRIKE',
-    'A',
-    'UL',
-    'OL',
-    'LI',
-    'BLOCKQUOTE',
-    'TABLE',
-    'THEAD',
-    'TBODY',
-    'TFOOT',
-    'TR',
-    'TD',
-    'TH',
-    'IMG',
-    'BR'
-  ])
   for (const element of document.querySelectorAll<HTMLElement>('*')) {
-    if (preserved.has(element) || !editableTags.has(element.tagName)) continue
+    if (preserved.has(element) || !EDITABLE_TAGS.has(element.tagName)) continue
     for (const attribute of [...element.attributes]) {
-      if (
-        [
-          'id',
-          'data-block-id',
-          'data-content-editable-leaf',
-          'data-is-empty',
-          'data-placeholder',
-          'contenteditable',
-          'spellcheck',
-          'tabindex'
-        ].includes(attribute.name)
-      )
+      if (INERT_ATTRIBUTES.has(attribute.name) || attribute.name.startsWith('aria-')) {
         element.removeAttribute(attribute.name)
+      }
     }
     const declarations: string[] = []
     for (const { property, value, raw } of cssDeclarations(element.getAttribute('style') ?? '')) {
-      if (
-        [
-          '-webkit-text-size-adjust',
-          '-webkit-user-select',
-          'user-select',
-          'caret-color',
-          'overflow-wrap',
-          'word-wrap'
-        ].includes(property)
-      )
-        continue
+      if (INERT_PROPERTIES.has(property)) continue
       if (property === 'font') declarations.push(...(expandFont(document, value) ?? []))
       else if (property === 'text-decoration-line') declarations.push(`text-decoration: ${value}`)
       else declarations.push(raw)
