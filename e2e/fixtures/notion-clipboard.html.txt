@@ -2,6 +2,8 @@
 <h1>Meeting notes</h1>
 <p><mark>Highlight</mark> <s>Old plan</s> <code>npm run dev</code></p>
 <ul><li><input type="checkbox" checked>Done</li><li><input type="checkbox">Next task</li></ul>
+<ul><li>[ ]  <strong>Weekly digest:</strong> summary of the week</li></ul>
+<p><img src="attachment:9fb172c5-5880-4192-8f1f-9ba1e7767f27:Screenshot_2026-07-14.png" alt="Screenshot 2026-07-14.png"></p>
 <blockquote>Customer feedback</blockquote>
 <details><summary>More details</summary><p>Expanded text</p></details>
 <pre>first line
