@@ -226,6 +226,16 @@ export function normalizeClipboardHtml(html: string, plainText?: string): string
     element.removeAttribute('role')
     element.removeAttribute('aria-checked')
   }
+  // Notion's desktop app writes checklist state as literal brackets at the
+  // start of the item text; give it the same symbols as a real checkbox.
+  for (const item of document.querySelectorAll('li')) {
+    if (preserved.has(item)) continue
+    const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT)
+    let text = walker.nextNode() as Text | null
+    while (text && !text.data.trim()) text = walker.nextNode() as Text | null
+    const match = text && /^\s*\[( |x|X)\]\s+/.exec(text.data)
+    if (text && match) text.data = `${match[1] === ' ' ? '☐' : '☑'} ${text.data.slice(match[0].length)}`
+  }
   for (const element of document.querySelectorAll('hr')) {
     if (preserved.has(element)) continue
     const paragraph = replace(element, 'p')

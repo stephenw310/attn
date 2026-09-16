@@ -197,3 +197,15 @@ it('expands inline font shorthand while respecting later longhands', () => {
   expect(important.html).not.toContain('18px')
   expect(important.html).toContain('font-style: italic')
 })
+
+describe('literal checklist prefixes', () => {
+  it('converts bracket prefixes at the start of a list item to checkbox symbols', () => {
+    const html = normalizeClipboardHtml(
+      '<ul><li>[ ]  <strong>Meal planning:</strong> introduce it</li><li>[x] Shipped</li><li>[X]  Also shipped</li><li>Note [ ] inside</li></ul>'
+    )
+    expect(html).toContain('<li>☐ <strong>Meal planning:</strong> introduce it</li>')
+    expect(html).toContain('<li>☑ Shipped</li>')
+    expect(html).toContain('<li>☑ Also shipped</li>')
+    expect(html).toContain('<li>Note [ ] inside</li>')
+  })
+})

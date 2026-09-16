@@ -5,6 +5,8 @@ import { QuoteNode } from '@lexical/rich-text'
 import { TableCellNode, TableNode, TableRowNode } from '@lexical/table'
 import { TextNode } from 'lexical'
 import { AttnFooterNode } from './nodes/AttnFooterNode'
+import { ComposerTableCellNode } from './nodes/ComposerTableCellNode'
+import { ComposerTableNode } from './nodes/ComposerTableNode'
 import { GmailSignatureNode } from './nodes/GmailSignatureNode'
 import { GmailSignaturePrefixNode } from './nodes/GmailSignaturePrefixNode'
 import { ImageNode } from './nodes/ImageNode'
@@ -29,10 +31,23 @@ export const editorConfig: InitialConfigType = {
     LegacyFontNode,
     OpaqueHtmlNode,
     StyledTextNode,
+    ComposerTableNode,
+    ComposerTableCellNode,
     {
       replace: TextNode,
       with: (node: TextNode) => new StyledTextNode(node.getTextContent()),
       withKlass: StyledTextNode
+    },
+    {
+      replace: TableNode,
+      with: () => new ComposerTableNode(),
+      withKlass: ComposerTableNode
+    },
+    {
+      replace: TableCellNode,
+      with: (node: TableCellNode) =>
+        new ComposerTableCellNode(node.__headerState, node.__colSpan, node.__width),
+      withKlass: ComposerTableCellNode
     }
   ],
   theme: {

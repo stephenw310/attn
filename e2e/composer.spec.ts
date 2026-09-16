@@ -1769,7 +1769,8 @@ test('preserves rich and opaque draft regions while editing elsewhere', async ({
     const draft = (await window.attn.draft.list()).find((candidate) => candidate.subject === 'Rich draft')
     return draft?.bodyHtml ?? ''
   })
-  expect(savedHtml).toContain('<table>')
+  expect(savedHtml).toContain('<table style="border-collapse: collapse">')
+  expect(savedHtml).toContain('Keep cell')
   expect(savedHtml).toMatch(/color: (?:#c00|rgb\(204, 0, 0\))/)
   expect(savedHtml).toContain('<section data-layout="card"><mark>Opaque exact region</mark></section>')
 })
@@ -1873,6 +1874,13 @@ for (const source of ['docs', 'notion'] as const) {
     } else {
       await expect(composer.editor).toContainText('☑ Done')
       await expect(composer.editor).toContainText('☐ Next task')
+      await expect(composer.editor).toContainText('☐ Weekly digest: summary of the week')
+      // Notion names images the clipboard does not carry; they leave with a notice, not a broken icon.
+      await expect(page.getByTestId('toast')).toHaveText(
+        'One image was not on the clipboard. Drag the image file into the message.'
+      )
+      await expect(composer.editor.locator('img')).toHaveCount(0)
+      await expect(composer.editor).not.toContainText('Screenshot 2026-07-14.png')
       await expect(composer.editor).toContainText('Expanded text')
       await expect(composer.editor.getByText('first line', { exact: true })).toHaveCSS(
         'font-family',
@@ -1888,6 +1896,21 @@ for (const source of ['docs', 'notion'] as const) {
       )
     }
     await composer.expectSaved()
+    if (source === 'docs') {
+      // Lexical's own export stamped a 75px width and a black border on every
+      // cell; the saved draft and the sent mail carry the composer's cells instead.
+      const saved = await page.evaluate(async () => {
+        const draft = (await window.attn.draft.list()).find(
+          (candidate) => candidate.subject === 'docs rich paste'
+        )
+        return draft?.bodyHtml ?? ''
+      })
+      expect(saved).toContain('<table style="border-collapse: collapse">')
+      expect(saved).not.toContain('width')
+      expect(saved).not.toContain('solid black')
+      expect(saved.split('border: 1px solid rgb(201, 208, 214)')).toHaveLength(5)
+      expect(saved.match(/padding: 6px 8px/g)).toHaveLength(4)
+    }
     for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme })
       await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
@@ -1901,6 +1924,12 @@ for (const source of ['docs', 'notion'] as const) {
       .click()
     await expect(composer.editor.locator('iframe')).toHaveCount(0)
     await expect(composer.editor).toContainText(source === 'docs' ? 'Fourth item' : 'Expanded text')
+    if (source === 'docs') {
+      await expect(composer.editor.locator('td')).toHaveCount(4)
+      for (const cell of await composer.editor.locator('td').all()) {
+        await expect(cell).not.toHaveAttribute('style', /width/)
+      }
+    }
   })
 }
 

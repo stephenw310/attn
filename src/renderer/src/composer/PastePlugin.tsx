@@ -21,6 +21,7 @@ import { $createImageNode } from './nodes/ImageNode'
 import { $isProtectedComposerNode, $topLevelComposerNode } from './nodes/protected'
 import { prepareHtmlForEditor } from './preserve'
 import { preserveBlankLineBlocks } from './rootNodes'
+import { sanitizeComposerImageSource } from './sanitize'
 
 function imageAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -146,9 +147,21 @@ export function PasteContentPlugin({
         if (prepared.issues.length > 0) onPreservedContent()
         const document = new DOMParser().parseFromString(prepared.html, 'text/html')
         preserveBlankLineBlocks(document)
-        for (const image of document.querySelectorAll<HTMLImageElement>('img[src]')) {
+        let missing = 0
+        for (const image of document.querySelectorAll<HTMLImageElement>('img')) {
           const source = image.getAttribute('src') ?? ''
-          if (!source.toLowerCase().startsWith('data:')) continue
+          if (!source.toLowerCase().startsWith('data:')) {
+            if (sanitizeComposerImageSource(source)) continue
+            // The clipboard named an image it does not carry. Notion writes
+            // `attachment:` references only its own paste handler resolves;
+            // the import sanitizer has already dropped that source, and a
+            // bare <img> renders as a broken icon in the draft and the mail.
+            const paragraph = image.parentElement
+            image.remove()
+            if (paragraph?.tagName === 'P' && !paragraph.childNodes.length) paragraph.remove()
+            missing += 1
+            continue
+          }
           const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,([a-z0-9+/=\s]+)$/i.exec(source)
           if (!match || !window.attn) {
             image.remove()
@@ -167,6 +180,13 @@ export function PasteContentPlugin({
             image.remove()
             onError(error instanceof Error ? error.message : 'Could not paste image')
           }
+        }
+        if (missing > 0) {
+          onError(
+            missing === 1
+              ? 'One image was not on the clipboard. Drag the image file into the message.'
+              : `${missing} images were not on the clipboard. Drag the image files into the message.`
+          )
         }
         editor.update(() => $insertNodes($generateNodesFromDOM(editor, document)))
       })()
