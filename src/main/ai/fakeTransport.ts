@@ -24,6 +24,8 @@ export interface FakeAiScript {
   chunkIntervalMs?: number
   error?: string
   hang?: boolean
+  /** Close the stream with this Anthropic stop reason after the chunks (`max_tokens` = truncated). */
+  stopReason?: string
 }
 
 /** What the fake records per request — the proof payloads used in tests. */
@@ -72,6 +74,14 @@ function sseFrame(text: string): string {
   })}\n`
 }
 
+function stopFrame(stopReason: string): string {
+  return `data: ${JSON.stringify({
+    type: 'message_delta',
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: 0 }
+  })}\n`
+}
+
 export class FakeAiTransport {
   private script: FakeAiScript = {}
   private readonly requests: RecordedAiRequest[] = []
@@ -111,14 +121,22 @@ export class FakeAiTransport {
           return
         }
         const encoder = new TextEncoder()
-        const frames = (script.chunks ?? []).map((text) => encoder.encode(sseFrame(text)))
+        const frames = [
+          ...(script.chunks ?? []).map((text) => sseFrame(text)),
+          ...(script.stopReason !== undefined ? [stopFrame(script.stopReason)] : [])
+        ].map((frame) => encoder.encode(frame))
         const interval = script.chunkIntervalMs ?? 0
         let next = 0
         const read = (): Promise<{ done: boolean; value?: Uint8Array }> => {
           const frame = frames[next]
           next++
           const deliver = (): { done: boolean; value?: Uint8Array } => {
-            if (frame !== undefined) return { done: false, value: frame }
+            if (frame !== undefined) {
+              // A stop frame is the provider's own end of stream: if the parser
+              // rejects it, the manager's abort is not a cancellation.
+              if (script.stopReason !== undefined && next === frames.length) finished = true
+              return { done: false, value: frame }
+            }
             finished = true
             return { done: true, value: undefined }
           }
