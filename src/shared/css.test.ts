@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { cssDeclarations, isRgbColor, parsedRgbColor, splitCssDeclarations } from './css'
+import {
+  cssDeclarations,
+  isRgbColor,
+  parsedRgbColor,
+  resolveCssDeclarations,
+  splitCssDeclarations
+} from './css'
+
+describe('resolveCssDeclarations', () => {
+  it('lets an important declaration outrank a later plain one and strips the flag', () => {
+    const resolved = resolveCssDeclarations(
+      cssDeclarations('color: red !important; color: blue; font-size: 12px; font-size: 14px')
+    )
+    expect(resolved.map(({ raw }) => raw)).toEqual(['color: red', 'font-size: 14px'])
+  })
+})
 
 describe('splitCssDeclarations', () => {
   it('splits on top-level semicolons only, so values keep their own', () => {

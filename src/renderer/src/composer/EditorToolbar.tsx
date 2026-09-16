@@ -20,7 +20,7 @@ import { safeUrl } from '../../../shared/html'
 import { createCommand, registerCommands } from '../commands'
 import { MailIcon } from '../components/MailIcon'
 import { modKeyLabel } from '../platform'
-import { toggleComposerQuoteBlock } from './bodyEditing'
+import { $clearSelectionFormatting, toggleComposerQuoteBlock } from './bodyEditing'
 import { $isProtectedComposerNode, $topLevelComposerNode } from './nodes/protected'
 import { COMPOSER_LINK_SCHEMES } from './sanitize'
 
@@ -192,6 +192,9 @@ export function EditorToolbar(): React.JSX.Element {
     },
     [editor, withSelection]
   )
+  const clearFormatting = useCallback(() => {
+    withSelection(() => $clearSelectionFormatting(editor))
+  }, [editor, withSelection])
   const patchStyle = useCallback(
     (property: string, value: string) => {
       withSelection(() => {
@@ -255,6 +258,7 @@ export function EditorToolbar(): React.JSX.Element {
           setFallbackOpen(true)
         }),
         createCommand('composer.link', openLink),
+        createCommand('composer.clearFormatting', clearFormatting),
         createCommand('composer.strikethrough', () => format('strikethrough')),
         createCommand('composer.fontFamily', () => patchStyle('font-family', 'Arial, sans-serif')),
         createCommand('composer.fontSize', () => patchStyle('font-size', '14px')),
@@ -264,7 +268,7 @@ export function EditorToolbar(): React.JSX.Element {
         createCommand('composer.alignCenter', () => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'center')),
         createCommand('composer.alignRight', () => editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'right'))
       ]),
-    [editor, format, openLink, patchStyle]
+    [editor, format, openLink, patchStyle, clearFormatting]
   )
 
   const button =
@@ -457,6 +461,13 @@ export function EditorToolbar(): React.JSX.Element {
                   }}
                 >
                   <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      className={menuButton}
+                      onClick={() => runMoreAction(clearFormatting)}
+                    >
+                      Clear formatting
+                    </button>
                     <button
                       type="button"
                       className={`${menuButton} line-through`}

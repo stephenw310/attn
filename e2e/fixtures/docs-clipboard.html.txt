@@ -1,0 +1,7 @@
+<b id="docs-internal-guid-example" style="font-weight:normal">
+<h2 style="font-size:20pt">Project update</h2>
+<p style="line-height:1.5"><span style="font-family:Arial; font-size:11pt; font-weight:700">Bold words</span> <span style="font-style:italic">Italic words</span> <span style="text-decoration:underline">Underlined words</span></p>
+<p><span style="color:rgb(180, 20, 20);background-color:rgb(255, 240, 120)">Highlighted words</span> <a href="https://example.com">Reference</a></p>
+<ol start="3"><li>Third item<ul><li>Nested item</li></ul></li><li>Fourth item</li></ol>
+<table><tbody><tr><td>Owner</td><td>Status</td></tr><tr><td>Jordan</td><td>Ready</td></tr></tbody></table>
+</b>

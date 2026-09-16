@@ -5,6 +5,7 @@ import {
   $isDecoratorNode,
   $isElementNode,
   $isRangeSelection,
+  $isTextNode,
   type LexicalNode
 } from 'lexical'
 import { useEffect, useState } from 'react'
@@ -23,6 +24,31 @@ function $authoredBodyIsEmpty(): boolean {
   for (const child of $getRoot().getChildren()) {
     if ($isProtectedComposerNode(child)) continue
     if (child.getTextContent().trim().length > 0 || hasNonTextContent(child)) return false
+  }
+  return true
+}
+
+/** A collapsed caret at the end of an authored paragraph or other text block. */
+export function $isAtAuthoredParagraphEnd(): boolean {
+  const range = $getSelection()
+  if (!$isRangeSelection(range) || !range.isCollapsed()) return false
+  const anchor = range.anchor
+  let node = anchor.getNode()
+  if ([node, ...node.getParents()].some($isProtectedComposerNode)) return false
+  if ($isTextNode(node)) {
+    if (anchor.offset !== node.getTextContentSize()) return false
+  } else if ($isElementNode(node)) {
+    if (anchor.offset !== node.getChildrenSize()) return false
+  } else return false
+  const root = $getRoot()
+  while (node !== root) {
+    if ($isElementNode(node) && !node.isInline()) return true
+    const parent = node.getParent()
+    if (!parent) return false
+    if (node.getNextSiblings().some((sibling) => parent !== root || !$isProtectedComposerNode(sibling))) {
+      return false
+    }
+    node = parent
   }
   return true
 }
@@ -49,12 +75,7 @@ export function ComposerBodyHintPlugin({
         const root = editor.getRootElement()
         const container = root?.parentElement
         const selection = window.getSelection()
-        const eligible = editor.getEditorState().read(() => {
-          const range = $getSelection()
-          if (!$isRangeSelection(range) || !range.isCollapsed()) return false
-          const node = range.anchor.getNode().getTopLevelElement()
-          return node !== null && !$isProtectedComposerNode(node)
-        })
+        const eligible = editor.getEditorState().read($isAtAuthoredParagraphEnd)
         if (
           !root ||
           !container ||

@@ -71,6 +71,30 @@ export function cssDeclarations(style: string): CssDeclaration[] {
   })
 }
 
+const IMPORTANT = /\s*!\s*important\s*$/i
+
+/**
+ * The winning declaration per property inside one block, in first-seen order.
+ * A `!important` declaration outranks a later plain one; the flag itself is
+ * removed because the callers store or re-emit plain values.
+ */
+export function resolveCssDeclarations(declarations: CssDeclaration[]): CssDeclaration[] {
+  const winners = new Map<string, CssDeclaration & { important: boolean }>()
+  for (const declaration of declarations) {
+    const important = IMPORTANT.test(declaration.value)
+    const current = winners.get(declaration.property)
+    if (current?.important && !important) continue
+    const value = declaration.value.replace(IMPORTANT, '')
+    winners.set(declaration.property, {
+      property: declaration.property,
+      value,
+      raw: `${declaration.property}: ${value}`,
+      important
+    })
+  }
+  return [...winners.values()].map(({ property, value, raw }) => ({ property, value, raw }))
+}
+
 export interface RgbColor {
   red: number
   green: number

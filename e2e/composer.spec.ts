@@ -1774,6 +1774,296 @@ test('preserves rich and opaque draft regions while editing elsewhere', async ({
   expect(savedHtml).toContain('<section data-layout="card"><mark>Opaque exact region</mark></section>')
 })
 
+test('pastes Notes paragraphs as editable text and preserves them through reopening', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Notes paste')
+  await composer.editor.click()
+  // Native Cocoa HTML export captured from Notes, with the text anonymized.
+  await pasteHtml(composer, readFileSync(join(__dirname, 'fixtures/notes-clipboard.html.txt'), 'utf8'))
+  await expect(composer.editor).toContainText('Hello Jordan,')
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  const greeting = composer.editor.locator('p').filter({ hasText: 'Hello Jordan,' })
+  await greeting.click()
+  await page.keyboard.type('Editable ')
+  await expect(greeting).toContainText('Editable ')
+  await expect(composer.editor).toContainText('Thanks again,')
+  await expect(composer.editor).toContainText('Taylor')
+  await composer.expectSaved()
+  mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
+    await page.screenshot({ path: join(__dirname, `.artifacts/notes-paste-${colorScheme}.png`) })
+  }
+  await page.keyboard.press('Escape')
+  await goToDrafts(page)
+  await page.getByTestId('draft-row').filter({ hasText: 'Notes paste' }).click()
+  await expect(composer.editor).toContainText('Editable ')
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+  await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+  const saved = await page.evaluate(async () => {
+    const draft = (await window.attn.draft.list()).find((item) => item.subject === 'Notes paste')
+    return draft ? await window.attn.draft.get(draft.id) : null
+  })
+  expect(saved?.bodyText).toContain('Thank you for the conversation.')
+  expect(saved?.bodyText).toContain('Thanks again,')
+  expect(saved?.bodyHtml).not.toContain('data-attn-opaque')
+})
+
+test('Notes emphasis stays editable with the formatting controls', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Notes formatting')
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(
+    composer,
+    `<meta name="Generator" content="Cocoa HTML Writer">
+    <style>p.p1 {font: 13px Helvetica} span.s1 {font-weight: bold}
+    span.s2 {text-decoration: underline} span.s3 {font-style: italic}</style>
+    <p class="p1"><b>Bold sample</b></p>
+    <p class="p1"><span class="s2">Underline sample</span></p>
+    <p class="p1"><span class="s3">Italic sample</span></p>
+    <p class="p1">Plain sample</p>`
+  )
+  const bold = composer.editor.getByText('Bold sample', { exact: true })
+  const underline = composer.editor.getByText('Underline sample', { exact: true })
+  const italic = composer.editor.getByText('Italic sample', { exact: true })
+  const plain = composer.editor.getByText('Plain sample', { exact: true })
+  await expect(bold).toHaveCSS('font-weight', '700')
+  await expect(underline).toHaveCSS('text-decoration-line', 'underline')
+  await expect(italic).toHaveCSS('font-style', 'italic')
+  await page.keyboard.press('ControlOrMeta+Shift+f')
+  await bold.selectText()
+  await page.getByRole('button', { name: 'Bold', exact: true }).click()
+  await expect(bold).toHaveCSS('font-weight', '400')
+  await plain.selectText()
+  await page.getByRole('button', { name: 'Bold', exact: true }).click()
+  await expect(plain).toHaveCSS('font-weight', '700')
+  await plain.selectText()
+  await page.getByRole('button', { name: 'Underline', exact: true }).click()
+  await expect(plain).toHaveCSS('text-decoration-line', 'underline')
+  await composer.expectSaved()
+  await page.keyboard.press('ArrowRight')
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
+    await page.screenshot({ path: join(__dirname, `.artifacts/notes-formatting-${colorScheme}.png`) })
+  }
+})
+
+for (const source of ['docs', 'notion'] as const) {
+  test(`pastes editable ${source} structure and saves it through reopening`, async ({ page }) => {
+    const composer = new ComposerPage(page)
+    await composer.openNew()
+    await composer.subject.fill(`${source} rich paste`)
+    await composer.editor.locator('p').first().click()
+    await pasteHtml(composer, readFileSync(join(__dirname, `fixtures/${source}-clipboard.html.txt`), 'utf8'))
+    await expect(page.getByTestId('composer-preserved-banner')).toHaveCount(0)
+    await expect(composer.editor.locator('iframe')).toHaveCount(0)
+    if (source === 'docs') {
+      await expect(composer.editor.getByText('Bold words', { exact: true })).toHaveCSS('font-weight', '700')
+      await expect(composer.editor.getByText('Highlighted words', { exact: true })).toHaveCSS(
+        'background-color',
+        'rgb(255, 240, 120)'
+      )
+      await expect(composer.editor.locator('table')).toHaveCount(1)
+      await expect(composer.editor.locator('ol')).toHaveAttribute('start', '3')
+    } else {
+      await expect(composer.editor).toContainText('☑ Done')
+      await expect(composer.editor).toContainText('☐ Next task')
+      await expect(composer.editor).toContainText('Expanded text')
+      await expect(composer.editor.getByText('first line', { exact: true })).toHaveCSS(
+        'font-family',
+        'monospace'
+      )
+      await expect(composer.editor.getByText('indented line', { exact: true })).toHaveCSS(
+        'font-family',
+        'monospace'
+      )
+      await expect(composer.editor.getByRole('link', { name: 'Demo' })).toHaveAttribute(
+        'href',
+        'https://example.com/demo'
+      )
+    }
+    await composer.expectSaved()
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
+      await page.screenshot({ path: join(__dirname, `.artifacts/${source}-paste-${colorScheme}.png`) })
+    }
+    await page.keyboard.press('Escape')
+    await goToDrafts(page)
+    await page
+      .getByTestId('draft-row')
+      .filter({ hasText: `${source} rich paste` })
+      .click()
+    await expect(composer.editor.locator('iframe')).toHaveCount(0)
+    await expect(composer.editor).toContainText(source === 'docs' ? 'Fourth item' : 'Expanded text')
+  })
+}
+
+test('inline fonts and inherited underline remain editable after paste', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Inline formatting')
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(
+    composer,
+    '<p><span style="font:italic 16px Arial">Font sample</span></p><p><u><span style="text-decoration:none">Underlined sample</span></u></p><p><s><span style="text-decoration:none">Struck sample</span></s></p>'
+  )
+  const font = composer.editor.getByText('Font sample', { exact: true })
+  const underline = composer.editor.getByText('Underlined sample', { exact: true })
+  await expect(font).toHaveCSS('font-style', 'italic')
+  await expect(font).toHaveCSS('font-size', '16px')
+  await expect(font).toHaveCSS('font-family', 'Arial')
+  await expect(underline).toHaveCSS('text-decoration-line', 'underline')
+  await expect(composer.editor.getByText('Struck sample', { exact: true })).toHaveCSS(
+    'text-decoration-line',
+    'line-through'
+  )
+  await page.keyboard.press('ControlOrMeta+Shift+f')
+  await underline.selectText()
+  await page.getByRole('button', { name: 'Underline', exact: true }).click()
+  await expect(underline).toHaveCSS('text-decoration-line', 'none')
+  await composer.expectSaved()
+})
+
+test('unsupported stylesheet paste remains editable without CSS emulation', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Unsupported stylesheet')
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(
+    composer,
+    '<style>p::before{content:"generated"}p{display:grid}</style><p>Editable fallback</p>'
+  )
+  await expect(composer.editor.locator('iframe')).toHaveCount(0)
+  await expect(composer.editor).toContainText('Editable fallback')
+  await expect(composer.editor).not.toContainText('generated')
+  await page.keyboard.press('ControlOrMeta+Shift+f')
+  await composer.editor.getByText('Editable fallback', { exact: true }).selectText()
+  await page.getByRole('button', { name: 'Bold', exact: true }).click()
+  await expect(composer.editor.getByText('Editable fallback', { exact: true }).last()).toHaveCSS(
+    'font-weight',
+    '700'
+  )
+})
+
+test('pastes without formatting and clears selected formatting through commands', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.subject.fill('Plain paste')
+  await composer.editor.locator('p').first().click()
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { readText: async () => 'Plain clipboard\nSecond line' }
+    })
+  })
+  await page.keyboard.press('ControlOrMeta+Shift+v')
+  await expect(composer.editor).toContainText('Plain clipboard')
+  await expect(composer.editor).toContainText('Second line')
+  await runPaletteCommand(page, 'Paste without formatting')
+  await expect(composer.editor).toContainText('Second linePlain clipboard')
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(
+    composer,
+    '<p><span style="font-weight:bold;color:red;background-color:yellow">Clear this</span></p>'
+  )
+  const text = composer.editor.getByText('Clear this', { exact: true })
+  await expect(text).toHaveCSS('font-weight', '700')
+  await text.selectText()
+  await runPaletteCommand(page, 'Clear formatting')
+  await expect(text).toHaveCSS('font-weight', '400')
+  await expect(text).not.toHaveCSS('color', 'rgb(255, 0, 0)')
+  await expect(text).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await runPaletteCommand(page, 'Undo body text')
+  await expect(text).toHaveCSS('font-weight', '700')
+  await expect(text).toHaveCSS('color', 'rgb(255, 0, 0)')
+  await composer.expectSaved()
+})
+
+test('plain paste inherits styled caret formatting across lines', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(composer, '<p><span style="font-weight:bold;color:red;font-family:Georgia">Seed</span></p>')
+  await composer.editor.getByText('Seed', { exact: true }).evaluate((element) => {
+    const range = document.createRange()
+    if (!element.firstChild) throw new Error('Missing styled text')
+    range.setStart(element.firstChild, 3)
+    range.collapse(true)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
+  await page.keyboard.type('X')
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { readText: async () => 'Styled\nNext' }
+    })
+  })
+  await page.keyboard.press('ControlOrMeta+Shift+v')
+  const next = composer.editor.getByText('Next', { exact: true })
+  await expect(next).toHaveCSS('font-weight', '700')
+  await expect(next).toHaveCSS('color', 'rgb(255, 0, 0)')
+  await expect(next).toHaveCSS('font-family', 'Georgia')
+})
+
+test('clearing a collapsed caret keeps the existing link intact', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.locator('p').first().click()
+  await pasteHtml(composer, '<p><a href="https://example.com">Reference</a></p>')
+  const link = composer.editor.getByRole('link', { name: 'Reference', exact: true })
+  await link.evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+    const text = walker.nextNode()
+    if (!text) throw new Error('Missing link text')
+    const range = document.createRange()
+    range.setStart(text, 3)
+    range.collapse(true)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+  })
+  await page.keyboard.type('X')
+  await runPaletteCommand(page, 'Clear formatting')
+  await expect(composer.editor.getByRole('link', { name: 'RefXerence', exact: true })).toHaveAttribute(
+    'href',
+    'https://example.com'
+  )
+})
+
+test('plain paste leaves recipient and subject shortcuts native', async ({ page }) => {
+  const composer = new ComposerPage(page)
+  await composer.openNew()
+  await composer.editor.locator('p').first().click()
+  await page.keyboard.type('Existing body')
+  await page.getByRole('button', { name: 'Show Cc and Bcc fields' }).click()
+  for (const input of [
+    composer.subject,
+    ...(['to', 'cc', 'bcc'] as const).map((field) => composer.recipientField(field).locator('input'))
+  ]) {
+    await input.focus()
+    const native = await input.evaluate((element) =>
+      element.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'V',
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true
+        })
+      )
+    )
+    expect(native).toBe(true)
+  }
+  await expect(composer.editor).toContainText('Existing body')
+})
+
 test('preserves unsupported foreign HTML pasted into a new draft', async ({ page }) => {
   const composer = new ComposerPage(page)
   await composer.openNew()

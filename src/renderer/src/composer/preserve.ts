@@ -1,5 +1,5 @@
 import { type DefaultTreeAdapterTypes, parseFragment } from 'parse5'
-import { cssDeclarations } from '../../../shared/css'
+import { cssDeclarations, resolveCssDeclarations } from '../../../shared/css'
 import {
   COMPOSER_STYLE_PROPERTIES,
   isGmailSignatureAttributes,
@@ -8,7 +8,7 @@ import {
   sanitizeDraftHtmlForImport
 } from './sanitize'
 
-const REPRESENTABLE_TAGS = new Set([
+export const REPRESENTABLE_TAGS = new Set([
   'p',
   'div',
   'br',
@@ -132,7 +132,8 @@ const INHERITED_TEXT_STYLES = new Set([
   'font-style',
   'font-weight',
   'line-height',
-  'text-decoration'
+  'text-decoration',
+  'white-space'
 ])
 
 /**
@@ -155,16 +156,91 @@ function materializeInheritedTextStyles(document: Document): void {
       ancestor = ancestor.parentElement
     }
     const inherited = new Map<string, string>()
+    // Decoration lines propagate from every ancestor and a descendant cannot
+    // cancel one; a declaration on the decorated element itself replaces only
+    // that element's own line.
+    const decorations = new Set<string>()
+    const tagDecorations = new Set<string>()
+    let exoticDecoration: string | null = null
+    // Emphasis an element establishes (table headers included) survives the
+    // style stripping below, so only there must a later `normal` stay in the
+    // text style to cancel it. Elsewhere it is a default the toolbar may change.
+    const emphasis = new Set<string>()
     for (const element of ancestors) {
-      for (const { property, value } of cssDeclarations(element.getAttribute('style') ?? '')) {
-        if (INHERITED_TEXT_STYLES.has(property)) inherited.set(property, value)
+      // Semantic emphasis participates in the cascade before the element's CSS.
+      if (['B', 'STRONG'].includes(element.tagName)) inherited.set('font-weight', 'bold')
+      if (['B', 'STRONG', 'TH'].includes(element.tagName)) emphasis.add('font-weight')
+      if (['I', 'EM'].includes(element.tagName)) {
+        inherited.set('font-style', 'italic')
+        emphasis.add('font-style')
       }
+      const own = new Set<string>()
+      if (element.tagName === 'U') own.add('underline')
+      if (['S', 'STRIKE'].includes(element.tagName)) own.add('line-through')
+      for (const line of own) tagDecorations.add(line)
+      let declared: string | null = null
+      for (const { property, value } of resolveCssDeclarations(
+        cssDeclarations(element.getAttribute('style') ?? '')
+      )) {
+        if (property === 'text-decoration') declared = value.trim()
+        else if (
+          INHERITED_TEXT_STYLES.has(property) ||
+          (element.tagName === 'SPAN' && COMPOSER_STYLE_PROPERTIES.has(property))
+        )
+          inherited.set(property, value)
+      }
+      if (declared !== null) {
+        const lines = declared.toLowerCase().split(/\s+/)
+        own.clear()
+        for (const line of lines) if (['underline', 'line-through'].includes(line)) own.add(line)
+        exoticDecoration = lines.every((line) => ['none', 'underline', 'line-through'].includes(line))
+          ? null
+          : declared
+      }
+      for (const line of own) decorations.add(line)
     }
-    if (inherited.size === 0) continue
+    // Lines from every ancestor render together, so an exotic declaration
+    // (an overline, a style, a color) keeps the propagated lines beside it.
+    const decorationTokens = exoticDecoration ? exoticDecoration.split(/\s+/) : []
+    for (const line of decorations) {
+      if (!decorationTokens.map((token) => token.toLowerCase()).includes(line)) decorationTokens.push(line)
+    }
+    if (decorationTokens.length) inherited.set('text-decoration', decorationTokens.join(' '))
+    const resets: string[] = []
+    if ([...tagDecorations].some((line) => !decorations.has(line))) resets.push('text-decoration')
+    for (const [property, defaults] of Object.entries({
+      'font-weight': ['normal', '400'],
+      'font-style': ['normal']
+    })) {
+      if (!defaults.includes(inherited.get(property)?.trim().toLowerCase() ?? '')) continue
+      if (emphasis.has(property)) resets.push(property)
+      else inherited.delete(property)
+    }
+    if (inherited.size === 0 && resets.length === 0) continue
     const span = document.createElement('span')
-    span.setAttribute('style', [...inherited].map(([property, value]) => `${property}: ${value}`).join('; '))
-    textNode.replaceWith(span)
-    span.append(textNode)
+    if (resets.length) span.setAttribute('data-attn-reset', resets.join(' '))
+    if (inherited.size) {
+      span.setAttribute(
+        'style',
+        [...inherited].map(([property, value]) => `${property}: ${value}`).join('; ')
+      )
+    }
+    if (['pre', 'pre-wrap', 'break-spaces'].includes(inherited.get('white-space') ?? '')) {
+      const fragment = document.createDocumentFragment()
+      for (const part of textNode.data.split(/(\r\n|\r|\n|\t)/)) {
+        if (!part) continue
+        if (/^[\r\n]+$/.test(part)) fragment.append(document.createElement('br'))
+        else {
+          const run = span.cloneNode() as HTMLElement
+          run.textContent = part
+          fragment.append(run)
+        }
+      }
+      textNode.replaceWith(fragment)
+    } else {
+      textNode.replaceWith(span)
+      span.append(textNode)
+    }
   }
 
   for (const element of document.body.querySelectorAll<HTMLElement>('[style]')) {
@@ -191,24 +267,50 @@ function materializeInheritedTextStyles(document: Document): void {
 interface ElementShape {
   tag: string
   attributes: { name: string; value: string }[]
+  /** Non-blank text nodes below the element. A box shared by several runs cannot be edited per run. */
+  textRuns: number
+}
+
+function domTextRuns(element: Element): number {
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  let runs = 0
+  while (walker.nextNode()) if ((walker.currentNode as Text).data.trim()) runs += 1
+  return runs
+}
+
+function sourceTextRuns(node: DefaultTreeAdapterTypes.ParentNode): number {
+  let runs = 0
+  for (const child of node.childNodes) {
+    if ('value' in child) {
+      if (child.value.trim()) runs += 1
+    } else if ('childNodes' in child) runs += sourceTextRuns(child)
+  }
+  return runs
 }
 
 function domElementShape(element: Element): ElementShape {
   return {
     tag: element.tagName.toLowerCase(),
-    attributes: element.getAttributeNames().map((name) => ({ name, value: element.getAttribute(name) ?? '' }))
+    attributes: element
+      .getAttributeNames()
+      .map((name) => ({ name, value: element.getAttribute(name) ?? '' })),
+    textRuns: domTextRuns(element)
   }
 }
 
 function sourceElementShape(element: DefaultTreeAdapterTypes.Element): ElementShape {
   return {
     tag: element.tagName.toLowerCase(),
-    attributes: element.attrs.map(({ name, value }) => ({ name, value }))
+    attributes: element.attrs.map(({ name, value }) => ({ name, value })),
+    textRuns: sourceTextRuns(element)
   }
 }
 
 /** Why the editor cannot represent this element losslessly, or null. */
-function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boolean): string | null {
+function unsupportedReason(
+  { tag, attributes, textRuns }: ElementShape,
+  hasStylesheet: boolean
+): string | null {
   if (!REPRESENTABLE_TAGS.has(tag)) return `<${tag}>`
   const values = new Map(attributes.map(({ name, value }) => [name, value]))
   const gmailSignature =
@@ -228,8 +330,17 @@ function unsupportedReason({ tag, attributes }: ElementShape, hasStylesheet: boo
       return `${tag}[${name}]`
     }
   }
-  for (const { property } of cssDeclarations(values.get('style') ?? '')) {
+  for (const { property, value } of cssDeclarations(values.get('style') ?? '')) {
     if (!COMPOSER_STYLE_PROPERTIES.has(property)) return `${tag}[style:${property}]`
+    // One run keeps its box editable; a box around several runs would be
+    // duplicated onto each of them, so it is preserved as a unit instead.
+    if (
+      tag === 'span' &&
+      textRuns > 1 &&
+      /^(border|padding|margin|width$|height$)/.test(property) &&
+      !/^(none|0(?:px)?|auto)$/.test(value)
+    )
+      return `span[box:${property}]`
   }
   return null
 }

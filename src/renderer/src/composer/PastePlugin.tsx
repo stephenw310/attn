@@ -1,9 +1,24 @@
 import { $generateNodesFromDOM } from '@lexical/html'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
-import { $insertNodes } from 'lexical'
+import {
+  $getNodeByKey,
+  $getSelection,
+  $insertNodes,
+  $isDecoratorNode,
+  $isElementNode,
+  $isRangeSelection,
+  $isTextNode,
+  $setSelection,
+  HISTORY_PUSH_TAG,
+  type LexicalNode
+} from 'lexical'
 import { useEffect } from 'react'
 import type { Draft } from '../../../shared/drafts'
+import { createCommand, registerCommands } from '../commands'
+import { normalizeClipboardHtml } from './clipboardHtml'
+import { $insertPlainClipboardText } from './clipboardText'
 import { $createImageNode } from './nodes/ImageNode'
+import { $isProtectedComposerNode, $topLevelComposerNode } from './nodes/protected'
 import { prepareHtmlForEditor } from './preserve'
 import { preserveBlankLineBlocks } from './rootNodes'
 
@@ -35,6 +50,57 @@ export function PasteContentPlugin({
 }): null {
   const [editor] = useLexicalComposerContext()
   useEffect(() => {
+    let disposed = false
+    // The same boundary the formatting toolbar refuses to act across.
+    const isReadOnlyNode = (node: LexicalNode): boolean => {
+      if ($isDecoratorNode(node)) return true
+      const top = $topLevelComposerNode(node)
+      if (!$isProtectedComposerNode(top)) return false
+      return (
+        top.getType() !== 'gmail-signature' ||
+        editor.getElementByKey(top.getKey())?.getAttribute('contenteditable') !== null
+      )
+    }
+    const unregisterCommand = registerCommands([
+      createCommand('composer.pastePlainText', () => {
+        // Lexical keeps the last range selection while the palette has focus.
+        const selection = editor.getEditorState().read(() => {
+          const current = $getSelection()
+          if (!$isRangeSelection(current) || current.getNodes().some(isReadOnlyNode)) return null
+          return current.clone()
+        })
+        if (!selection) return
+        void navigator.clipboard
+          .readText()
+          .then((text) => {
+            if (disposed || !text) return
+            editor.update(
+              () => {
+                const anchor = $getNodeByKey(selection.anchor.key)
+                const focus = $getNodeByKey(selection.focus.key)
+                if (!anchor || !focus) return
+                // Text may have changed while the clipboard was read.
+                for (const [point, node] of [
+                  [selection.anchor, anchor],
+                  [selection.focus, focus]
+                ] as const) {
+                  const size = $isTextNode(node)
+                    ? node.getTextContentSize()
+                    : $isElementNode(node)
+                      ? node.getChildrenSize()
+                      : 0
+                  point.set(point.key, Math.min(point.offset, size), point.type)
+                }
+                $setSelection(selection)
+                $insertPlainClipboardText(selection, text)
+              },
+              { tag: HISTORY_PUSH_TAG }
+            )
+            editor.focus()
+          })
+          .catch(() => onError('Could not read clipboard text. Try pasting directly into the message.'))
+      })
+    ])
     // One handler per effect run: Lexical calls the root listener with
     // `(null, previousRoot)` on unregister, so the function removed there must
     // be the one that was added, or every re-run leaves a paste handler behind.
@@ -69,7 +135,14 @@ export function PasteContentPlugin({
       event.preventDefault()
       event.stopPropagation()
       void (async () => {
-        const prepared = prepareHtmlForEditor(html)
+        const prepared = prepareHtmlForEditor(
+          normalizeClipboardHtml(
+            html,
+            event.clipboardData?.types.includes('text/plain')
+              ? event.clipboardData.getData('text/plain')
+              : undefined
+          )
+        )
         if (prepared.issues.length > 0) onPreservedContent()
         const document = new DOMParser().parseFromString(prepared.html, 'text/html')
         preserveBlankLineBlocks(document)
@@ -98,10 +171,15 @@ export function PasteContentPlugin({
         editor.update(() => $insertNodes($generateNodesFromDOM(editor, document)))
       })()
     }
-    return editor.registerRootListener((root, previous) => {
+    const unregisterRoot = editor.registerRootListener((root, previous) => {
       previous?.removeEventListener('paste', onPaste, true)
       root?.addEventListener('paste', onPaste, true)
     })
+    return () => {
+      disposed = true
+      unregisterRoot()
+      unregisterCommand()
+    }
   }, [draftId, editor, onAttachment, onError, onPreservedContent])
   return null
 }

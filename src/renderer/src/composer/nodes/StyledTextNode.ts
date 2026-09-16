@@ -3,14 +3,61 @@ import {
   type DOMConversionMap,
   type DOMConversionOutput,
   type SerializedTextNode,
+  type TextFormatType,
   TextNode
 } from 'lexical'
+import { cssDeclarations } from '../../../../shared/css'
 import { sanitizeComposerStyle } from '../sanitize'
 
 function styleConversion(element: HTMLElement): DOMConversionOutput {
-  const cleanStyle = sanitizeComposerStyle(element.getAttribute('style') ?? '')
+  const style = document.createElement('span').style
+  const sanitized = sanitizeComposerStyle(element.getAttribute('style') ?? '')
+  style.cssText = sanitized
+  const formats: TextFormatType[] = []
+  const resets: TextFormatType[] = []
+  const represented = new Set<string>()
+  // The import pass marks a `normal` that cancels emphasis the exported HTML
+  // still carries (a bold-by-default table header); that CSS must stay.
+  const kept = new Set((element.getAttribute('data-attn-reset') ?? '').split(/\s+/))
+  if (['normal', '400', 'bold', '700'].includes(style.fontWeight)) {
+    if (['bold', '700'].includes(style.fontWeight)) formats.push('bold')
+    else resets.push('bold')
+    if (formats.includes('bold') || !kept.has('font-weight')) represented.add('font-weight')
+  }
+  if (['normal', 'italic'].includes(style.fontStyle)) {
+    if (style.fontStyle === 'italic') formats.push('italic')
+    else resets.push('italic')
+    if (formats.includes('italic') || !kept.has('font-style')) represented.add('font-style')
+  }
+  const decoration = style.textDecoration.trim().split(/\s+/)
+  if (decoration.every((value) => ['none', 'underline', 'line-through'].includes(value))) {
+    represented.add('text-decoration')
+    // A descendant cannot cancel a decoration established by an ancestor.
+    if (decoration.includes('underline')) formats.push('underline')
+    if (decoration.includes('line-through')) formats.push('strikethrough')
+  }
+  // A declaration on the decorated element itself replaced the tag's own line.
+  if (kept.has('text-decoration')) {
+    for (const format of ['underline', 'strikethrough'] as const) {
+      if (!formats.includes(format)) resets.push(format)
+    }
+  }
+  // Keep CSS whenever flags cannot reproduce the complete presentation.
+  const cleanStyle = cssDeclarations(sanitized)
+    .filter(({ property }) => !represented.has(property))
+    .map(({ raw }) => raw)
+    .join('; ')
   return {
-    forChild: (child) => (cleanStyle && $isTextNode(child) ? child.setStyle(cleanStyle) : child),
+    forChild: (child) => {
+      if (!$isTextNode(child)) return child
+      for (const format of resets) {
+        if (child.hasFormat(format)) child.toggleFormat(format)
+      }
+      for (const format of formats) {
+        if (!child.hasFormat(format)) child.toggleFormat(format)
+      }
+      return child.setStyle(cleanStyle)
+    },
     node: null
   }
 }
