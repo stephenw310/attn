@@ -724,7 +724,9 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   cap and provider failures still skip without automatic retries. Cancel and discard results more than five
   seconds after dispatch. Slow, offline, or failed providers leave typing usable without recurring error
   toasts. Settings still expose configuration errors. Anthropic autocomplete requests explicitly disable
-  model thinking for latency; reply and refine requests retain the provider default.
+  model thinking for latency; reply and refine requests retain the provider default and give the token cap
+  headroom for that thinking. A reply that reaches the provider's length limit surfaces as an error, never
+  as a finished draft.
 - Disabling autocomplete cancels its timers and requests and clears previews without disabling explicit
   reply drafting. The master AI switch stops both features; removing the key also disables both. Cancel
   in-flight work and ignore late responses. Content already sent to a provider cannot be recalled.

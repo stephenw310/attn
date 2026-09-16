@@ -237,6 +237,27 @@ describe('buildWireRequest', () => {
     expect(body.thinking).toBeUndefined()
   })
 
+  it('gives Anthropic reply requests thinking headroom and leaves the OpenAI-compatible cap alone', () => {
+    const anthropic = resolveProviderTarget('anthropic', null, null, 'sk-ant-test')
+    const replyBody = JSON.parse(buildWireRequest(anthropic, prompt).body)
+    // Adaptive thinking shares `max_tokens` with the reply text on current Claude models.
+    expect(replyBody.max_tokens).toBe(prompt.maxTokens + 7_168)
+
+    const autocompletePrompt = buildPrompt(
+      { purpose: 'autocomplete', prefix: 'Thanks for', suffix: '', thread: replyRequest.thread },
+      voice
+    )
+    // Thinking is off for autocomplete, so its cap stays exact.
+    const autocompleteBody = JSON.parse(buildWireRequest(anthropic, autocompletePrompt).body)
+    expect(autocompleteBody.max_tokens).toBe(autocompletePrompt.maxTokens)
+
+    // The headroom is Anthropic-specific: an OpenAI-compatible server may reject a cap
+    // larger than its context window, so that body is unchanged.
+    const openai = resolveProviderTarget('openai-compatible', null, null, null)
+    const openaiBody = JSON.parse(buildWireRequest(openai, prompt).body)
+    expect(openaiBody.max_tokens).toBe(prompt.maxTokens)
+  })
+
   it('disables Anthropic thinking for latency-sensitive autocomplete', () => {
     const target = resolveProviderTarget('anthropic', null, null, 'sk-ant-test')
     const autocompletePrompt = buildPrompt(
@@ -305,6 +326,21 @@ describe('AiStreamParser', () => {
   it('ignores malformed data lines rather than failing the stream', () => {
     const parser = new AiStreamParser('anthropic')
     expect(parser.push('data: {not json}\ndata: 42\n')).toEqual([])
+  })
+
+  it('reports a max_tokens stop as a truncated draft, not a finished one', () => {
+    const parser = new AiStreamParser('anthropic')
+    expect(() =>
+      parser.push(
+        'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":1024}}\n'
+      )
+    ).toThrow(/length limit/)
+    // An ordinary end of turn is bookkeeping, not an error.
+    expect(
+      new AiStreamParser('anthropic').push(
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null}}\n'
+      )
+    ).toEqual([])
   })
 
   it('surfaces a provider error frame instead of ending the draft silently', () => {

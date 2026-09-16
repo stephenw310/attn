@@ -99,6 +99,27 @@ test('enabling shows the disclosure, a key round-trips, and a scripted generatio
   expect(await aiRequests(app)).toHaveLength(1)
 })
 
+test('a reply cut off at the provider length limit surfaces as an error, not a finished draft', async ({
+  app,
+  page
+}) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await page.evaluate(() => window.attn.ai.setSetting('enabled', true))
+  await page.evaluate(() => window.attn.ai.setKey('sk-test-key-e2e'))
+
+  // An ordinary end of turn after the chunks is bookkeeping and completes the draft.
+  await installFakeAi(app, { chunks: ['Hello', ' world'], stopReason: 'end_turn' })
+  expect(await generateText(page, replyRequest)).toBe('Hello world')
+
+  // A max_tokens stop means the reply was truncated: the stream ends in an error.
+  await installFakeAi(app, { chunks: ['Hello, I wanted to'], stopReason: 'max_tokens' })
+  await expect(generateText(page, replyRequest)).rejects.toThrow(/length limit/)
+  const requests = await aiRequests(app)
+  expect(requests).toHaveLength(2)
+  // The provider closed the stream itself; the manager's abort is not a cancellation.
+  expect(requests[1].canceled).toBe(false)
+})
+
 test('disabled AI reaches no provider: Mod+J hints, the bridge rejects, and relaunch stays off', async ({
   app,
   boot,

@@ -39,6 +39,11 @@ const TONE_INSTRUCTIONS: Record<AiVoiceTone, string> = {
 
 const REPLY_MAX_TOKENS = 1_024
 const AUTOCOMPLETE_MAX_TOKENS = 60
+// Claude Sonnet 5, Opus 5, and later run adaptive thinking when `thinking` is
+// omitted, and `max_tokens` caps thinking plus reply text together. Only the
+// Anthropic wire gets this headroom: an OpenAI-compatible server may reject a
+// cap larger than its context window.
+const ANTHROPIC_THINKING_HEADROOM_TOKENS = 7_168
 
 /**
  * Mail bodies are attacker-controlled text. They reach the model inside
@@ -201,7 +206,8 @@ export function buildWireRequest(target: AiProviderTarget, prompt: AiPrompt): Ai
       },
       body: JSON.stringify({
         model: target.model,
-        max_tokens: prompt.maxTokens,
+        max_tokens:
+          prompt.maxTokens + (prompt.reasoning === 'disabled' ? 0 : ANTHROPIC_THINKING_HEADROOM_TOKENS),
         system: prompt.system,
         messages: prompt.messages,
         ...(prompt.reasoning === 'disabled' ? { thinking: { type: 'disabled' } } : {}),
@@ -226,8 +232,8 @@ export function buildWireRequest(target: AiProviderTarget, prompt: AiPrompt): Ai
 
 /** A provider error frame arrived mid-stream, so the response is truncated, not complete. */
 export class AiStreamError extends Error {
-  constructor() {
-    super('The AI provider reported an error mid-response')
+  constructor(message = 'The AI provider reported an error mid-response') {
+    super(message)
     this.name = 'AiStreamError'
   }
 }
@@ -271,8 +277,15 @@ export class AiStreamParser {
     }
     if (!parsed || typeof parsed !== 'object') return null
     if (this.provider === 'anthropic') {
-      const event = parsed as { type?: string; delta?: { type?: string; text?: string } }
+      const event = parsed as {
+        type?: string
+        delta?: { type?: string; text?: string; stop_reason?: string }
+      }
       if (event.type === 'error') throw new AiStreamError()
+      // The cap on thinking plus text was reached: the draft is truncated, not finished.
+      if (event.type === 'message_delta' && event.delta?.stop_reason === 'max_tokens') {
+        throw new AiStreamError('The AI reply reached its length limit before it finished')
+      }
       if (event.type === 'content_block_delta' && typeof event.delta?.text === 'string') {
         return event.delta.text
       }
