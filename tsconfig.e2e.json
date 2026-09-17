@@ -11,5 +11,11 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["e2e/**/*", "playwright.config.ts", "src/preload/index.d.ts"]
+  "include": [
+    "e2e/**/*",
+    "playwright.config.ts",
+    "src/preload/index.d.ts",
+    ".cursor/skills/verify-attn/drives/**/*",
+    ".cursor/skills/verify-attn/playwright.config.ts"
+  ]
 }
