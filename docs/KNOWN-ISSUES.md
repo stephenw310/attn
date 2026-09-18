@@ -18,20 +18,3 @@ Workaround: select the text and run Clear formatting. A selection splits the wra
 Affected symbol: `$clearSelectionFormatting` in `src/renderer/src/composer/bodyEditing.ts`. The wrapper lift runs only for a non-collapsed selection. A collapsed caret would need a caret position between two inline elements, which Lexical does not represent for a plain caret.
 
 Verified: 2026-09-16 on PR #131.
-
-### BUG-17: An older build hides a rule that holds a description
-
-Symptom: A user who installs a build older than smart splits loses every split rule that holds a description condition. The rule disappears from the Inbox strip and from the split-rule manager. Its conversations fall through to the next matching split, or to Other.
-
-Steps to reproduce:
-
-1. Create a split whose conditions include a description.
-2. Install a build from before smart splits shipped.
-3. Open the Inbox. The described split is absent.
-4. Install the current build again. The split returns with its conditions intact.
-
-Workaround: upgrade to a build that parses a description condition.
-
-Affected symbol: `parseSplitMatchJson` in `src/main/splits.ts`. The older normalizer rejects the unknown condition type and returns null, so the caller skips the row. The stored row is not deleted and not rewritten, which is why the upgrade restores it.
-
-Verified: 2026-09-17 on the smart-splits branch.
