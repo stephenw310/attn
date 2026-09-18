@@ -14,22 +14,77 @@ The command palette lists every command available in the current context. A user
 
 - Press `Mod+K` anywhere in the app. The footer shows the shortcut as `Command palette`.
 
-## Driving it with a verify-attn drive
+## Driving it with control-attn
 
 Preconditions:
 
-- Seed `fixtures/seed-inbox.json`. `page.getByTestId('thread-row')` has count 8.
+- Seed `inbox`. `eval "document.querySelectorAll('[data-testid=thread-row]').length"` returns 8.
 
-- **Open.** Press Mod+K. Run `await openPalette(page)` from `e2e/nav`. `command-palette` is visible, `command-palette-input` is focused, and the palette has `data-usage-loaded="true"`.
-- **Context.** Check the list commands. Run `page.locator('[data-command-id="view.sent"]')`. It has count 1 alongside the other `view.*` chords.
-- **Run.** Type and run a navigation command. Run `await runPaletteCommand(page, 'Go to Sent')`. `command-palette` has count 0 and `view-title` reads `Sent`.
-- **Argument.** Open with a snooze phrase. Run `await openPalette(page, 'remind me tomorrow 9am')`. The `triage.snooze` result contains `Snooze until`. Press Enter with `await page.getByTestId('command-palette-input').press('Enter')`. Rows drop to 7 and `toast` reads `Snoozed`.
-- **Usage.** Relaunch and reopen. Run `({ page } = await boot.relaunch())` then `await openPalette(page)`. `command-palette-result` first has `data-command-id="view.sent"`.
-- **Proof.** Snapshot the open palette and the Sent view. Save `window.attn.settings.getCommandUsage('seed@attn.test')` with `record()`.
+- **Open.** Press Mod+K.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press ControlOrMeta+K
+  node .cursor/skills/verify-attn/control-attn.mjs wait command-palette
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.activeElement?.getAttribute('data-testid')"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=command-palette]')?.getAttribute('data-usage-loaded')"
+  ```
+
+  `command-palette` is visible, `command-palette-input` is focused, and the palette has `data-usage-loaded="true"`.
+
+- **Context.** Check the list commands.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-command-id=\"view.sent\"]').length"
+  ```
+
+  The count is 1 alongside the other `view.*` chords.
+
+- **Run.** Type and run a navigation command.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs fill command-palette-input "Go to Sent"
+  node .cursor/skills/verify-attn/control-attn.mjs press Enter
+  node .cursor/skills/verify-attn/control-attn.mjs wait view-title
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=view-title]')?.textContent"
+  ```
+
+  `command-palette` is gone and `view-title` reads `Sent`.
+
+- **Argument.** Open with a snooze phrase.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press ControlOrMeta+K
+  node .cursor/skills/verify-attn/control-attn.mjs wait command-palette-input
+  node .cursor/skills/verify-attn/control-attn.mjs fill command-palette-input "remind me tomorrow 9am"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-command-id=\"triage.snooze\"]')?.textContent"
+  node .cursor/skills/verify-attn/control-attn.mjs press Enter
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-row]').length"
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid toast
+  ```
+
+  The `triage.snooze` result contains `Snooze until`. After Enter, rows drop to 7 and `toast` reads `Snoozed`.
+
+- **Usage.** Open the palette again in this session after running Go to Sent. `close` deletes the profile, so ranking after a second `launch` is a fresh store.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press ControlOrMeta+K
+  node .cursor/skills/verify-attn/control-attn.mjs wait command-palette
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=command-palette-result]')?.getAttribute('data-command-id')"
+  ```
+
+  The first result is `view.sent`.
+
+- **Proof.** Snapshot the open palette and the Sent view.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-palette
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 02-sent
+  node .cursor/skills/verify-attn/control-attn.mjs eval "window.attn.settings.getCommandUsage('seed@attn.test')"
+  ```
 
 ## Gotchas
 
-- The Mod+K listener mounts with the app shell. `openPalette` retries the press until the input exists. Do not press once and assert.
+- The Mod+K listener mounts with the app shell. A press that lands too early is dropped. If `wait command-palette` fails, press `ControlOrMeta+K` again.
 - In the composer, `composer.new` and `search.open` are hidden. Their absence is the context proof, not a bug.
-- Escape or clicking `command-palette-backdrop` closes the palette and returns focus to the previous control.
+- Escape or `click command-palette-backdrop` closes the palette and returns focus to the previous control.
 - Keys pressed while the palette is open stay in the palette. Pressing `e` does not archive a row behind it.

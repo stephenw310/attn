@@ -16,25 +16,77 @@ The Inbox lists conversations grouped by age. A user moves the selection with J 
 - Press `g` then `i` from any mailbox to return to the Inbox.
 - Run `Go to Inbox` from the command palette.
 
-## Driving it with a verify-attn drive
+## Driving it with control-attn
 
 Preconditions:
 
-- Seed `fixtures/seed-inbox.json`. `page.getByTestId('thread-row')` has count 8.
-- `page.evaluate(() => window.attn.mail.getUnreadCount())` returns 4.
+- Seed `inbox`. `eval "document.querySelectorAll('[data-testid=thread-row]').length"` returns 8.
+- `eval "window.attn.mail.getUnreadCount()"` returns 4.
 
-- **Select.** Press J twice. Run `await page.keyboard.press('j')` twice. `selectedIndex(page)` from `e2e/nav` resolves to 2 and `rows.nth(2)` has `data-unread="true"`.
-- **Open.** Press Enter. Run `await page.keyboard.press('Enter')`. `conversation-view` is visible, `thread-list` is hidden, `conversation-subject` reads `Design notes`, and `conversation-view` has `data-thread-index="2"`.
-- **Mark read.** Read the store. Run `page.evaluate(() => window.attn.mail.getUnreadCount())` inside `expect.poll`. It resolves to 3 and `pending-count` contains `1 pending`.
-- **Next message.** Press J inside the reader. Run `await page.keyboard.press('j')`. `conversation-subject` reads `Lunch next week` and `data-thread-index` is `3`.
-- **Back.** Press Escape. Run `await page.keyboard.press('Escape')`. `conversation-view` has count 0, `thread-list` is visible, and `selectedIndex(page)` matches the thread you left.
-- **Proof.** Snapshot the list, the reader, and the list after return. Run `snap(page, testInfo, '01-inbox-list')`, `snap(page, testInfo, '02-reader')`, and `snap(page, testInfo, '03-back-to-list')`. Save both unread counts with `record(testInfo, 'unread-count.json', { unreadBefore, unreadAfter })`.
+- **Select.** Press J twice.
 
-The template drive [../drives/inbox-reading.spec.ts](../drives/inbox-reading.spec.ts) runs this recipe.
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press j
+  node .cursor/skills/verify-attn/control-attn.mjs press j
+  node .cursor/skills/verify-attn/control-attn.mjs eval "[...document.querySelectorAll('[data-testid=thread-row]')].findIndex(r => r.hasAttribute('data-selected'))"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-row]')[2]?.getAttribute('data-unread')"
+  ```
+
+  The selected index is 2 and that row has `data-unread="true"`.
+
+- **Open.** Press Enter.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press Enter
+  node .cursor/skills/verify-attn/control-attn.mjs wait conversation-view
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid conversation-subject
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=conversation-view]')?.getAttribute('data-thread-index')"
+  ```
+
+  `conversation-view` is visible, `thread-list` is hidden, the subject snapshot contains `Design notes`, and `data-thread-index` is `2`.
+
+- **Mark read.** Read the store.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs eval "window.attn.mail.getUnreadCount()"
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
+  ```
+
+  Unread count is 3 and `pending-count` contains `1 pending`.
+
+- **Next message.** Press J inside the reader.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press j
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid conversation-subject
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=conversation-view]')?.getAttribute('data-thread-index')"
+  ```
+
+  The subject snapshot contains `Lunch next week` and `data-thread-index` is `3`.
+
+- **Back.** Press Escape.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press Escape
+  node .cursor/skills/verify-attn/control-attn.mjs wait thread-list
+  node .cursor/skills/verify-attn/control-attn.mjs eval "[...document.querySelectorAll('[data-testid=thread-row]')].findIndex(r => r.hasAttribute('data-selected'))"
+  ```
+
+  `conversation-view` is gone, `thread-list` is visible, and the selected index matches the thread you left.
+
+- **Proof.** Snapshot the list, the reader, and the list after return.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-inbox-list
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 02-reader
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 03-back-to-list
+  ```
+
+  Save both unread counts from the `eval` results.
 
 ## Gotchas
 
-- `firstWindow()` can resolve before the store's first render. Assert the row count of 8 before pressing keys, or J clamps against a one-row list.
+- `launch` can return before the store's first render. Assert the row count of 8 before pressing keys, or J clamps against a one-row list.
 - Row 2 (`Your receipt`) is already read in the seed. Opening it does not change the unread count. Use row 3 (`Design notes`) for a mark-read proof.
 - `pending-count` renders only above zero. Assert count 0 for "nothing queued", not empty text.
 - The footer shortcut hints change between list and reader. `footer-shortcut-reply` exists only in the reader.

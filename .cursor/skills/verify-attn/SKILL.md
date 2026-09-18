@@ -1,62 +1,74 @@
 ---
 name: verify-attn
-description: Drive the built Attn desktop app (Electron Gmail client) with Playwright against a throwaway profile and capture screenshots plus store reads as proof. Use to verify a mail feature or UI change on the real app, to reproduce a reported defect, or when a change claims to work and needs runtime evidence rather than a passing unit test.
+description: Drive the built Attn desktop app (Electron Gmail client) through the control-attn CLI against a throwaway profile and capture screenshots plus store reads as proof. Use to verify a mail feature or UI change on the real app, to reproduce a reported defect, or when a change claims to work and needs runtime evidence rather than a passing unit test.
 disable-model-invocation: true
 ---
 
 # Verify Attn
 
-Attn's user surface is one Electron window. Every proof here boots the production build from `out/` with a fresh SQLite profile, drives it through Playwright's Electron API, and writes evidence to a run directory that survives cleanup. Nothing here touches Gmail or a developer's real profile.
+Attn's user surface is one Electron window. Every proof here boots the production build from `out/` with a fresh SQLite profile, drives it through `control-attn.mjs`, and writes evidence to a run directory that survives cleanup. Nothing here touches Gmail or a developer's real profile.
 
 Read [features/README.md](features/README.md) before you drive. It lists the mapped features and the conventions each recipe follows.
 
+The CLI is `node .cursor/skills/verify-attn/control-attn.mjs`. Every invocation is a fresh process. `launch` starts a detached daemon that holds the Playwright handle. Later commands talk to that daemon over a Unix socket.
+
 ## Launch
 
-Build once, then each drive boots its own app instance.
+Build once, then launch one app instance.
 
 ```sh
 npm run build
+node .cursor/skills/verify-attn/control-attn.mjs launch --seed inbox
 ```
 
-A drive launches `out/main/index.js` through the `e2e/electron.ts` fixture with `ATTN_TEST_USER_DATA` set to a new `attn-e2e-*` directory under the OS temp dir and `ATTN_TEST_SEED` pointing at a fixture in `e2e/fixtures/`. The app is ready when `firstWindow()` resolves and `main.log` in that directory contains `[db] open at ... attn.db (schema vN)`. Windows stay hidden. Pass `--visible` to `drive.mjs` to show them.
+`launch` runs the doctor first and refuses on failure. It starts `out/main/index.js` through Playwright's Electron API with `ATTN_TEST_USER_DATA` set to a new `attn-verify-*` directory under the OS temp dir. `--seed inbox` sets `ATTN_TEST_SEED` to `e2e/fixtures/seed-inbox.json`. Any other name resolves to `e2e/fixtures/seed-<name>.json`. A value that contains `/` is used as a path.
 
-Teardown is automatic. The fixture calls `app.close()` and deletes the profile directory when the drive ends, pass or fail.
+The app is ready when `ping` succeeds. Confirm isolation with `doctor`. `main.log` in the profile directory contains `[db] open at ... attn-verify-... attn.db (schema vN)`. Windows stay hidden. Pass `--visible` to show them.
 
-Two instances can run side by side because each owns its profile. Do not run `npm run dev` for verification. It uses the developer's real profile and real OAuth tokens.
+`launch` prints JSON with `runId`, `userData`, and `evidenceDir`. It also prints `ATTN_VERIFY_RUN=<runId>` on stderr. Export that value, or pass `--run <runId>` on later commands. If both are omitted, the CLI uses the newest run file.
+
+Do not run `npm run dev` for verification. It uses the developer's real profile and real OAuth tokens.
+
+`close` quits the app and deletes the profile. Evidence in `e2e/.artifacts/verify-attn/<runId>/` stays.
 
 ## Doctor
 
-Run before the first drive and again after any drive fails for a reason you do not understand.
+Run before the first launch and again after a command fails for a reason you do not understand.
 
 ```sh
-node .cursor/skills/verify-attn/scripts/doctor.mjs
+node .cursor/skills/verify-attn/control-attn.mjs doctor
 ```
 
-It is read-only. It checks the Node version, that `out/main/index.js`, `out/preload/index.js`, and `out/renderer/index.html` exist and are newer than every file in `src/`, that the Electron binary and the `better-sqlite3` prebuild for this platform exist, and it counts leftover `attn-e2e-*` profiles. A stale build fails the check. Run `npm run build` and retry.
+It is read-only. Pre-flight checks the Node version, that `out/main/index.js`, `out/preload/index.js`, and `out/renderer/index.html` exist and are newer than every file in `src/`, and that the Electron binary and the `better-sqlite3` prebuild for this platform exist. A stale build fails the check. Run `npm run build` and retry.
 
-Inside a drive, `assertIsolated(app, userData, mainLog)` from `drives/harness.ts` is the live-instance doctor. It confirms `app.getPath('userData')` is the throwaway directory and that the store opened there.
+When a run is targeted, doctor also checks that the pid is alive, the socket answers `ping`, `info.userData` matches the run file, `main.log` shows the throwaway store, and the renderer error count is 0.
 
-`drive.mjs` runs the doctor first. Pass `--skip-doctor` only when you ran it moments ago.
+`launch` runs the pre-flight checks first.
 
 ## Drive
 
-Write a drive as a Playwright spec in `.cursor/skills/verify-attn/drives/`. Name a throwaway drive `scratch-<name>.spec.ts`. Git ignores that prefix. Start from [drives/inbox-reading.spec.ts](drives/inbox-reading.spec.ts).
+Issue commands against the live instance. Start from [features/inbox-reading.md](features/inbox-reading.md).
 
 ```sh
-node .cursor/skills/verify-attn/scripts/drive.mjs scratch-<name>
-node .cursor/skills/verify-attn/scripts/drive.mjs --visible --grep "marks it read"
+node .cursor/skills/verify-attn/control-attn.mjs press j
+node .cursor/skills/verify-attn/control-attn.mjs eval "window.attn.mail.getUnreadCount()"
+node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-inbox-list
 ```
 
-Arguments after the script name pass through to Playwright. `--visible` shows the window.
+Select elements with `click <testid>`. Never select Tailwind classes. Drive the keyboard with `press <key>`. `ControlOrMeta` maps to Command on macOS and Control elsewhere.
 
-Import the fixture and drivers the e2e suite already owns. Paths are relative to `drives/`.
+Common moves:
 
-- `../../../../e2e/electron` gives `test`, `expect`, and the `app`, `page`, `userData`, `mainLog`, and `boot` fixtures. `test.use({ seed: 'fixtures/seed-inbox.json' })` seeds the store.
-- `../../../../e2e/nav` gives `goTo(page, key)` for G chords, `threadRow(page, subject)`, `selectedIndex(page)`, `openPalette(page, query)`, `runPaletteCommand(page, query)`, and `enableAi(page)`.
-- `../../../../e2e/composer` gives `ComposerPage` with `openNew()`, `openReply()`, `addRecipient()`, `typeBody()`, `triggerSend()`, `expectPending(n)`, and `expectSaved()`.
-- `../../../../e2e/seams` gives `armSending(app)`, `installFakeAi(app, script)`, `setSyncState(app, state)`, `expireReminders(app, n)`, and `flushRendererIpc(page)`.
+- Open the command palette with `press ControlOrMeta+K`.
+- Run a palette command with `press ControlOrMeta+K`, `fill command-palette-input <query>`, `press Enter`.
+- Go to a mailbox with a G chord, for example `press g` then `press i` for Inbox.
+- Send without Gmail or an undo delay with `seam setUndoSendDelay 0 --fire` then `seam installSendProvider`.
+- Script AI replies with `seam installFakeAiProvider '{"chunks":["..."]}'`.
+- Make Gmail reject the next action on a thread with `seam failNextAction t-roadmap`.
 
-Select elements with `page.getByTestId(...)`. Never select Tailwind classes. Drive the keyboard with `page.keyboard.press(...)`. `ControlOrMeta` maps to Command on macOS and Control elsewhere. Stable handles used across the map:
+`seam <name>` reaches the test-only controls listed in `docs/TESTING.md`. The name maps to the `attn:test:<name>` channel. Extra arguments are parsed as JSON when they parse, otherwise passed as strings.
+
+Stable handles used across the map:
 
 | Handle | Meaning |
 | --- | --- |
@@ -69,50 +81,50 @@ Select elements with `page.getByTestId(...)`. Never select Tailwind classes. Dri
 | `toast`, `toast-undo`, `pending-count`, `outbox-count` | Feedback and queued work |
 | `snooze-picker`, `snooze-preset-tomorrow`, `selection-count` | Snooze and multi-select |
 
-The fixture fails a drive when the renderer logs a console error. Keep that behavior. It is part of the proof.
+The daemon records leftover renderer console errors in `renderer-errors.log`. `info` reports the count. Keep that count at 0. It is part of the proof.
 
 ## Evidence
 
-Each run writes to `e2e/.artifacts/verify-attn/<run-id>/`. `drive.mjs` prints the run id and lists every file at the end. The directory is git-ignored and outlives cleanup.
+Each run writes to `e2e/.artifacts/verify-attn/<runId>/`. `launch` prints that path. `cleanup` does not delete it. The directory is git-ignored.
 
-Use the helpers in `drives/harness.ts`.
-
-- `snap(page, testInfo, '01-name')` writes `<drive-slug>/01-name.png`.
-- `record(testInfo, 'name.json', value)` writes text or JSON beside the screenshots.
-- Playwright writes a trace to `<run-id>/results/` when a drive fails. Open it with `npx playwright show-trace <path>`.
+- `screenshot <name>` writes `<name>.png` in the evidence dir.
+- `snapshot` prints ARIA text. Redirect it into the evidence dir when you need a file.
+- `eval` prints a JSON result. Copy it into the evidence dir when you need a file.
+- `log` prints the last lines of the profile `main.log`.
+- `daemon.log`, `main-stdio.log`, and `renderer-errors.log` land in the evidence dir.
 
 Proof standards for this app:
 
 - Exercise the user path. Press the key or click the control. Do not call `window.attn.*` setters to reach a state and then screenshot it.
 - Capture the action and the resulting state, not only the final screen. Number screenshots in order.
-- Verify the side effect in the store alongside the screen. Production bridge reads are legitimate evidence, for example `page.evaluate(() => window.attn.mail.getUnreadCount())` or `mainLog()`. Test seams in `e2e/seams.ts` set up conditions. They are not proof.
-- Sends and AI calls cross a production boundary. `armSending(app)` installs the fake send provider with no undo delay. `installFakeAi(app, script)` installs the fake AI provider. Use them and no other mock. Without `armSending`, a send waits in the undo window and never reaches a provider.
-- Check `pending-count` or `expectPending(n)` after a mail action. Attn applies changes to SQLite first and queues the Gmail call. A queued row is the expected end state.
+- Verify the side effect in the store alongside the screen. Production bridge reads are legitimate evidence, for example `eval "window.attn.mail.getUnreadCount()"` or `log`. Test seams set up conditions. They are not proof.
+- Sends and AI calls cross a production boundary. `seam setUndoSendDelay 0 --fire` then `seam installSendProvider` installs the fake send provider with no undo delay. `seam installFakeAiProvider '{"chunks":[...]}'` installs the fake AI provider. Use them and no other mock. Without that send seam, a send waits in the undo window and never reaches a provider.
+- Check `pending-count` after a mail action. Attn applies changes to SQLite first and queues the Gmail call. A queued row is the expected end state.
 
 ## Cleanup
 
-The fixture removes the profile it created when the drive exits. After a crashed or interrupted run:
+`close` removes the profile it created. After a crashed or interrupted run:
 
 ```sh
-node .cursor/skills/verify-attn/scripts/cleanup.mjs
-node .cursor/skills/verify-attn/scripts/cleanup.mjs --older-than 0
+node .cursor/skills/verify-attn/control-attn.mjs cleanup --dry-run
+node .cursor/skills/verify-attn/control-attn.mjs cleanup
 ```
 
-It removes `attn-e2e-*` profiles in the OS temp dir whose newest file is older than the threshold (default 60 minutes) and nothing else. Use `--older-than 0` only when no Attn test or verification run is active on this machine.
+It removes run files whose pid is dead, their sockets, and their `attn-verify-*` profiles. It also removes orphan `attn-verify-*` dirs in the OS temp dir that no run file references and whose newest file is older than 60 minutes. `--all` also sends `close` to live runs, and SIGTERM the pid if the socket does not answer. It never touches `e2e/.artifacts`. `--dry-run` prints the plan and changes nothing.
 
-Stop a hung run with Ctrl-C. Playwright closes the Electron process it launched. Never `pkill Electron` or kill by process name. The developer's own Attn or another Electron app may be running.
-
-Delete `drives/scratch-*.spec.ts` when the proof is done, or rename the file and add it to the feature map if it proves a mapped feature better than the current recipe.
+Never `pkill Electron` or kill by process name. The developer's own Attn or another Electron app may be running.
 
 ## Helpers
 
-| Script | Invocation | Purpose |
+| Command | Invocation | Purpose |
 | --- | --- | --- |
-| `scripts/doctor.mjs` | `node .cursor/skills/verify-attn/scripts/doctor.mjs` | Read-only pre-flight |
-| `scripts/drive.mjs` | `node .cursor/skills/verify-attn/scripts/drive.mjs [--visible] [--skip-doctor] [playwright args]` | Doctor, run drives, list evidence |
-| `scripts/cleanup.mjs` | `node .cursor/skills/verify-attn/scripts/cleanup.mjs [--older-than <minutes>]` | Remove leftover profiles |
-| `drives/harness.ts` | `import { assertIsolated, record, snap } from './harness'` | Live doctor and evidence writers |
-| `playwright.config.ts` | Used by `drive.mjs`, which sets `ATTN_VERIFY_RUN` | Runs `drives/` only, one worker, 60 s timeout |
-| `scripts/fs.mjs` | Imported by `doctor.mjs` and `cleanup.mjs` | Newest file mtime under a directory |
+| `launch` | `node .cursor/skills/verify-attn/control-attn.mjs launch --seed inbox` | Doctor, boot a throwaway instance |
+| `doctor` | `node .cursor/skills/verify-attn/control-attn.mjs doctor` | Read-only pre-flight and live checks |
+| `press` / `type` / `click` / `fill` / `wait` | `node .cursor/skills/verify-attn/control-attn.mjs press j` | Drive the window |
+| `eval` / `seam` / `info` / `log` | `node .cursor/skills/verify-attn/control-attn.mjs eval "window.attn.mail.getUnreadCount()"` | Store reads and test seams |
+| `snapshot` / `screenshot` | `node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-inbox-list` | Evidence |
+| `close` | `node .cursor/skills/verify-attn/control-attn.mjs close` | Quit and delete the profile |
+| `cleanup` | `node .cursor/skills/verify-attn/control-attn.mjs cleanup` | Remove leftover profiles |
+| `help` | `node .cursor/skills/verify-attn/control-attn.mjs help` | Usage for every command |
 
-`npm run typecheck` covers `drives/` and this config. `npm run lint` formats them. Keep both green.
+`npx biome check .cursor` formats the CLI. Keep it green.

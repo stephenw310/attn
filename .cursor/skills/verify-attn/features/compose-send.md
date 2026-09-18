@@ -18,26 +18,101 @@ A user writes a new message or a reply, adds recipients, and sends with Mod+Ente
 - Press `r`, `a`, or `f` inside the reader.
 - Run `New message`, `Reply all`, `Forward`, or `Discard draft` from the command palette.
 
-## Driving it with a verify-attn drive
+## Driving it with control-attn
 
 Preconditions:
 
-- Seed `fixtures/seed-inbox.json`. `page.getByTestId('thread-list')` is attached.
-- `const composer = new ComposerPage(page)` from `e2e/composer`.
+- Seed `inbox`. `wait thread-list` succeeds.
 
-- **Open.** Press C. Run `await composer.openNew()`. `composer` is visible and `composer-subject` is empty.
-- **Recipients.** Type an address and press Enter. Run `await composer.addRecipient('undo@example.com')`. `await composer.expectRecipients(['undo@example.com'])` passes.
-- **Subject and body.** Fill both. Run `await composer.subject.fill('Verify send')` and `await composer.typeBody('Body text')`. The editor contains `Body text`.
-- **Send into the undo window.** Press Mod+Enter. Run `await composer.triggerSend()`. `composer` has count 0, `toast` matches `/Sending in \d+ secondsUndo Z/`, and `await composer.expectPending(1)` passes.
-- **Undo.** Select Undo on the toast. Run `await page.getByTestId('toast-undo').click()`. `composer` is visible with the same recipients, subject, and body, and `await composer.expectPending(0)` passes.
-- **Send through the provider.** Arm the fake provider first. Run `await armSending(app)` from `e2e/seams`, then `await composer.triggerSend()`. `composer` has count 0 and `await composer.expectPending(0)` passes.
-- **Draft.** Open a new composer, fill a subject, press Escape. Run `await page.keyboard.press('Escape')`. `toast` reads `Draft saved` and `await composer.expectPending(1)` passes.
-- **Proof.** Snapshot the composer, the countdown toast, and the reopened draft. Save the `outbox-count` text before and after with `record()`.
+- **Open.** Press C.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs wait thread-list
+  node .cursor/skills/verify-attn/control-attn.mjs press c
+  node .cursor/skills/verify-attn/control-attn.mjs wait composer
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=composer-subject]')?.value ?? document.querySelector('[data-testid=composer-subject]')?.textContent"
+  ```
+
+  `composer` is visible and `composer-subject` is empty.
+
+- **Recipients.** Type an address and press Enter.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs fill composer-to undo@example.com
+  node .cursor/skills/verify-attn/control-attn.mjs press Enter
+  node .cursor/skills/verify-attn/control-attn.mjs eval "[...document.querySelectorAll('[data-testid=recipient-chip]')].map(c => c.getAttribute('data-email'))"
+  ```
+
+  The chips are `['undo@example.com']`.
+
+- **Subject and body.** Fill both.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs fill composer-subject "Verify send"
+  node .cursor/skills/verify-attn/control-attn.mjs fill composer-editor "Body text"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=composer-editor]')?.textContent"
+  ```
+
+  The editor contains `Body text`.
+
+- **Send into the undo window.** Press Mod+Enter.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press ControlOrMeta+Enter
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=composer]').length"
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid toast
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
+  ```
+
+  `composer` has count 0, `toast` matches `/Sending in \d+ secondsUndo Z/`, and `pending-count` contains `1 pending`.
+
+- **Undo.** Select Undo on the toast.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs click toast-undo
+  node .cursor/skills/verify-attn/control-attn.mjs wait composer
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=pending-count]').length"
+  ```
+
+  `composer` is visible with the same recipients, subject, and body, and `pending-count` is gone.
+
+- **Send through the provider.** Arm the fake provider first.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs seam setUndoSendDelay 0 --fire
+  node .cursor/skills/verify-attn/control-attn.mjs seam installSendProvider
+  node .cursor/skills/verify-attn/control-attn.mjs press ControlOrMeta+Enter
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=composer]').length"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=pending-count]').length"
+  ```
+
+  `composer` has count 0 and `pending-count` is gone.
+
+- **Draft.** Open a new composer, fill a subject, press Escape.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press c
+  node .cursor/skills/verify-attn/control-attn.mjs wait composer
+  node .cursor/skills/verify-attn/control-attn.mjs fill composer-subject "Draft subject"
+  node .cursor/skills/verify-attn/control-attn.mjs press Escape
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid toast
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
+  ```
+
+  `toast` reads `Draft saved` and `pending-count` contains `1 pending`.
+
+- **Proof.** Snapshot the composer, the countdown toast, and the reopened draft. Save the `outbox-count` text before and after.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-composer
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 02-undo-toast
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 03-reopened-draft
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=outbox-count]')?.textContent"
+  ```
 
 ## Gotchas
 
-- Without `armSending(app)` the send sits in the Outbox for the undo window and never reaches a provider. The countdown toast is the proof of that state. Do not wait it out on the wall clock.
+- Without `seam setUndoSendDelay 0 --fire` and `seam installSendProvider` the send sits in the Outbox for the undo window and never reaches a provider. The countdown toast is the proof of that state. Do not wait it out on the wall clock.
 - Hidden windows do not dispatch `selectionchange`. To edit at a position, click it and type one character first, then delete through it.
-- `expectSaved()` waits for a saved revision newer than the last one it saw. Call it on the same `ComposerPage` instance throughout.
 - Whether the fake provider's send appears in the Sent mailbox is not established by this map. Treat an Outbox count of 0 as the delivery proof until a recipe proves the Sent row.
 - Chips expose the address in `data-email`. Assert that attribute, not the visible text.

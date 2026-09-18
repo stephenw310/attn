@@ -18,24 +18,97 @@ Triage lets a user archive, snooze, or act on one or many selected conversations
 - Press `z` after any action to undo it.
 - Run `Mark done`, `Snooze / remind me later`, or `Undo` from the command palette.
 
-## Driving it with a verify-attn drive
+## Driving it with control-attn
 
 Preconditions:
 
-- Seed `fixtures/seed-inbox.json`. `page.getByTestId('thread-row')` has count 8 and `rows.nth(1)` contains `Northstar Books`.
-- `pending-count` has count 0.
+- Seed `inbox`. `eval "document.querySelectorAll('[data-testid=thread-row]').length"` returns 8 and the second row contains `Northstar Books`.
+- `eval "document.querySelectorAll('[data-testid=pending-count]').length"` returns 0.
 
-- **Archive.** Press E. Run `await page.keyboard.press('e')`. Rows drop to 7, `rows.first()` contains `Northstar Books` and has `data-selected="true"`, and `pending-count` contains `1 pending`.
-- **Undo.** Press Z. Run `await page.keyboard.press('z')`. Rows return to 8 and `pending-count` contains `2 pending`.
-- **Multi-select.** Press X then Shift+J seven times. Run `await page.keyboard.press('x')` and then `await page.keyboard.press('Shift+j')` in a loop of 7. `selection-count` reads `8 selected`.
-- **Archive all.** Press E. Run `await page.keyboard.press('e')`. Rows drop to 0 and `thread-date-group` has count 0.
-- **Snooze.** From a fresh baseline, press H and choose the tomorrow preset. Run `await page.keyboard.press('h')` and `await page.getByTestId('snooze-preset-tomorrow').click()`. `snooze-picker` was visible, rows drop to 7.
-- **Snoozed mailbox.** Press G then H. Run `await goTo(page, 'h')` from `e2e/nav`. `view-title` reads `Snoozed`, one row contains `Maya Lin`, and its `chip-snooze-due` is visible.
-- **Proof.** Snapshot after archive, after undo, and in Snoozed. Save the `pending-count` text and `window.attn.mail.getUnreadCount()` with `record()`.
+- **Archive.** Press E.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press e
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-row]').length"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=thread-row]')?.textContent"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=thread-row]')?.hasAttribute('data-selected')"
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
+  ```
+
+  Rows drop to 7, the first row contains `Northstar Books` and has `data-selected="true"`, and `pending-count` contains `1 pending`.
+
+- **Undo.** Press Z.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press z
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-row]').length"
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
+  ```
+
+  Rows return to 8 and `pending-count` contains `2 pending`.
+
+- **Multi-select.** Press X then Shift+J seven times.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press x
+  node .cursor/skills/verify-attn/control-attn.mjs press Shift+j
+  node .cursor/skills/verify-attn/control-attn.mjs press Shift+j
+  node .cursor/skills/verify-attn/control-attn.mjs press Shift+j
+  node .cursor/skills/verify-attn/control-attn.mjs press Shift+j
+  node .cursor/skills/verify-attn/control-attn.mjs press Shift+j
+  node .cursor/skills/verify-attn/control-attn.mjs press Shift+j
+  node .cursor/skills/verify-attn/control-attn.mjs press Shift+j
+  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid selection-count
+  ```
+
+  `selection-count` reads `8 selected`.
+
+- **Archive all.** Press E.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press e
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-row]').length"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-date-group]').length"
+  ```
+
+  Rows drop to 0 and `thread-date-group` has count 0.
+
+- **Snooze.** From a fresh baseline, press H and choose the tomorrow preset.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press h
+  node .cursor/skills/verify-attn/control-attn.mjs wait snooze-picker
+  node .cursor/skills/verify-attn/control-attn.mjs click snooze-preset-tomorrow
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-row]').length"
+  ```
+
+  `snooze-picker` was visible, rows drop to 7.
+
+- **Snoozed mailbox.** Press G then H.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs press g
+  node .cursor/skills/verify-attn/control-attn.mjs press h
+  node .cursor/skills/verify-attn/control-attn.mjs wait view-title
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=view-title]')?.textContent"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=thread-row]')?.textContent"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=chip-snooze-due]') !== null"
+  ```
+
+  `view-title` reads `Snoozed`, one row contains `Maya Lin`, and its `chip-snooze-due` is visible.
+
+- **Proof.** Snapshot after archive, after undo, and in Snoozed. Save the `pending-count` text and `window.attn.mail.getUnreadCount()`.
+
+  ```sh
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-archived
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 02-undone
+  node .cursor/skills/verify-attn/control-attn.mjs screenshot 03-snoozed
+  node .cursor/skills/verify-attn/control-attn.mjs eval "window.attn.mail.getUnreadCount()"
+  ```
 
 ## Gotchas
 
-- Rows animate out with `data-exiting="true"` before they leave the DOM. Assert the final count with `expect(rows).toHaveCount(n)`, which retries, not a one-shot read.
+- Rows animate out with `data-exiting="true"` before they leave the DOM. Re-run the row-count `eval` until it settles, not a one-shot read.
 - Undo queues a second action. `2 pending` after undo is correct, not a leak.
 - The palette accepts an inline snooze argument such as `remind me tomorrow 9am`. That path is covered in [command-palette.md](./command-palette.md).
-- `TEST_CHANNELS.failNextAction` makes Gmail reject the next action for one thread. It sets up a recovery scenario. The toast text `Couldn't archive ...` is the proof, not the seam call.
+- `seam failNextAction` makes Gmail reject the next action for one thread. It sets up a recovery scenario. The toast text `Couldn't archive ...` is the proof, not the seam call.
