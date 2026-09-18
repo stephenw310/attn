@@ -155,8 +155,12 @@ export const SEARCH_RECENT_MESSAGE_LIMIT = 2_000
 
 /**
  * The yes-probability a stored judgment needs before a described split claims
- * the thread. This is an untuned starting value: a dogfood eval over real mail
- * sets the shipped number, so do not read 0.7 as a measured operating point.
+ * the thread. Measured with `scripts/triage-eval.mjs` on 2026-09-18 over 100
+ * Inbox threads and four described splits: true positives scored 0.72 or
+ * above and true negatives 0.53 or below, so 0.6 and 0.7 claim the same
+ * threads. Three splits reached precision and recall 1.00; the fourth's two
+ * misses scored above 0.78, which a threshold cannot fix — a tighter
+ * description can. Re-run the eval before changing this.
  */
 export const SPLIT_TRIAGE_THRESHOLD = 0.7
 

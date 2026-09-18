@@ -18,7 +18,7 @@
 // separated by `;`, or leave it empty for none. Then run `score`.
 
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -104,6 +104,12 @@ function loadSamples(db: Database.Database, accountId: string, limit: number): T
 }
 
 function loadRules(path: string): TriageRule[] {
+  if (!existsSync(path)) {
+    throw new Error(
+      `${path} does not exist. Write a JSON array of { "name", "description" } entries, ` +
+        'one per split you want to measure, then run judge again.'
+    )
+  }
   const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
   if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('splits.json must be a non-empty array')
   return parsed.map((entry, index) => {

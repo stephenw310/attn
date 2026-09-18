@@ -19,23 +19,6 @@ Affected symbol: `$clearSelectionFormatting` in `src/renderer/src/composer/bodyE
 
 Verified: 2026-09-16 on PR #131.
 
-### BUG-16: The described-split threshold is an untuned starting value
-
-Symptom: A described split can over-claim or under-claim conversations. The stored yes-probability decides membership at a fixed cutoff that no evaluation has set. A description that reads well can still collect unrelated mail, or leave the mail it describes in Other.
-
-Steps to reproduce:
-
-1. Enable smart splits and save a TypeSafe key.
-2. Create a split whose only condition is a description, such as "Anything from my landlord".
-3. Wait for the classifier pass to finish.
-4. Compare the split against the conversations you expect. Borderline conversations fall on either side.
-
-Workaround: rewrite the description with a concrete example, or add a hard condition to the rule.
-
-Affected symbol: `SPLIT_TRIAGE_THRESHOLD` in `src/main/sync/tuning.ts`. The shipped value is 0.7. A dogfood evaluation over real mail must set the number.
-
-Verified: 2026-09-17 on the smart-splits branch.
-
 ### BUG-17: An older build hides a rule that holds a description
 
 Symptom: A user who installs a build older than smart splits loses every split rule that holds a description condition. The rule disappears from the Inbox strip and from the split-rule manager. Its conversations fall through to the next matching split, or to Other.
