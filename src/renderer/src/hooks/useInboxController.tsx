@@ -436,6 +436,11 @@ export function useInboxController({
     setSettingsOpen(false)
     setSettingsFocus(null)
   }, [])
+  /** Split rules own the smart-splits consent, so Settings links here (F11, F15). */
+  const openSplitRules = useCallback(() => {
+    closeSettings()
+    setSplitRulesOpen(true)
+  }, [closeSettings])
 
   // Settings Esc rides the bubble phase: overlays that own Escape (palette,
   // cheat sheet, remove-account dialog) consume it during capture, and the
@@ -817,6 +822,7 @@ export function useInboxController({
   useSettingsCommands({
     settings: appSettings,
     openSettings,
+    openSplitRules,
     openCheatSheet,
     updateAppSetting,
     updateAccountSetting,
@@ -958,6 +964,7 @@ export function useInboxController({
     toggleFooter,
     toggleSidebar,
     openSettings,
+    openSplitRules,
     closeSettings,
     openCheatSheet,
     closeCheatSheet,

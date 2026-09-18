@@ -127,12 +127,7 @@ describe('split triage pass', () => {
   }
 
   const describedSplit = (accountId: string, name: string, description: string): string => {
-    const state = saveSplit(db, accountId, {
-      name,
-      operator: 'any',
-      conditions: [{ type: 'description', value: description }],
-      notify: true
-    })
+    const state = saveSplit(db, accountId, { name, mode: 'description', description, notify: true })
     const rule = state.splits.find((split) => split.name === name)
     if (!rule) throw new Error(`missing split ${name}`)
     return rule.id

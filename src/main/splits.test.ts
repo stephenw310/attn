@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { IMPORTANT_SPLIT_ID, SPLIT_DESCRIPTION_MAX_LENGTH } from '../shared/splits'
+import {
+  IMPORTANT_SPLIT_ID,
+  SPLIT_DESCRIPTION_MAX_LENGTH,
+  SPLIT_DESCRIPTION_MIN_LENGTH
+} from '../shared/splits'
 import { type Db, openDatabase } from './db'
 import { listInboxThreads } from './db/queries'
 import {
@@ -8,13 +12,14 @@ import {
   descriptionHash,
   ensureSplitSetup,
   getSplitState,
-  normalizeSplitMatch,
+  normalizeDescription,
   notificationEnabledSplitIds,
   reorderSplits,
   restoreSplitPreset,
   saveSplit,
   splitLocationForThread,
-  splitRevision
+  splitRevision,
+  splitTriageCounts
 } from './splits'
 
 describe('split inbox', () => {
@@ -62,27 +67,27 @@ describe('split inbox', () => {
     })
   }
 
-  /** A stored classifier answer. Phase 3 writes these; Phase 1 only reads them. */
+  /**
+   * A stored classifier answer. `evidenceKey` defaults to a value no message
+   * id can equal, so a compiled rule reads it while the triage counts still
+   * call the thread unjudged; pass the real message id to answer it for good.
+   */
   const insertJudgment = (
     threadId: string,
     splitId: string,
     description: string,
-    probability: number
+    probability: number,
+    evidenceKey = `${threadId}-evidence`
   ): void => {
     db.prepare(
       `INSERT INTO split_judgments
        (account_id, thread_id, split_id, description_hash, evidence_key, probability, judged_at)
        VALUES ('account', ?, ?, ?, ?, ?, 1)`
-    ).run(threadId, splitId, descriptionHash(description), `${threadId}-evidence`, probability)
+    ).run(threadId, splitId, descriptionHash(description), evidenceKey, probability)
   }
 
   const describedSplit = (name: string, description: string): string => {
-    const state = saveSplit(db, 'account', {
-      name,
-      operator: 'any',
-      conditions: [{ type: 'description', value: description }],
-      notify: false
-    })
+    const state = saveSplit(db, 'account', { name, mode: 'description', description, notify: false })
     const custom = state.splits.find((split) => split.name === name)
     if (!custom) throw new Error(`Expected split ${name}`)
     return custom.id
@@ -141,6 +146,7 @@ describe('split inbox', () => {
 
     const saved = saveSplit(db, 'account', {
       name: 'GitHub important',
+      mode: 'rules',
       operator: 'all',
       conditions: [
         { type: 'senderDomain', value: 'GitHub.com' },
@@ -175,6 +181,7 @@ describe('split inbox', () => {
     }
     const state = saveSplit(db, 'account', {
       name: 'Query test',
+      mode: 'rules',
       operator: 'any',
       conditions: [{ type: 'senderDomain', value: 'query.test' }],
       notify: false
@@ -265,58 +272,97 @@ describe('split inbox', () => {
   })
 
   it('collapses description whitespace, keeps case, and rejects lengths outside the limits', () => {
-    const conditions = (value: string) =>
-      normalizeSplitMatch({ version: 1, operator: 'any', conditions: [{ type: 'description', value }] })
-        ?.conditions
-
-    expect(conditions('  Anything   from\n\t my  Landlord  ')).toEqual([
-      { type: 'description', value: 'Anything from my Landlord' }
-    ])
-    expect(conditions('Bug')).toEqual([{ type: 'description', value: 'Bug' }])
-    expect(conditions('a'.repeat(SPLIT_DESCRIPTION_MAX_LENGTH))).toEqual([
-      { type: 'description', value: 'a'.repeat(SPLIT_DESCRIPTION_MAX_LENGTH) }
-    ])
+    expect(normalizeDescription('  Anything   from\n\t my  Landlord  ')).toBe('Anything from my Landlord')
+    expect(normalizeDescription('Bug')).toBe('Bug')
+    const longest = 'a'.repeat(SPLIT_DESCRIPTION_MAX_LENGTH)
+    expect(normalizeDescription(longest)).toBe(longest)
     // Too short and too long are both rejected: a long description is never
     // truncated, because a cut question is not the one the user wrote.
-    expect(conditions('ab')).toBeUndefined()
-    expect(conditions('   ')).toBeUndefined()
-    expect(conditions('a'.repeat(SPLIT_DESCRIPTION_MAX_LENGTH + 1))).toBeUndefined()
-  })
-
-  it('rejects a rule that carries more than one description', () => {
-    // `split_judgments` stores one answer per (thread, split), so a second
-    // description would have nowhere to live and would read the first's answer.
-    expect(
-      normalizeSplitMatch({
-        version: 1,
-        operator: 'any',
-        conditions: [
-          { type: 'description', value: 'Anything from my landlord' },
-          { type: 'description', value: 'Anything from my bank' }
-        ]
-      })
-    ).toBeNull()
-    expect(
-      normalizeSplitMatch({
-        version: 1,
-        operator: 'all',
-        conditions: [
-          { type: 'description', value: 'Anything from my landlord' },
-          { type: 'senderDomain', value: 'landlord.test' }
-        ]
-      })?.conditions
-    ).toHaveLength(2)
+    expect(normalizeDescription('ab')).toBeNull()
+    expect(normalizeDescription('   ')).toBeNull()
+    expect(normalizeDescription('a'.repeat(SPLIT_DESCRIPTION_MAX_LENGTH + 1))).toBeNull()
+    expect(() =>
+      saveSplit(db, 'account', { name: 'Too short', mode: 'description', description: 'ab', notify: false })
+    ).toThrow(`Describe the split in ${SPLIT_DESCRIPTION_MIN_LENGTH} to ${SPLIT_DESCRIPTION_MAX_LENGTH}`)
     expect(() =>
       saveSplit(db, 'account', {
-        name: 'Two questions',
+        name: 'Empty',
+        mode: 'rules',
         operator: 'any',
-        conditions: [
-          { type: 'description', value: 'Anything from my landlord' },
-          { type: 'description', value: 'Anything from my bank' }
-        ],
+        conditions: [],
         notify: false
       })
     ).toThrow('Add at least one complete split condition')
+  })
+
+  it('switches a split between the two modes and never keeps both definitions', () => {
+    insertThread('vendor', 100, [{ id: 'vendor-message', from: 'alerts@vendor.test' }])
+    const splitId = describedSplit('Alerts', 'Something is broken')
+    insertJudgment('vendor', splitId, 'Something is broken', 0.95)
+    expect(listInboxThreads(db, 'account', 10, null, splitId).map((row) => row.id)).toEqual(['vendor'])
+
+    // Rules mode clears the prose, so the stored judgment stops counting.
+    const rules = saveSplit(db, 'account', {
+      id: splitId,
+      name: 'Alerts',
+      mode: 'rules',
+      operator: 'any',
+      conditions: [{ type: 'senderDomain', value: 'other.test' }],
+      notify: false
+    })
+    const saved = rules.splits.find((split) => split.id === splitId)
+    expect(saved?.description).toBeNull()
+    expect(saved?.match.conditions).toEqual([{ type: 'senderDomain', value: 'other.test' }])
+    expect(listInboxThreads(db, 'account', 10, null, splitId)).toEqual([])
+
+    // A row that carries both is read as described: the prose wins.
+    db.prepare("UPDATE split_rules SET description = ? WHERE account_id = 'account' AND id = ?").run(
+      'Something is broken',
+      splitId
+    )
+    const described = getSplitState(db, 'account').splits.find((split) => split.id === splitId)
+    expect(described?.description).toBe('Something is broken')
+    expect(described?.match.conditions).toEqual([])
+    expect(listInboxThreads(db, 'account', 10, null, splitId).map((row) => row.id)).toEqual(['vendor'])
+  })
+
+  it('counts described splits, judged threads, and the ones still waiting', () => {
+    insertThread('judged', 300, [{ id: 'judged-message', from: 'billing@supplier.test' }])
+    insertThread('waiting', 200, [{ id: 'waiting-message', from: 'friend@example.com' }])
+    // No message at all: the pass cannot judge it, so it is neither judged nor pending.
+    db.prepare(
+      `INSERT INTO threads
+       (account_id, id, subject, snippet, last_msg_at, from_display, is_unread, is_inbox_visible)
+       VALUES ('account', 'empty', 'empty', '', 100, '', 0, 1)`
+    ).run()
+    db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES ('account', 'empty', 'INBOX')"
+    ).run()
+
+    expect(splitTriageCounts(db, 'account')).toEqual({
+      describedSplits: 0,
+      judgedThreads: 0,
+      pendingThreads: 0
+    })
+
+    const splitId = describedSplit('Invoices', 'Invoices I have to pay')
+    expect(splitTriageCounts(db, 'account')).toEqual({
+      describedSplits: 1,
+      judgedThreads: 0,
+      pendingThreads: 2
+    })
+
+    // A judgment counts only when it answered this description against the
+    // thread's latest message, which is the queue's own definition of current.
+    insertJudgment('judged', splitId, 'Invoices I have to pay', 0.1, 'judged-message')
+    expect(splitTriageCounts(db, 'account')).toEqual({
+      describedSplits: 1,
+      judgedThreads: 1,
+      pendingThreads: 1
+    })
+
+    insertJudgment('waiting', splitId, 'A different question', 0.99, 'waiting-message')
+    expect(splitTriageCounts(db, 'account').pendingThreads).toBe(1)
   })
 
   it('hashes a description through its normalized form and separates different texts', () => {
@@ -361,33 +407,6 @@ describe('split inbox', () => {
 
     insertJudgment('stale', 'other-split', 'Receipts for things I bought', 0.99)
     expect(listInboxThreads(db, 'account', 10, null, splitId)).toEqual([])
-  })
-
-  it('combines a sender domain and a description under all', () => {
-    insertThread('both', 300, [{ id: 'both-message', from: 'alerts@vendor.test' }])
-    insertThread('domain-only', 200, [{ id: 'domain-message', from: 'news@vendor.test' }])
-    insertThread('description-only', 100, [{ id: 'description-message', from: 'alerts@other.test' }])
-
-    const description = 'Something is broken and needs attention'
-    const state = saveSplit(db, 'account', {
-      name: 'Vendor alerts',
-      operator: 'all',
-      conditions: [
-        { type: 'senderDomain', value: 'Vendor.test' },
-        { type: 'description', value: description }
-      ],
-      notify: false
-    })
-    const splitId = state.splits.find((split) => split.name === 'Vendor alerts')?.id
-    if (!splitId) throw new Error('Expected the vendor split')
-    expect(state.splits.find((split) => split.id === splitId)?.match.conditions).toEqual([
-      { type: 'senderDomain', value: 'vendor.test' },
-      { type: 'description', value: description }
-    ])
-    insertJudgment('both', splitId, description, 0.95)
-    insertJudgment('description-only', splitId, description, 0.95)
-
-    expect(listInboxThreads(db, 'account', 10, null, splitId).map((row) => row.id)).toEqual(['both'])
   })
 
   it('keeps first-match order when two described splits both hold a yes judgment', () => {

@@ -48,7 +48,8 @@ import type {
   SaveSplitInput,
   SplitPresetId,
   SplitState,
-  SplitThreadLocation
+  SplitThreadLocation,
+  SplitTriageStatus
 } from '../shared/splits'
 import { isThemePreference, normalizePalette, type ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
@@ -301,7 +302,8 @@ const api = {
       invoke(IPC_CHANNELS.splitsSetNotify, id, notify),
     delete: (id: string): Promise<SplitState> => invoke(IPC_CHANNELS.splitsDelete, id),
     reorder: (input: ReorderSplitsInput): Promise<SplitState> => invoke(IPC_CHANNELS.splitsReorder, input),
-    restorePreset: (id: SplitPresetId): Promise<SplitState> => invoke(IPC_CHANNELS.splitsRestorePreset, id)
+    restorePreset: (id: SplitPresetId): Promise<SplitState> => invoke(IPC_CHANNELS.splitsRestorePreset, id),
+    getTriageStatus: (): Promise<SplitTriageStatus> => invoke(IPC_CHANNELS.splitsGetTriageStatus)
   },
   contacts: {
     search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)

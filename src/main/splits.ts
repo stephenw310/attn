@@ -33,7 +33,10 @@ interface StoredSplitRow {
   kind: string
   match_json: string
   notify: number
+  description: string | null
 }
+
+const STORED_ROW_COLUMNS = 'id, position, name, kind, match_json, notify, description'
 
 export interface SplitAssignmentSql {
   sql: string
@@ -48,8 +51,7 @@ const CONDITION_TYPES = new Set<SplitCondition['type']>([
   'listIdPresent',
   'label',
   'attachmentMimeType',
-  'attachmentFilenameSuffix',
-  'description'
+  'attachmentFilenameSuffix'
 ])
 
 const STARTER_RULES: readonly SplitRule[] = [
@@ -58,6 +60,7 @@ const STARTER_RULES: readonly SplitRule[] = [
     position: 0,
     name: 'Calendar',
     kind: 'preset',
+    description: null,
     match: {
       version: 1,
       operator: 'any',
@@ -76,6 +79,7 @@ const STARTER_RULES: readonly SplitRule[] = [
     position: 1,
     name: 'GitHub',
     kind: 'preset',
+    description: null,
     match: {
       version: 1,
       operator: 'any',
@@ -88,6 +92,7 @@ const STARTER_RULES: readonly SplitRule[] = [
     position: 2,
     name: 'Newsletters',
     kind: 'preset',
+    description: null,
     match: {
       version: 1,
       operator: 'any',
@@ -100,6 +105,7 @@ const STARTER_RULES: readonly SplitRule[] = [
     position: 3,
     name: 'Important',
     kind: 'base',
+    description: null,
     match: {
       version: 1,
       operator: 'any',
@@ -112,6 +118,7 @@ const STARTER_RULES: readonly SplitRule[] = [
     position: 4,
     name: 'Other',
     kind: 'fallback',
+    description: null,
     match: EMPTY_SPLIT_MATCH,
     notify: false
   }
@@ -136,6 +143,20 @@ export function canonicalListId(raw: string): string | null {
  */
 function collapsedDescription(value: string): string {
   return value.trim().replace(/\s+/g, ' ')
+}
+
+/**
+ * The stored description, or null when the text is unusable. Too long is a
+ * mistake to report, not something to silently truncate: a cut description asks
+ * a different question than the one the user wrote.
+ */
+export function normalizeDescription(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const collapsed = collapsedDescription(value)
+  if (collapsed.length < SPLIT_DESCRIPTION_MIN_LENGTH || collapsed.length > SPLIT_DESCRIPTION_MAX_LENGTH) {
+    return null
+  }
+  return collapsed
 }
 
 /**
@@ -166,15 +187,6 @@ function normalizedCondition(condition: SplitCondition): SplitCondition | null {
     return value ? { type: 'listId', value } : null
   }
   if (condition.type === 'label') return { type: 'label', value: trimmed.slice(0, 200) }
-  if (condition.type === 'description') {
-    // Too long is a mistake to report, not something to silently truncate: a
-    // cut description asks a different question than the one the user wrote.
-    const value = collapsedDescription(trimmed)
-    if (value.length < SPLIT_DESCRIPTION_MIN_LENGTH || value.length > SPLIT_DESCRIPTION_MAX_LENGTH) {
-      return null
-    }
-    return { type: 'description', value }
-  }
   return { type: condition.type, value: trimmed.toLowerCase().slice(0, 500) } as SplitCondition
 }
 
@@ -198,10 +210,6 @@ export function normalizeSplitMatch(value: unknown): SplitMatchExpression | null
     if (!condition) return null
     conditions.push(condition)
   }
-  // One description per rule. `split_judgments` keys one judgment per (thread,
-  // split), so a second description would have nowhere to store its answer and
-  // would silently read the first one's.
-  if (conditions.filter((condition) => condition.type === 'description').length > 1) return null
   return { version: 1, operator: candidate.operator, conditions }
 }
 
@@ -220,7 +228,7 @@ function validKind(value: string): value is SplitKind {
 function storedRows(db: Db, accountId: string): StoredSplitRow[] {
   return db
     .prepare(
-      `SELECT id, position, name, kind, match_json, notify
+      `SELECT ${STORED_ROW_COLUMNS}
        FROM split_rules
        WHERE account_id = ?
        ORDER BY position, id`
@@ -237,6 +245,7 @@ function parseStoredRow(row: StoredSplitRow): SplitRule | null {
           position: row.position,
           name: row.name.trim(),
           kind: 'fallback',
+          description: null,
           match: EMPTY_SPLIT_MATCH,
           notify: row.notify === 1
         }
@@ -250,10 +259,27 @@ function parseStoredRow(row: StoredSplitRow): SplitRule | null {
           position: row.position,
           name: row.name.trim(),
           kind: 'base',
+          description: null,
           match: starter.match,
           notify: row.notify === 1
         }
       : null
+  }
+  // Description wins. A row that somehow carries both a description and stored
+  // conditions is a described split, and its conditions are ignored: the two
+  // modes are exclusive, and reading them together would compile a rule the
+  // user never wrote.
+  const description = normalizeDescription(row.description)
+  if (description !== null) {
+    return {
+      id: row.id,
+      position: row.position,
+      name: row.name.trim(),
+      kind: row.kind,
+      description,
+      match: EMPTY_SPLIT_MATCH,
+      notify: row.notify === 1
+    }
   }
   const match = parseSplitMatchJson(row.match_json)
   if (!match) return null
@@ -262,6 +288,7 @@ function parseStoredRow(row: StoredSplitRow): SplitRule | null {
     position: row.position,
     name: row.name.trim(),
     kind: row.kind,
+    description: null,
     match,
     notify: row.notify === 1
   }
@@ -284,8 +311,8 @@ function rawRuleIds(db: Db, accountId: string): Set<string> {
 
 function insertRule(db: Db, accountId: string, rule: SplitRule): void {
   db.prepare(
-    `INSERT INTO split_rules (account_id, id, position, name, kind, match_json, notify)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO split_rules (account_id, id, position, name, kind, match_json, notify, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     accountId,
     rule.id,
@@ -293,7 +320,8 @@ function insertRule(db: Db, accountId: string, rule: SplitRule): void {
     rule.name,
     rule.kind,
     JSON.stringify(rule.match),
-    rule.notify ? 1 : 0
+    rule.notify ? 1 : 0,
+    rule.description
   )
 }
 
@@ -340,7 +368,7 @@ export function splitRevision(db: Db, accountId: string): number {
   return row?.revision ?? 0
 }
 
-function compileCondition(condition: SplitCondition, splitId: string): { sql: string; params: unknown[] } {
+function compileCondition(condition: SplitCondition): { sql: string; params: unknown[] } {
   if (condition.type === 'senderAddress') {
     return { sql: "lower(trim(COALESCE(m.from_email, ''))) = ?", params: [condition.value] }
   }
@@ -380,23 +408,6 @@ function compileCondition(condition: SplitCondition, splitId: string): { sql: st
       params: [condition.value]
     }
   }
-  if (condition.type === 'description') {
-    // The judgment is per (thread, split), so this test reads the same row for
-    // every `messages m` the enclosing expression walks. It is constant across
-    // those rows, which keeps `all` honest: a described condition combined with
-    // message-level ones still asks about the one message satisfying the rest.
-    return {
-      sql: `EXISTS (
-        SELECT 1 FROM split_judgments j
-        WHERE j.account_id = ${THREAD_KEY.accountId}
-          AND j.thread_id = ${THREAD_KEY.id}
-          AND j.split_id = ?
-          AND j.description_hash = ?
-          AND j.probability >= ?
-      )`,
-      params: [splitId, descriptionHash(condition.value), SPLIT_TRIAGE_THRESHOLD]
-    }
-  }
   const filename = "lower(trim(COALESCE(json_extract(split_attachment.value, '$.filename'), '')))"
   return {
     sql: `EXISTS (
@@ -408,10 +419,28 @@ function compileCondition(condition: SplitCondition, splitId: string): { sql: st
   }
 }
 
-/** Takes the whole rule, not just its expression: a described condition reads judgments keyed by split id. */
+/**
+ * Takes the whole rule, not just its expression: a described split is answered
+ * per thread, so it compiles straight to its judgment test with no `messages m`
+ * walk. A rule-based split keeps the message walk, which is what makes `all`
+ * mean "one message satisfies every condition".
+ */
 function compileRuleMatch(rule: SplitRule): { sql: string; params: unknown[] } {
+  if (rule.description !== null) {
+    return {
+      sql: `EXISTS (
+        SELECT 1 FROM split_judgments j
+        WHERE j.account_id = ${THREAD_KEY.accountId}
+          AND j.thread_id = ${THREAD_KEY.id}
+          AND j.split_id = ?
+          AND j.description_hash = ?
+          AND j.probability >= ?
+      )`,
+      params: [rule.id, descriptionHash(rule.description), SPLIT_TRIAGE_THRESHOLD]
+    }
+  }
   const match = rule.match
-  const compiled = match.conditions.map((condition) => compileCondition(condition, rule.id))
+  const compiled = match.conditions.map((condition) => compileCondition(condition))
   return {
     sql: `EXISTS (
       SELECT 1 FROM messages m
@@ -505,12 +534,31 @@ function compactPositions(db: Db, accountId: string): void {
   update.run(ids.length, accountId, OTHER_SPLIT_ID)
 }
 
-function validatedSaveInput(input: SaveSplitInput): SaveSplitInput {
+/** One shape for both modes: the description and the match are never both set. */
+interface ValidatedSaveInput {
+  id?: string
+  name: string
+  notify: boolean
+  description: string | null
+  match: SplitMatchExpression
+}
+
+function validatedSaveInput(input: SaveSplitInput): ValidatedSaveInput {
   const name = input.name.trim().slice(0, 64)
   if (!name) throw new Error('Split name is required')
+  const common = { ...(input.id === undefined ? {} : { id: input.id }), name, notify: input.notify }
+  if (input.mode === 'description') {
+    const description = normalizeDescription(input.description)
+    if (!description) {
+      throw new Error(
+        `Describe the split in ${SPLIT_DESCRIPTION_MIN_LENGTH} to ${SPLIT_DESCRIPTION_MAX_LENGTH} characters`
+      )
+    }
+    return { ...common, description, match: EMPTY_SPLIT_MATCH }
+  }
   const match = normalizeSplitMatch({ version: 1, operator: input.operator, conditions: input.conditions })
   if (!match) throw new Error('Add at least one complete split condition')
-  return { ...input, name, operator: match.operator, conditions: match.conditions }
+  return { ...common, description: null, match }
 }
 
 export function saveSplit(db: Db, accountId: string, raw: SaveSplitInput): SplitState {
@@ -526,17 +574,21 @@ export function saveSplit(db: Db, accountId: string, raw: SaveSplitInput): Split
     if (existing && existing.kind !== 'custom' && existing.kind !== 'preset') {
       throw new Error('Only custom and preset rules can be edited')
     }
-    const match: SplitMatchExpression = {
-      version: 1,
-      operator: input.operator,
-      conditions: input.conditions
-    }
     if (existing) {
+      // `description` is always written, so switching a described split back to
+      // conditions clears the prose instead of leaving it to win the next read.
       db.prepare(
         `UPDATE split_rules
-         SET name = ?, match_json = ?, notify = ?
+         SET name = ?, match_json = ?, notify = ?, description = ?
          WHERE account_id = ? AND id = ?`
-      ).run(input.name, JSON.stringify(match), input.notify ? 1 : 0, accountId, existing.id)
+      ).run(
+        input.name,
+        JSON.stringify(input.match),
+        input.notify ? 1 : 0,
+        input.description,
+        accountId,
+        existing.id
+      )
     } else {
       const position = (
         db
@@ -548,7 +600,8 @@ export function saveSplit(db: Db, accountId: string, raw: SaveSplitInput): Split
         position,
         name: input.name,
         kind: 'custom',
-        match,
+        description: input.description,
+        match: input.match,
         notify: input.notify
       })
     }
@@ -618,7 +671,7 @@ export function restoreSplitPreset(db: Db, accountId: string, id: SplitPresetId)
   db.transaction(() => {
     const existing = db
       .prepare(
-        `SELECT id, position, name, kind, match_json, notify
+        `SELECT ${STORED_ROW_COLUMNS}
          FROM split_rules
          WHERE account_id = ? AND id = ?`
       )
@@ -676,18 +729,107 @@ export interface DescribedSplitRule {
 }
 
 export function describedSplitRules(db: Db, accountId: string): DescribedSplitRule[] {
-  return visibleRules(db, accountId).flatMap((rule) => {
-    const described = rule.match.conditions.find((condition) => condition.type === 'description')
-    if (described?.type !== 'description') return []
-    return [
-      {
-        splitId: rule.id,
-        name: rule.name,
-        description: described.value,
-        descriptionHash: descriptionHash(described.value)
-      }
-    ]
+  return visibleRules(db, accountId).flatMap((rule) =>
+    rule.description === null
+      ? []
+      : [
+          {
+            splitId: rule.id,
+            name: rule.name,
+            description: rule.description,
+            descriptionHash: descriptionHash(rule.description)
+          }
+        ]
+  )
+}
+
+/**
+ * "Some described split has no current answer for this thread." One definition
+ * shared by the classifier's work query and the status counts, so the queue and
+ * the number reported for it can never disagree.
+ *
+ * It asks about presence, not about a yes: a confident no is a current answer.
+ * `threadId` and `evidenceKey` are the caller's column expressions, and the
+ * returned params bind per rule in `rules` order.
+ */
+export function pendingJudgmentPredicate(
+  accountId: string,
+  rules: readonly DescribedSplitRule[],
+  columns: { threadId: string; evidenceKey: string }
+): { sql: string; params: unknown[] } {
+  // An empty list has no honest answer here: an empty disjunction would compile
+  // to `AND ()`. Callers ask only once they know a described split exists.
+  if (rules.length === 0) throw new Error('A pending-judgment test needs at least one described split')
+  const clauses = rules.map(
+    () =>
+      `NOT EXISTS (
+         SELECT 1 FROM split_judgments j
+         WHERE j.account_id = ?
+           AND j.thread_id = ${columns.threadId}
+           AND j.split_id = ?
+           AND j.description_hash = ?
+           AND j.evidence_key = ${columns.evidenceKey}
+       )`
+  )
+  return {
+    sql: clauses.join(' OR '),
+    params: rules.flatMap((rule) => [accountId, rule.splitId, rule.descriptionHash])
+  }
+}
+
+/**
+ * The classifier's candidate threads: Inbox-visible INBOX conversations with at
+ * least one stored message. `splitTriageCounts` and the pass walk the same set,
+ * so a thread counted as pending is one the pass will actually pick up.
+ */
+const TRIAGE_CANDIDATE_SQL = `SELECT t.id AS thread_id,
+         COALESCE(t.last_msg_at, 0) AS sort_at,
+         (SELECT m.id FROM messages m
+            WHERE m.account_id = t.account_id AND m.thread_id = t.id
+            ORDER BY m.internal_date DESC, m.id DESC
+            LIMIT 1) AS latest_message_id
+  FROM threads t
+  JOIN thread_labels inbox
+    ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
+  WHERE t.account_id = ? AND t.is_inbox_visible = 1`
+
+export function triageCandidateSql(extraFilters = ''): string {
+  return `${TRIAGE_CANDIDATE_SQL} ${extraFilters}`
+}
+
+export interface SplitTriageCounts {
+  describedSplits: number
+  judgedThreads: number
+  pendingThreads: number
+}
+
+/**
+ * How far the classifier has got. `judged` is every candidate that is not
+ * pending, so a thread with no stored message counts as neither: it is not
+ * work the pass can do.
+ */
+export function splitTriageCounts(db: Db, accountId: string): SplitTriageCounts {
+  const rules = describedSplitRules(db, accountId)
+  if (rules.length === 0) return { describedSplits: 0, judgedThreads: 0, pendingThreads: 0 }
+  const pending = pendingJudgmentPredicate(accountId, rules, {
+    threadId: 'candidate.thread_id',
+    evidenceKey: 'candidate.latest_message_id'
   })
+  const row = db
+    .prepare(
+      `WITH candidate AS (${triageCandidateSql()})
+       SELECT COUNT(*) AS total,
+              SUM(CASE WHEN ${pending.sql} THEN 1 ELSE 0 END) AS pending
+       FROM candidate
+       WHERE latest_message_id IS NOT NULL`
+    )
+    .get(accountId, ...pending.params) as { total: number; pending: number | null }
+  const pendingThreads = row.pending ?? 0
+  return {
+    describedSplits: rules.length,
+    judgedThreads: row.total - pendingThreads,
+    pendingThreads
+  }
 }
 
 /** Announce that split membership changed underneath the renderer's cached pages. */

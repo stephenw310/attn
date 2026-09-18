@@ -45,9 +45,9 @@ test('classifies a described split and sends only the disclosed state', async ({
   await page.evaluate(async (description) => {
     await window.attn.splits.save({
       name: 'Dinners',
-      operator: 'any',
-      conditions: [{ type: 'description', value: description }],
-      notify: false
+      notify: false,
+      mode: 'description',
+      description
     })
   }, DESCRIPTION)
 
@@ -83,61 +83,142 @@ test('classifies a described split and sends only the disclosed state', async ({
   }
 })
 
-test('writes a description in the rule editor and links to the consent it needs', async ({
+test('turns smart splits on from its card and describes a split in the editor', async ({
   app,
   page
 }, testInfo) => {
+  // The pass a saved description starts must answer from the scripted service,
+  // never the network.
+  await installFakeTriage(app, { default: 0.05 })
   await page.getByTestId('split-rules-settings').click()
   await expect(page.getByTestId('split-rules')).toBeVisible()
+
+  // Split rules owns the consent, the key, and the model.
+  const card = page.getByTestId('smart-splits-card')
+  const toggle = page.getByTestId('smart-splits-enabled')
+  await expect(card).toBeVisible()
+  await expect(page.getByTestId('smart-splits-status')).toContainText('Off · Describe a split')
+  await expect(page.getByTestId('smart-splits-model')).toHaveAttribute('placeholder', 'jev-latest')
+  // Without a TypeSafe key there is nothing to consent to.
+  await expect(toggle).toBeDisabled()
+  await expect(toggle).not.toBeChecked()
+
+  // Smart splits off: a new split can only be matched by rules.
   await page.getByTestId('split-rule-new').click()
-  await page.getByTestId('split-rule-name').fill('Landlord')
-  await page.getByLabel('Condition 1 type').selectOption({ label: 'Matches description' })
+  await expect(page.getByTestId('split-rule-mode-rules')).toHaveAttribute('aria-pressed', 'true')
+  const describeIt = page.getByTestId('split-rule-mode-description')
+  await expect(describeIt).toBeDisabled()
+  await expect(describeIt).toHaveAttribute('title', 'Turn on smart splits to describe a split')
 
-  const description = page.getByTestId('split-rule-description')
-  await expect(description).toBeVisible()
-  await description.fill('Anything from my landlord, such as a rent receipt or a repair notice')
+  // The key round trip shows presence only, never the value.
+  await page.getByTestId('smart-splits-key').fill('ts-test-key-e2e')
+  await page.getByTestId('smart-splits-key-save').click()
+  await expect(page.getByTestId('smart-splits-key-present')).toHaveText(
+    'ts-t\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022-e2e'
+  )
+  await expect(page.getByTestId('smart-splits-key')).toHaveCount(0)
+  await expect(toggle).toBeEnabled()
 
-  // The rule is savable, but nothing judges it yet: the editor says so and
-  // offers the one setting that fixes it.
-  const off = page.getByTestId('split-rule-triage-off')
-  await expect(off).toBeVisible()
-  await expect(off).toContainText('Smart splits are off')
+  // Enabling is a consent flow: the checkbox alone writes nothing.
+  await toggle.click()
+  const disclosure = page.getByTestId('smart-splits-enable-confirm')
+  await expect(disclosure).toBeVisible()
+  await expect(disclosure).toContainText('sent to TypeSafe using your own key')
+  await expect(disclosure).toContainText('recipient count')
+  await expect(disclosure).toContainText('in the background without a command')
+  await expect(disclosure).toContainText('cannot be recalled')
+  await expect(toggle).not.toBeChecked()
+  await page.getByTestId('smart-splits-enable-cancel').click()
+  await expect(disclosure).toHaveCount(0)
+  await expect(toggle).not.toBeChecked()
+
+  await toggle.click()
+  await page.getByTestId('smart-splits-enable-apply').click()
+  await expect(toggle).toBeChecked()
+  await expect(page.getByTestId('smart-splits-status')).toContainText('On \u00b7 no described splits yet')
+  // Smart splits never turn AI writing on, and they carry a separate key.
+  const aiSettings = await page.evaluate(() => window.attn.ai.getSettings())
+  expect(aiSettings.enabled).toBe(false)
+  expect(aiSettings.keyPresent).toBe(false)
 
   const artifactDirectory = join(__dirname, '.artifacts')
   mkdirSync(artifactDirectory, { recursive: true })
+  const cardPath = join(artifactDirectory, 'split-rules-smart-card.png')
+  await card.screenshot({ path: cardPath, animations: 'disabled' })
+  await testInfo.attach('split-rules-smart-card', { path: cardPath, contentType: 'image/png' })
+
+  // With smart splits on, a new split starts on Describe it.
+  await page.getByTestId('split-rule-new').click()
+  await expect(describeIt).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('split-rule-name').fill('Landlord')
+  const description = page.getByTestId('split-rule-description')
+  await expect(description).toBeVisible()
+  await description.fill('Anything from my landlord, such as a rent receipt or a repair notice')
+  await description.blur()
+
   const editorPath = join(artifactDirectory, 'split-rule-description.png')
   await page.screenshot({ path: editorPath, animations: 'disabled' })
   await testInfo.attach('split-rule-description', { path: editorPath, contentType: 'image/png' })
 
+  // A mode switch never throws away typed words behind the user's back.
+  await page.getByTestId('split-rule-mode-rules').click()
+  const modeConfirm = page.getByTestId('split-rule-mode-confirm')
+  await expect(modeConfirm).toContainText('Discard the description?')
+  await expect(describeIt).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('split-rule-mode-confirm-cancel').click()
+  await expect(modeConfirm).toHaveCount(0)
+  await expect(description).toHaveValue(
+    'Anything from my landlord, such as a rent receipt or a repair notice'
+  )
+
+  // Discarding switches for real, and the blank side asks nothing on the way back.
+  await page.getByTestId('split-rule-mode-rules').click()
+  await page.getByTestId('split-rule-mode-confirm-apply').click()
+  await expect(page.getByTestId('split-rule-mode-rules')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('split-rule-description')).toHaveCount(0)
+  await describeIt.click()
+  await expect(modeConfirm).toHaveCount(0)
+  await expect(description).toHaveValue('')
+  await description.fill('Anything from my landlord, such as a rent receipt or a repair notice')
+
   await page.getByTestId('split-rule-save').click()
   const saved = page.locator('[data-testid="split-rule"][data-split-id^="custom:"]')
+  const summary = saved.getByTestId('split-rule-summary')
   await expect(saved).toHaveCount(1)
-  await expect(saved.getByTestId('split-rule-summary')).toContainText('Landlord')
-  await expect(saved.getByTestId('split-rule-summary')).toContainText('1 condition')
+  await expect(summary).toContainText('Landlord')
+  await expect(summary).toContainText('Described')
+  await expect(summary).not.toContainText('paused')
 
-  // The note's button is the `ai.triageSettings` path: it closes the manager
-  // and opens Settings on the smart-splits controls.
-  await saved.getByTestId('split-rule-summary').click()
-  await page.getByTestId('split-rule-triage-setup').click()
-  await expect(page.getByTestId('split-rules')).toHaveCount(0)
-  await expect(page.getByTestId('settings-view')).toBeVisible()
-  await expect(page.getByTestId('settings-ai-triage-enabled')).toBeVisible()
+  // Turning smart splits off pauses the description; it never deletes it.
+  await toggle.click()
+  await expect(toggle).not.toBeChecked()
+  await expect(summary).toContainText('Described \u00b7 paused')
+
+  // Removing the key withdraws the consent and blocks the toggle again.
+  await page.getByTestId('smart-splits-key-remove').click()
+  await expect(page.getByTestId('smart-splits-key')).toBeVisible()
+  await expect(toggle).not.toBeChecked()
+  await expect(toggle).toBeDisabled()
+  const cleared = await page.evaluate(() => window.attn.ai.getSettings())
+  expect(cleared.triageEnabled).toBe(false)
+  expect(cleared.triageKeyPresent).toBe(false)
+  await expect(summary).toContainText('Described \u00b7 paused')
+
+  await summary.click()
+  await expect(page.getByTestId('split-rule-description')).toHaveValue(
+    'Anything from my landlord, such as a rent receipt or a repair notice'
+  )
+
+  // AI writing settings only point here; the controls themselves are gone.
   await page.keyboard.press('Escape')
+  await expect(page.getByTestId('split-rules')).toHaveCount(0)
+  await page.keyboard.press('ControlOrMeta+,')
+  await page.getByTestId('settings-nav-ai').click()
+  await expect(page.getByTestId('settings-ai')).toBeVisible()
+  await expect(page.getByTestId('settings-ai-triage-enabled')).toHaveCount(0)
+  await page.getByTestId('settings-ai-open-split-rules').click()
   await expect(page.getByTestId('settings-view')).toHaveCount(0)
-
-  // Consent and the key arrive through the shipped bridge. The manager reads
-  // them when it opens, so the note clears on the next open, not in place.
-  await installFakeTriage(app, { default: 0.05 })
-  await page.evaluate(async () => {
-    await window.attn.ai.setTriageKey('ts-test-key-editor')
-    await window.attn.ai.setSetting('triageEnabled', true)
-  })
-
-  await page.getByTestId('split-rules-settings').click()
-  await expect(page.getByTestId('split-rules')).toBeVisible()
-  await saved.getByTestId('split-rule-summary').click()
-  await expect(page.getByTestId('split-rule-description')).toBeVisible()
-  await expect(page.getByTestId('split-rule-triage-off')).toHaveCount(0)
+  await expect(page.getByTestId('smart-splits-card')).toBeVisible()
 })
 
 // ---------------------------------------------------------------------------
@@ -212,9 +293,9 @@ async function armNotifyingSplit(app: ElectronApplication, page: Page): Promise<
   await page.evaluate(async (description) => {
     await window.attn.splits.save({
       name: 'Invites',
-      operator: 'any',
-      conditions: [{ type: 'description', value: description }],
-      notify: true
+      notify: true,
+      mode: 'description',
+      description
     })
   }, INVITES)
   await runTriagePass(app)

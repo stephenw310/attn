@@ -185,12 +185,7 @@ describe('two-account read isolation', () => {
     try {
       ensureSplitSetup(db, A)
       const description = 'Anything about the roadmap'
-      const saved = saveSplit(db, A, {
-        name: 'Described',
-        operator: 'any',
-        conditions: [{ type: 'description', value: description }],
-        notify: false
-      })
+      const saved = saveSplit(db, A, { name: 'Described', mode: 'description', description, notify: false })
       const splitId = saved.splits.find((split) => split.name === 'Described')?.id
       if (!splitId) throw new Error('Expected the described split')
       const judge = db.prepare(

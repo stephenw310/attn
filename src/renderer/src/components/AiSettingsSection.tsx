@@ -7,8 +7,7 @@ import {
   type AiSettingKey,
   type AiSettings,
   isAiProviderKind,
-  isAiVoiceTone,
-  TYPESAFE_DEFAULT_MODEL
+  isAiVoiceTone
 } from '../../../shared/ai'
 import { useShowToast } from '../toastContext'
 import { ACTION_BUTTON, INPUT, NOTE, ROW, SELECT } from './settingsStyles'
@@ -18,7 +17,8 @@ import { ACTION_BUTTON, INPUT, NOTE, ROW, SELECT } from './settingsStyles'
 // disclosure first, and only the confirm button writes. Keys are write-only —
 // they are never echoed back into the UI after saving. Smart splits carry
 // their own consent and their own TypeSafe key, so a user may run either
-// feature alone.
+// feature alone; their controls live in the Split rules manager, beside the
+// descriptions they judge.
 
 const CONFIRM_PANEL = 'mx-3 mt-1 rounded-md border border-accent/40 bg-accent/10 px-3 py-2'
 const CONFIRM_APPLY =
@@ -38,21 +38,11 @@ const AUTOCOMPLETE_DISCLOSURE =
   'sent mail, and ' +
   'content already sent to a provider cannot be recalled.'
 
-const TRIAGE_DISCLOSURE =
-  'When smart splits are on, each new Inbox conversation — and every stored Inbox conversation when you ' +
-  'add or edit a split description — is sent to TypeSafe using your own key. Each request carries the ' +
-  "subject, the sender's name and address, the recipient count, Gmail's category labels, whether the " +
-  'message came from a mailing list, the message count, and a bounded excerpt of the first and latest ' +
-  'message. Judgments run ' +
-  'in the background without a command, and content already sent cannot be recalled.'
-
-export function AiSettingsSection(): React.JSX.Element {
+export function AiSettingsSection({ onOpenSplits }: { onOpenSplits: () => void }): React.JSX.Element {
   const onToast = useShowToast()
   const [settings, setSettings] = useState<AiSettings | null>(null)
-  const [confirming, setConfirming] = useState<'enable' | 'autocomplete' | 'triage' | null>(null)
+  const [confirming, setConfirming] = useState<'enable' | 'autocomplete' | null>(null)
   const [keyDraft, setKeyDraft] = useState('')
-  const [triageKeyDraft, setTriageKeyDraft] = useState('')
-  const [triageModelDraft, setTriageModelDraft] = useState<string | null>(null)
   const [baseUrlDraft, setBaseUrlDraft] = useState<string | null>(null)
   const [modelDraft, setModelDraft] = useState<string | null>(null)
   const [rulesDraft, setRulesDraft] = useState<string | null>(null)
@@ -85,7 +75,6 @@ export function AiSettingsSection(): React.JSX.Element {
   const baseUrlValue = baseUrlDraft ?? settings?.baseUrl ?? ''
   const modelValue = modelDraft ?? settings?.model ?? ''
   const rulesValue = rulesDraft ?? settings?.voiceRules ?? ''
-  const triageModelValue = triageModelDraft ?? settings?.triageModel ?? ''
 
   const saveKey = useCallback(() => {
     const key = keyDraft.trim()
@@ -104,26 +93,6 @@ export function AiSettingsSection(): React.JSX.Element {
       .deleteKey()
       .then(setSettings)
       .catch(() => onToast('The key could not be removed'))
-  }, [onToast])
-
-  const saveTriageKey = useCallback(() => {
-    const key = triageKeyDraft.trim()
-    if (key.length === 0) return
-    void window.attn?.ai
-      .setTriageKey(key)
-      .then((next) => {
-        setSettings(next)
-        setTriageKeyDraft('')
-      })
-      .catch(() => onToast('The TypeSafe key could not be saved'))
-  }, [triageKeyDraft, onToast])
-
-  const removeTriageKey = useCallback(() => {
-    setConfirming((current) => (current === 'triage' ? null : current))
-    void window.attn?.ai
-      .deleteTriageKey()
-      .then(setSettings)
-      .catch(() => onToast('The TypeSafe key could not be removed'))
   }, [onToast])
 
   return (
@@ -434,137 +403,22 @@ export function AiSettingsSection(): React.JSX.Element {
         </div>
       )}
 
-      <h4 className="mb-2 mt-[29px] text-[15px] font-medium text-ink">Smart splits</h4>
-
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
-          <span className="text-sm text-ink">TypeSafe key</span>
+          <span className="text-sm text-ink">Smart splits</span>
           <span className={NOTE}>
-            Stored encrypted by the OS in its own file. Removing it turns smart splits off and never touches
-            your AI writing key or your accounts.
+            Set up in Split rules: describe a split and TypeSafe sorts mail into it.
           </span>
         </span>
-        {settings?.triageKeyPresent ? (
-          <span className="flex flex-none items-center gap-1.5">
-            <span data-testid="settings-ai-triage-key-present" className="font-mono text-xs text-ink-dim">
-              {settings.triageKeyPreview ?? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'}
-            </span>
-            <button
-              type="button"
-              data-testid="settings-ai-triage-key-remove"
-              onClick={removeTriageKey}
-              className={ACTION_BUTTON}
-            >
-              Remove key
-            </button>
-          </span>
-        ) : (
-          <span className="flex flex-none items-center gap-1.5">
-            <input
-              type="password"
-              data-testid="settings-ai-triage-key"
-              aria-label="TypeSafe API key"
-              placeholder="Paste your TypeSafe key"
-              disabled={!settings}
-              value={triageKeyDraft}
-              onChange={(event) => setTriageKeyDraft(event.target.value)}
-              className={`w-56 ${INPUT}`}
-            />
-            <button
-              type="button"
-              data-testid="settings-ai-triage-key-save"
-              disabled={triageKeyDraft.trim().length === 0}
-              onClick={saveTriageKey}
-              className={ACTION_BUTTON}
-            >
-              Save
-            </button>
-          </span>
-        )}
+        <button
+          type="button"
+          data-testid="settings-ai-open-split-rules"
+          onClick={onOpenSplits}
+          className={ACTION_BUTTON}
+        >
+          Open Split rules
+        </button>
       </div>
-
-      <div className={ROW}>
-        <span className="flex min-w-0 flex-col">
-          <span className="text-sm text-ink">Judgment model</span>
-          <span className={NOTE}>Leave empty for the TypeSafe default ({TYPESAFE_DEFAULT_MODEL}).</span>
-        </span>
-        <span className="flex flex-none items-center gap-1.5">
-          <input
-            type="text"
-            data-testid="settings-ai-triage-model"
-            aria-label="Smart splits model"
-            placeholder={TYPESAFE_DEFAULT_MODEL}
-            value={triageModelValue}
-            onChange={(event) => setTriageModelDraft(event.target.value)}
-            className={`w-44 ${INPUT}`}
-          />
-          <button
-            type="button"
-            data-testid="settings-ai-triage-model-apply"
-            disabled={triageModelDraft === null}
-            onClick={() => {
-              setTriageModelDraft(null)
-              write('triageModel', triageModelValue.trim().length === 0 ? null : triageModelValue.trim())
-            }}
-            className={ACTION_BUTTON}
-          >
-            Apply
-          </button>
-        </span>
-      </div>
-
-      <label className={ROW}>
-        <span className="flex min-w-0 flex-col">
-          <span className="text-sm text-ink">Judge conversations against split descriptions</span>
-          <span className={NOTE}>
-            {settings?.triageKeyPresent
-              ? 'A separate opt-in from AI writing: TypeSafe sorts Inbox mail into your splits in the background.'
-              : 'Save a TypeSafe key above to turn this on.'}
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          data-testid="settings-ai-triage-enabled"
-          data-settings-control="aiTriage"
-          aria-label="Enable smart splits"
-          disabled={!settings?.triageKeyPresent}
-          checked={settings?.triageEnabled ?? false}
-          onChange={(event) => {
-            if (event.target.checked) setConfirming('triage')
-            else {
-              setConfirming(null)
-              write('triageEnabled', false)
-            }
-          }}
-          className="app-pref-toggle"
-        />
-      </label>
-      {confirming === 'triage' && (
-        <div data-testid="settings-ai-triage-enable-confirm" className={CONFIRM_PANEL}>
-          <p className="text-[12px] leading-relaxed text-ink-dim">{TRIAGE_DISCLOSURE}</p>
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              data-testid="settings-ai-triage-enable-apply"
-              onClick={() => {
-                setConfirming(null)
-                write('triageEnabled', true)
-              }}
-              className={CONFIRM_APPLY}
-            >
-              Enable smart splits
-            </button>
-            <button
-              type="button"
-              data-testid="settings-ai-triage-enable-cancel"
-              onClick={() => setConfirming(null)}
-              className={ACTION_BUTTON}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

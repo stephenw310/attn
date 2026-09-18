@@ -683,9 +683,10 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
       const started = performance.now()
       const state = await window.attn.splits.save({
         name: 'Generated mail',
+        notify: false,
+        mode: 'rules',
         operator: 'any',
-        conditions: [{ type: 'senderDomain', value: 'example.test' }],
-        notify: false
+        conditions: [{ type: 'senderDomain', value: 'example.test' }]
       })
       const split = state.splits.find((candidate) => candidate.name === 'Generated mail')
       if (!split) throw new Error('Generated split was not created')

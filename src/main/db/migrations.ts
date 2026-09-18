@@ -111,6 +111,11 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
         PRIMARY KEY (account_id, thread_id, split_id)
       );
     `
+  },
+  {
+    from: 28,
+    to: 29,
+    sql: 'ALTER TABLE split_rules ADD COLUMN description TEXT;'
   }
 ]
 

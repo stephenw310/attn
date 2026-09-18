@@ -491,6 +491,14 @@ async function initialize(): Promise<void> {
       check: () => appUpdater?.checkNow() ?? Promise.resolve(updateStateOverride ?? UPDATE_STATE_IDLE),
       restart: () => appUpdater?.restartToApply() ?? Promise.resolve(false)
     },
+    splits: {
+      // The utility owns the counts and the consent flag; the TypeSafe key
+      // never leaves main, so only main can say whether one is stored.
+      getTriageStatus: async () => ({
+        ...(await ownedService.invoke(IPC_CHANNELS.splitsGetTriageStatus)),
+        keyPresent: triageKeyStore.present()
+      })
+    },
     ai: {
       getSettings: aiSettingsSnapshot,
       setSetting: async (key, value) => {

@@ -105,7 +105,8 @@ import {
   saveSplit,
   setSplitNotify,
   splitLocationForThread,
-  splitRevision
+  splitRevision,
+  splitTriageCounts
 } from '../splits'
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
@@ -265,22 +266,31 @@ function isSplitCondition(value: unknown): value is SplitCondition {
       candidate.type === 'listId' ||
       candidate.type === 'label' ||
       candidate.type === 'attachmentMimeType' ||
-      candidate.type === 'attachmentFilenameSuffix' ||
-      candidate.type === 'description') &&
+      candidate.type === 'attachmentFilenameSuffix') &&
     typeof candidate.value === 'string'
   )
 }
 
+/** A split is described or rule-based: `mode` decides which fields have to be there. */
 function isSaveSplitInput(value: unknown): value is SaveSplitInput {
   if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<SaveSplitInput>
+  const candidate = value as {
+    id?: unknown
+    name?: unknown
+    notify?: unknown
+    mode?: unknown
+    operator?: unknown
+    conditions?: unknown
+    description?: unknown
+  }
+  if (candidate.id !== undefined && !nonEmptyString(candidate.id)) return false
+  if (typeof candidate.name !== 'string' || typeof candidate.notify !== 'boolean') return false
+  if (candidate.mode === 'description') return typeof candidate.description === 'string'
+  if (candidate.mode !== 'rules') return false
   return (
-    (candidate.id === undefined || nonEmptyString(candidate.id)) &&
-    typeof candidate.name === 'string' &&
     (candidate.operator === 'any' || candidate.operator === 'all') &&
     Array.isArray(candidate.conditions) &&
-    candidate.conditions.every(isSplitCondition) &&
-    typeof candidate.notify === 'boolean'
+    candidate.conditions.every(isSplitCondition)
   )
 }
 
@@ -1001,6 +1011,16 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const state = restoreSplitPreset(context.db, requireAccount(context), id as SplitPresetId)
     context.broadcastMailChanged()
     return state
+  })
+  // `keyPresent` is main-only custody, exactly as the AI settings are: the
+  // utility reports false and main overwrites it from the encrypted key file.
+  handle(IPC_CHANNELS.splitsGetTriageStatus, () => {
+    const account = context.currentAccountId()
+    const counts =
+      !account || (context.testUserData && !hasSplitSetup(context.db, account))
+        ? { describedSplits: 0, judgedThreads: 0, pendingThreads: 0 }
+        : splitTriageCounts(context.db, account)
+    return { ...counts, enabled: readAiStoredSettings(context.db).triageEnabled, keyPresent: false }
   })
   handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration, mailbox) => {
     if (typeof threadId !== 'string') return null

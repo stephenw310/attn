@@ -120,10 +120,7 @@ export function InboxLayout({ controller: c }: { controller: InboxController }):
               onAddAccount={c.accounts.addAccount}
               onReconnect={c.accounts.reconnectActions}
               onSignOut={c.accounts.requestRemoveAccount}
-              onOpenSplits={() => {
-                c.closeSettings()
-                c.setSplitRulesOpen(true)
-              }}
+              onOpenSplits={c.openSplitRules}
               onClose={c.closeSettings}
               focusControl={c.settingsFocus}
               onNavigate={c.clearSettingsFocus}

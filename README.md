@@ -14,7 +14,7 @@ Attn is in early development. You need your own Google OAuth client to connect G
 - Save drafts locally, sync drafts with Gmail, and cancel sends during the undo-send delay.
 - Search cached mail or submit a search to Gmail for older mail.
 - Create inbox splits with rules and set follow-up reminders. You can also describe a split in plain words
-  and let TypeSafe sort mail into it with your own key.
+  and let TypeSafe sort mail into it with your own key. Turn smart splits on in Split rules.
 - Use desktop notifications, unread badges, and light or dark themes.
 - Enable AI reply drafts or inline autocomplete with your own provider. Both are optional.
 
@@ -135,7 +135,7 @@ Remote images load directly from senders by default. You can block them in setti
 
 AI is disabled by default. If you enable it, Attn sends mail context to your chosen provider for requested reply drafts. Inline autocomplete has a separate opt-in and sends a limited excerpt of unsent text. Review generated text before you send it.
 
-Smart splits have their own opt-in and their own TypeSafe key. If you turn them on, Attn sends a limited summary of each Inbox conversation to TypeSafe in the background, without a command. Remove the TypeSafe key to stop it.
+Smart splits have their own opt-in and their own TypeSafe key, both in the Split rules manager. If you turn them on, Attn sends a limited summary of each Inbox conversation to TypeSafe in the background, without a command. Remove the TypeSafe key to stop it.
 
 Snooze and follow-up timers run locally. If Attn is closed when a reminder becomes due, it returns when Attn next starts.
 

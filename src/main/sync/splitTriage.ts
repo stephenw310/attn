@@ -20,7 +20,14 @@ import {
   type TypeSafeTransport
 } from '../ai/typesafeClient'
 import type { Db } from '../db'
-import { bumpSplitRevision, type DescribedSplitRule, describedSplitRules, splitIdForThread } from '../splits'
+import {
+  bumpSplitRevision,
+  type DescribedSplitRule,
+  describedSplitRules,
+  pendingJudgmentPredicate,
+  splitIdForThread,
+  triageCandidateSql
+} from '../splits'
 import type { SchedulerTime } from '../time'
 import { OfflineRetryScheduler } from './retry'
 import {
@@ -352,47 +359,27 @@ export class SplitTriage {
       filters.push(`AND t.id IN (${threadIds.map(() => '?').join(', ')})`)
       params.push(...threadIds)
     }
-    const unanswered = gate.rules.map(
-      () =>
-        `NOT EXISTS (
-           SELECT 1 FROM split_judgments j
-           WHERE j.account_id = ?
-             AND j.thread_id = candidate.thread_id
-             AND j.split_id = ?
-             AND j.description_hash = ?
-             AND j.evidence_key = candidate.latest_message_id
-         )`
-    )
+    const unanswered = pendingJudgmentPredicate(this.accountId, gate.rules, {
+      threadId: 'candidate.thread_id',
+      evidenceKey: 'candidate.latest_message_id'
+    })
     const exclusion =
       excluded.length > 0 ? `AND thread_id NOT IN (${excluded.map(() => '?').join(', ')})` : ''
     const rows = this.db
       .prepare(
-        `WITH candidate AS (
-           SELECT t.id AS thread_id,
-                  COALESCE(t.last_msg_at, 0) AS sort_at,
-                  (SELECT m.id FROM messages m
-                     WHERE m.account_id = t.account_id AND m.thread_id = t.id
-                     ORDER BY m.internal_date DESC, m.id DESC
-                     LIMIT 1) AS latest_message_id
-           FROM threads t
-           JOIN thread_labels inbox
-             ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
-           WHERE t.account_id = ? AND t.is_inbox_visible = 1 ${filters.join(' ')}
-         )
+        `WITH candidate AS (${triageCandidateSql(filters.join(' '))})
          SELECT thread_id, latest_message_id
          FROM candidate
          WHERE latest_message_id IS NOT NULL
            ${exclusion}
-           AND (${unanswered.join(' OR ')})
+           AND (${unanswered.sql})
          ORDER BY sort_at DESC, thread_id DESC
          LIMIT ?`
       )
-      .all(
-        ...params,
-        ...excluded,
-        ...gate.rules.flatMap((rule) => [this.accountId, rule.splitId, rule.descriptionHash]),
-        limit
-      ) as { thread_id: string; latest_message_id: string }[]
+      .all(...params, ...excluded, ...unanswered.params, limit) as {
+      thread_id: string
+      latest_message_id: string
+    }[]
     return rows.map((row) => ({ threadId: row.thread_id, latestMessageId: row.latest_message_id }))
   }
 

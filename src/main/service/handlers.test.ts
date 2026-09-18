@@ -365,3 +365,82 @@ describe('inbox thread pages', () => {
     }
   })
 })
+
+describe('split save validation and triage status', () => {
+  it('accepts one mode at a time and rejects an input that names neither', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+    try {
+      const described = await handlers.invoke(IPC_CHANNELS.splitsSave, [
+        { name: 'Landlord', mode: 'description', description: 'Anything from my landlord', notify: false }
+      ])
+      const custom = described.splits.find((split) => split.name === 'Landlord')
+      expect(custom?.description).toBe('Anything from my landlord')
+      expect(custom?.match.conditions).toEqual([])
+
+      const ruled = await handlers.invoke(IPC_CHANNELS.splitsSave, [
+        {
+          name: 'Vendor',
+          mode: 'rules',
+          operator: 'any',
+          conditions: [{ type: 'senderDomain', value: 'vendor.test' }],
+          notify: false
+        }
+      ])
+      expect(ruled.splits.find((split) => split.name === 'Vendor')?.description).toBeNull()
+
+      // The union is the boundary: a missing mode, a mode's own fields on the
+      // other branch, and the retired condition type are all refused.
+      for (const invalid of [
+        { name: 'No mode', operator: 'any', conditions: [], notify: false },
+        { name: 'Wrong fields', mode: 'description', operator: 'any', conditions: [], notify: false },
+        {
+          name: 'Prose as a condition',
+          mode: 'rules',
+          operator: 'any',
+          notify: false,
+          conditions: [{ type: 'description', value: 'Anything from my landlord' }]
+        }
+      ]) {
+        await expect(handlers.invoke(IPC_CHANNELS.splitsSave, [invalid])).rejects.toThrow('invalid split')
+      }
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+
+  it('reports the triage counts with key presence left for main to fill in', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+    try {
+      await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
+        enabled: false,
+        keyPresent: false,
+        describedSplits: 0,
+        judgedThreads: 0,
+        pendingThreads: 0
+      })
+
+      persistThread(db, ACCOUNT, thread('waiting'))
+      await handlers.invoke(IPC_CHANNELS.splitsSave, [
+        { name: 'Landlord', mode: 'description', description: 'Anything from my landlord', notify: false }
+      ])
+      await handlers.invoke(IPC_CHANNELS.aiSetSetting, ['triageEnabled', true])
+
+      // `keyPresent` stays false here by design: the utility never sees the key.
+      await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
+        enabled: true,
+        keyPresent: false,
+        describedSplits: 1,
+        judgedThreads: 0,
+        pendingThreads: 1
+      })
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})

@@ -290,12 +290,49 @@ it('applies the v27 → 28 upgrade: split judgments added, split rules untouched
   }
 })
 
+it('applies the v28 → 29 upgrade: split rules gain a description and keep their rows', () => {
+  const db = new Database(':memory:')
+  const fresh = openDatabase(':memory:')
+  try {
+    // The v28 shape of the one table the additive procedure touches.
+    db.exec(`
+      CREATE TABLE split_rules (
+        account_id TEXT NOT NULL,
+        id         TEXT NOT NULL,
+        position   INTEGER NOT NULL,
+        name       TEXT NOT NULL,
+        kind       TEXT NOT NULL,
+        match_json TEXT NOT NULL DEFAULT '{"version":1,"operator":"any","conditions":[]}',
+        notify     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, id)
+      );
+      INSERT INTO split_rules
+      VALUES ('account', 'custom:1', 0, 'Landlord', 'custom',
+              '{"version":1,"operator":"any","conditions":[{"type":"senderDomain","value":"landlord.test"}]}', 1);
+      PRAGMA user_version = 28;
+    `)
+    migrateSchema(db, 28, 29)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(29)
+    expect(db.pragma('quick_check', { simple: true })).toBe('ok')
+    expect(db.pragma('table_info(split_rules)')).toEqual(fresh.pragma('table_info(split_rules)'))
+    // An upgraded rule keeps its conditions and reads as rule-based.
+    expect(db.prepare('SELECT id, name, notify, description FROM split_rules').all()).toEqual([
+      { id: 'custom:1', name: 'Landlord', notify: 1, description: null }
+    ])
+  } finally {
+    db.close()
+    fresh.close()
+  }
+})
+
 it('openDatabase migrates an existing profile before returning it', () => {
   const root = mkdtempSync(join(tmpdir(), 'attn-schema-upgrade-'))
   const path = join(root, 'attn.db')
   try {
     const old = openDatabase(path)
     old.exec(`
+      ALTER TABLE split_rules DROP COLUMN description;
       DROP TABLE split_judgments;
       ALTER TABLE accounts ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
       INSERT INTO accounts (id, email, created_at) VALUES ('account', 'person@example.test', 123);
@@ -333,6 +370,7 @@ it('upgrades a populated v21 profile through every retained migration', () => {
     // Reverse only the recorded v21..v28 changes to build a complete v21
     // profile from the authoritative current snapshot.
     db.exec(`
+      ALTER TABLE split_rules DROP COLUMN description;
       DROP TABLE split_judgments;
       DROP TABLE thread_mailboxes;
       DROP INDEX idx_message_fts_map_recent;
@@ -360,6 +398,8 @@ it('upgrades a populated v21 profile through every retained migration', () => {
       VALUES ('outbox', 'account', 100, 200, 300);
       INSERT INTO reminders (account_id, thread_id, kind, due_at)
       VALUES ('account', 'thread', 'snooze', 400);
+      INSERT INTO split_rules (account_id, id, position, name, kind, notify)
+      VALUES ('account', 'custom:1', 0, 'Landlord', 'custom', 1);
       PRAGMA user_version = 21;
     `)
 
@@ -380,6 +420,9 @@ it('upgrades a populated v21 profile through every retained migration', () => {
       origin_message_id: null
     })
     expect(db.prepare('SELECT COUNT(*) AS count FROM split_judgments').get()).toEqual({ count: 0 })
+    expect(db.prepare('SELECT id, name, description FROM split_rules').all()).toEqual([
+      { id: 'custom:1', name: 'Landlord', description: null }
+    ])
   } finally {
     db.close()
   }

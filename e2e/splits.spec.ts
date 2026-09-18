@@ -196,9 +196,10 @@ test('classifies once, navigates locally, and restores each split selection', as
     for (let index = 1; index <= 4; index++) {
       await window.attn.splits.save({
         name: `Custom ${index}`,
+        notify: false,
+        mode: 'rules',
         operator: 'any',
-        conditions: [{ type: 'senderDomain', value: `custom-${index}.example` }],
-        notify: false
+        conditions: [{ type: 'senderDomain', value: `custom-${index}.example` }]
       })
     }
   })
@@ -349,7 +350,7 @@ test('edits, reorders, deletes, persists, and explicitly restores a starter pres
   await expect(conditionValue).toHaveValue('sam@example.com')
   await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByTestId('split-rule')).toHaveCount(6)
-  await expect(page.getByTestId('split-rule').filter({ hasText: 'Personal' })).toContainText('1 condition')
+  await expect(page.getByTestId('split-rule').filter({ hasText: 'Personal' })).toContainText('1 rule')
 
   const github = page.locator('[data-testid="split-rule"][data-split-id="preset:github"]')
   await github.getByTestId('split-rule-summary').click()

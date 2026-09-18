@@ -612,8 +612,8 @@ describe('ServiceRuntime with several accounts', () => {
     await runtime.invoke(IPC_CHANNELS.splitsSave, [
       {
         name: 'Roadmaps',
-        operator: 'any',
-        conditions: [{ type: 'description', value: 'Anything about a product roadmap' }],
+        mode: 'description',
+        description: 'Anything about a product roadmap',
         notify: true
       }
     ])

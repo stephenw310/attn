@@ -12,6 +12,7 @@ import type { AppInfo, UpdateState } from '../shared/distribution'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
 import type { PendingFocusTarget } from '../shared/notifications'
 import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
+import type { SplitTriageStatus } from '../shared/splits'
 import { isThemePreference, type ThemePreference } from '../shared/theme'
 import { fromAppFrame, MailFrameGrants } from './remoteImages'
 import type { ServiceSupervisor } from './service/supervisor'
@@ -64,6 +65,10 @@ export interface IpcContext {
     generate: (request: unknown) => Promise<{ requestId: string }>
     cancel: (requestId: unknown) => void
   }
+  /** Smart splits: the counts come from the utility, the key presence from main. */
+  splits: {
+    getTriageStatus: () => Promise<SplitTriageStatus>
+  }
   setThemePreference: (preference: ThemePreference) => void
   pickAttachmentPaths?: () => Promise<string[]>
 }
@@ -89,6 +94,7 @@ export function registerIpc(context: IpcContext): () => void {
   handle(IPC_CHANNELS.updateGetState, () => context.update.getState())
   handle(IPC_CHANNELS.updateCheck, () => context.update.check())
   handle(IPC_CHANNELS.updateRestart, () => context.update.restart())
+  handle(IPC_CHANNELS.splitsGetTriageStatus, () => context.splits.getTriageStatus())
   handle(IPC_CHANNELS.aiGetSettings, () => context.ai.getSettings())
   handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => context.ai.setSetting(key, value))
   handle(IPC_CHANNELS.aiSetKey, (_event, key) => {

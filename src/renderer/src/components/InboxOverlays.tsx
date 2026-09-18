@@ -52,7 +52,6 @@ export function InboxOverlays({ controller: c }: { controller: InboxController }
           onDelete={c.splits.remove}
           onReorder={(ids) => c.splits.reorder({ ids })}
           onRestore={c.splits.restorePreset}
-          onOpenTriageSettings={() => c.openSettings('aiTriage')}
           onClose={() => c.setSplitRulesOpen(false)}
         />
       )}

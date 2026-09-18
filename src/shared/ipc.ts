@@ -37,7 +37,8 @@ import type {
   SaveSplitInput,
   SplitPresetId,
   SplitState,
-  SplitThreadLocation
+  SplitThreadLocation,
+  SplitTriageStatus
 } from './splits'
 import type { ThemePreference } from './theme'
 
@@ -118,6 +119,7 @@ export const IPC_CHANNELS = {
   splitsDelete: 'splits:delete',
   splitsReorder: 'splits:reorder',
   splitsRestorePreset: 'splits:restorePreset',
+  splitsGetTriageStatus: 'splits:getTriageStatus',
   mailPeekActionsReverted: 'mail:peekActionsReverted',
   mailAcknowledgeActionsReverted: 'mail:acknowledgeActionsReverted',
   mailGetConversation: 'mail:getConversation',
@@ -330,6 +332,7 @@ export interface InvokeChannels {
   [IPC_CHANNELS.splitsDelete]: { args: [id: string]; result: SplitState }
   [IPC_CHANNELS.splitsReorder]: { args: [input: ReorderSplitsInput]; result: SplitState }
   [IPC_CHANNELS.splitsRestorePreset]: { args: [id: SplitPresetId]; result: SplitState }
+  [IPC_CHANNELS.splitsGetTriageStatus]: { args: []; result: SplitTriageStatus }
   [IPC_CHANNELS.mailPeekActionsReverted]: {
     args: [accountId: string]
     result: ActionRevertNotice | null

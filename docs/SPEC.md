@@ -545,16 +545,26 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   accepts Up and Down for keyboard access. Attn never recreates a changed or deleted preset during launch,
   sync, or an app update. The rule manager can restore a preset only after an explicit user action.
 - The split-rule manager keeps the sortable list beside the selected rule editor. It identifies the current account and explains first-match ordering. Important and Other show their built-in behavior and notification preference. Custom rules expose their existing conditions, notification preference, save, and delete actions. The manager selects the first rule on opening. Escape closes it in one step, except during a drag.
+- A smart-splits card spans the top of the manager, above the rule list. It holds the consent switch, the
+  TypeSafe key, the judgment model, and one status line: off, on with no described split, or on with the
+  count of described splits and judged conversations. The card reports outstanding judgments while they run.
+- The rule editor offers a two-way choice under the split name: **Describe it** or **Match by rules**. A new
+  split starts on Describe it while smart splits are on, and on Match by rules while they are off, where
+  Describe it stays unavailable. An existing split opens on the choice it was saved with. Switching the
+  choice asks before it discards what the other side holds.
+- Each row summarizes its rule: `Described`, `Described · paused` while smart splits are off, the condition
+  count for a rule-based split, or the built-in behavior of Important and Other.
 - A split expression combines conditions with **any** or **all**. Conditions match a sender address, a sender
   domain, an exact `List-Id`, `List-Id` presence, a label, an attachment MIME type, or an attachment filename
   suffix. A thread matches when at least one message satisfies the whole expression. Under **all**, the same
   message must satisfy every condition. First matching split wins in the user's configured order. **Other**
   is the final fallback and cannot move ahead of a matching split, so every Inbox thread appears exactly
   once. Splits are views, so splitting never moves mail.
-- **Described splits (smart splits):** a condition can also be prose the user writes, such as "Anything from
-  my landlord". A background classifier answers that description for each Inbox conversation and stores the
-  yes-probability. The split claims the conversation at or above the stored threshold. A rule holds at most
-  one description, because one judgment is stored per conversation per split.
+- **Described splits (smart splits):** a split is described or rule-based, never both. A described split
+  holds prose the user writes, such as "Anything from my landlord", and no conditions. A background
+  classifier answers that description for each Inbox conversation and stores the yes-probability. The split
+  claims the conversation at or above the stored threshold. Changing a split to conditions clears its
+  description, and changing it to a description clears its conditions.
 - Smart splits stay off until the user gives separate consent and saves a TypeSafe key. They use their own
   service, their own key, and their own switch. Enabling AI writing never enables them.
 - The classifier sends one request per conversation. The request carries the subject, the sender, the
@@ -650,7 +660,8 @@ Settings and the palette expose:
 - Snippet manager and theme. The split-rule manager opens from its columns icon beside the Inbox splits.
 - Background behavior: launch at login and the macOS menu-bar icon while the window is open (F16).
 - AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
-- Smart splits: a separate consent, its own TypeSafe key, and its judgment model (F11, F17).
+- Smart splits: the AI writing page links to Split rules, which holds their consent, their TypeSafe key,
+  and their judgment model (F11, F17).
 - Keyboard cheat sheet (`Mod+/`).
 
 Label account-specific controls with the owning email; other preferences apply app-wide. Settings reuse
@@ -763,8 +774,9 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   Gmail's category labels, the mailing-list flag, the message count, and a bounded excerpt of the first and
   latest message. It also states that judgments run in the background without a command, unlike reply
   drafting. Removing the TypeSafe key withdraws the consent and stops the classifier; it touches neither the
-  writing key nor the OAuth credentials. The split-rule editor states that a description does not sort mail
-  while smart splits are off, and it opens that setting.
+  writing key nor the OAuth credentials. The consent, the key, and the model live in the Split rules
+  manager, beside the descriptions they judge; the AI writing settings page only links there. A described
+  split's row reads `Described · paused` while smart splits are off.
 - **Never auto-sends.** Accepted autocomplete text and generated replies use the normal editable draft
   and send flow, undo send included. Unaccepted suggestions are never sent.
 
