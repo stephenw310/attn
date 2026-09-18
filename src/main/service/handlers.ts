@@ -144,6 +144,8 @@ export interface ServiceHandlerContext {
   /** The active account's live workers, or null while no account is active. */
   activeSession: () => ServiceSession | null
   broadcastMailChanged: (serverSearchRequestId?: string) => void
+  /** Smart-splits consent or model changed: every session re-reads its gate. */
+  triageChanged: () => void
   /** Push the stored remote-image policy to main's request filter (T33). */
   publishRemoteImagePolicy: () => void
   mailboxCounts: (accountId: string) => SystemMailboxCounts
@@ -263,7 +265,8 @@ function isSplitCondition(value: unknown): value is SplitCondition {
       candidate.type === 'listId' ||
       candidate.type === 'label' ||
       candidate.type === 'attachmentMimeType' ||
-      candidate.type === 'attachmentFilenameSuffix') &&
+      candidate.type === 'attachmentFilenameSuffix' ||
+      candidate.type === 'description') &&
     typeof candidate.value === 'string'
   )
 }
@@ -476,12 +479,21 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     writeAccountSetting(context.db, account, 'commandPaletteUsage', JSON.stringify(sanitized))
     return sanitized
   })
-  // T36 AI settings storage. keyPresent is main-only custody: the utility
-  // reports false and main overwrites it from the encrypted key file.
-  handle(IPC_CHANNELS.aiGetSettings, () => ({ ...readAiStoredSettings(context.db), keyPresent: false }))
+  // T36 AI settings storage. Both key-presence flags are main-only custody:
+  // the utility reports false and main overwrites them from the encrypted key
+  // files.
+  handle(IPC_CHANNELS.aiGetSettings, () => ({
+    ...readAiStoredSettings(context.db),
+    keyPresent: false,
+    triageKeyPresent: false
+  }))
   handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => {
     const update = validateAiSettingUpdate(key, value)
-    return { ...writeAiStoredSetting(context.db, update), keyPresent: false }
+    const stored = writeAiStoredSetting(context.db, update)
+    // Turning triage on starts the classifier now rather than at the next
+    // mail change; turning it off is picked up at the next batch boundary.
+    if (update.key === 'triageEnabled' || update.key === 'triageModel') context.triageChanged()
+    return { ...stored, keyPresent: false, triageKeyPresent: false }
   })
   handle(IPC_CHANNELS.aiStyleExamples, (_event, excludeThreadId) => {
     if (!nonEmptyString(excludeThreadId)) throw new Error('invalid thread id')

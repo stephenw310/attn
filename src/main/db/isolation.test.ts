@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { IMPORTANT_SPLIT_ID } from '../../shared/splits'
 import { loadSeed } from '../dev/seed'
-import { ensureSplitSetup } from '../splits'
+import { descriptionHash, ensureSplitSetup, saveSplit } from '../splits'
 import { runFtsBackfill } from '../sync/ftsBackfill'
 import { THREAD_LIST_LIMIT } from '../sync/tuning'
 import { type Db, openDatabase } from './index'
@@ -178,6 +178,40 @@ describe('two-account read isolation', () => {
       new Set(['alpha-t1'])
     )
     db.close()
+  })
+
+  it('honors a described split judgment only for the account that owns it', async () => {
+    const db = await twoAccountStore()
+    try {
+      ensureSplitSetup(db, A)
+      const description = 'Anything about the roadmap'
+      const saved = saveSplit(db, A, {
+        name: 'Described',
+        operator: 'any',
+        conditions: [{ type: 'description', value: description }],
+        notify: false
+      })
+      const splitId = saved.splits.find((split) => split.name === 'Described')?.id
+      if (!splitId) throw new Error('Expected the described split')
+      const judge = db.prepare(
+        `INSERT INTO split_judgments
+         (account_id, thread_id, split_id, description_hash, evidence_key, probability, judged_at)
+         VALUES (?, 'alpha-t2', ?, ?, 'm-alpha-t2', 0.99, 1)`
+      )
+
+      // Beta's judgment names alpha's thread and alpha's split id. An unscoped
+      // read would honor it; the compiled rule must not see it at all.
+      judge.run(B, splitId, descriptionHash(description))
+      expect(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, splitId)).toEqual([])
+
+      judge.run(A, splitId, descriptionHash(description))
+      onlyAlpha(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, splitId))
+      expect(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, splitId).map((row) => row.id)).toEqual([
+        'alpha-t2'
+      ])
+    } finally {
+      db.close()
+    }
   })
 
   it('targeted restoration reads enforce account and mailbox membership', async () => {

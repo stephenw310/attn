@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { emptyDraftInput } from '../../shared/drafts'
-import { IPC_CHANNELS } from '../../shared/ipc'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../../shared/ipc'
 import type { ThreadPage } from '../../shared/mail'
 import { OTHER_SPLIT_ID, type SplitState } from '../../shared/splits'
 import { storeActionError } from '../actions/execute'
@@ -20,9 +20,15 @@ import * as splits from '../splits'
 import { persistThread } from '../sync/persist'
 import { type HistoryPoller, historyEvents } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
+import { SPLIT_TRIAGE_NOTIFY_WAIT_MS } from '../sync/tuning'
 import type { SyncController } from '../syncController'
 import { type SchedulerTime, systemTime } from '../time'
-import type { ServiceAccountsState, ServiceEvent, ServiceInitialize } from './protocol'
+import {
+  SERVICE_PROTOCOL_VERSION,
+  type ServiceAccountsState,
+  type ServiceEvent,
+  type ServiceInitialize
+} from './protocol'
 import { IndexingSlot, ServiceRuntime } from './runtime'
 
 // Two seeded accounts prove the session-per-account runtime (F18): reads are
@@ -91,6 +97,51 @@ const TWO_ACCOUNTS = {
   ]
 }
 
+/**
+ * A runtime clock whose timers only fire when a test says so. The smart-splits
+ * notification wait rides it, so no case here waits out a deadline on the wall
+ * clock.
+ */
+class ManualRuntimeTimers {
+  private next = 1
+  private pending = new Map<number, { callback: () => void; delayMs: number }>()
+
+  readonly time: SchedulerTime = {
+    now: () => Date.now(),
+    timers: {
+      setTimeout: (callback, delayMs) => {
+        const id = this.next++
+        this.pending.set(id, { callback, delayMs })
+        return id as unknown as ReturnType<typeof setTimeout>
+      },
+      clearTimeout: (handle) => {
+        this.pending.delete(handle as unknown as number)
+      }
+    }
+  }
+
+  fire(maxDelayMs: number): void {
+    for (const [id, entry] of [...this.pending]) {
+      if (entry.delayMs <= maxDelayMs) {
+        this.pending.delete(id)
+        entry.callback()
+      }
+    }
+  }
+}
+
+/** Settle queued promise work without letting any timer callback run. */
+async function flushPromises(): Promise<void> {
+  for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+}
+
+/** Let queued promise work and a few macrotask turns settle. */
+async function flushMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 5; turn++) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
+
 describe('ServiceRuntime with several accounts', () => {
   let dir: string | null = null
   let runtimes: ServiceRuntime[] = []
@@ -109,14 +160,15 @@ describe('ServiceRuntime with several accounts', () => {
     const seedPath = join(dir, 'seed.json')
     writeFileSync(seedPath, JSON.stringify(TWO_ACCOUNTS))
     return {
-      protocolVersion: 4,
+      protocolVersion: SERVICE_PROTOCOL_VERSION,
       dbPath: join(dir, 'attn.db'),
       userDataPath: dir,
       downloadsPath: dir,
       testMode: true,
       testSeed: seedPath,
       accounts: { config: null, accounts: [], activeAccountId: null },
-      focused: false
+      focused: false,
+      triageKey: null
     }
   }
 
@@ -182,6 +234,26 @@ describe('ServiceRuntime with several accounts', () => {
     ])
     return { runtime, db, drafts }
   }
+
+  it('holds the relayed smart-splits key in memory and never in SQLite', async () => {
+    const seeded = { ...makeInput(), triageKey: 'ts-seeded-key' }
+    const { runtime } = await createRuntime(seeded)
+    expect(runtime.triageKey()).toBe('ts-seeded-key')
+
+    await runtime.internal('apply-triage-key', ['ts-updated-key'])
+    expect(runtime.triageKey()).toBe('ts-updated-key')
+
+    // Removing the key relays null; nothing about it is ever persisted.
+    await runtime.internal('apply-triage-key', [null])
+    expect(runtime.triageKey()).toBeNull()
+    await expect(runtime.internal('apply-triage-key', [''])).rejects.toThrow('invalid smart splits key')
+    await expect(runtime.internal('apply-triage-key', [7])).rejects.toThrow('invalid smart splits key')
+
+    const db = openDatabase(seeded.dbPath)
+    const rows = db.prepare("SELECT value FROM settings WHERE value LIKE 'ts-%'").all()
+    expect(rows).toEqual([])
+    db.close()
+  })
 
   it('returns the active account mailbox totals and reuses them between writes', async () => {
     const { runtime } = await createRuntime(makeInput())
@@ -520,6 +592,119 @@ describe('ServiceRuntime with several accounts', () => {
     const second = await createRuntime(makeInput())
     expect(second.runtime.ready().activeAccountId).toBe('second@attn.test')
     expect(await listInboxSubjects(second.runtime)).toEqual(['Beta launch', 'Beta digest'])
+  })
+
+  /**
+   * A runtime with smart splits switched on, the classifier pointed at the
+   * scripted TypeSafe service, and every starter split silenced except the
+   * ones the caller names. `notifyOther` decides whether an unjudged arrival
+   * would notify on its own, which is what separates "waited for the judgment"
+   * from "notified anyway".
+   */
+  async function armTriage(
+    runtime: ServiceRuntime,
+    options: { probability: number; notifyOther?: boolean }
+  ): Promise<void> {
+    const state = (await runtime.invoke(IPC_CHANNELS.splitsGetState, [])) as SplitState
+    for (const split of state.splits) {
+      if (split.notify) await runtime.invoke(IPC_CHANNELS.splitsSetNotify, [split.id, false])
+    }
+    await runtime.invoke(IPC_CHANNELS.splitsSave, [
+      {
+        name: 'Roadmaps',
+        operator: 'any',
+        conditions: [{ type: 'description', value: 'Anything about a product roadmap' }],
+        notify: true
+      }
+    ])
+    if (options.notifyOther) await runtime.invoke(IPC_CHANNELS.splitsSetNotify, [OTHER_SPLIT_ID, true])
+    await runtime.invoke(IPC_CHANNELS.aiSetSetting, ['triageEnabled', true])
+    await runtime.internal('apply-triage-key', ['ts-secret'])
+    // Drain the queue against a "no" script first, so the stored mail is fully
+    // judged and the arrival below is the only work left. Then arm the answer
+    // the arriving reply gets.
+    await runtime.internal('test', [TEST_CHANNELS.installFakeTriageProvider, { default: 0 }])
+    await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
+    await runtime.internal('test', [
+      TEST_CHANNELS.installFakeTriageProvider,
+      { bySubject: [{ subjectIncludes: 'Alpha', probabilities: { Roadmaps: options.probability } }] }
+    ])
+  }
+
+  /** A reply landing on the seeded thread: new evidence, so a fresh judgment. */
+  function appendReply(dbPath: string): void {
+    const db = openDatabase(dbPath)
+    db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
+                             body_text, recipients_json, attachments_json, labels_json)
+       VALUES ('primary@attn.test', 'm-alpha-2', 't-alpha', 'Ada', 'ada@example.com', 'Reply snippet', ?,
+               'More on the roadmap', '{"to":[],"cc":[],"bcc":[],"replyTo":[]}', '[]', '["INBOX","UNREAD"]')`
+    ).run(Date.now())
+    db.close()
+  }
+
+  function notificationEvents(events: ServiceEvent[]): { subjects: string[] }[] {
+    return events.flatMap((event) =>
+      event.kind === 'notification-candidates'
+        ? [{ subjects: event.candidates.map((candidate) => candidate.subject) }]
+        : []
+    )
+  }
+
+  const ARRIVAL = [{ threadId: 't-alpha', messageId: 'm-alpha-2' }]
+
+  it('waits for an arriving conversation to be judged before it decides to notify', async () => {
+    const input = makeInput()
+    const { runtime, events } = await createRuntime(input)
+    await armTriage(runtime, { probability: 0.95 })
+    appendReply(input.dbPath)
+
+    historyEvents.emit('newMail', 'primary@attn.test', ARRIVAL)
+    await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
+    await flushMicrotasks()
+
+    // Nothing else notifies for this thread: the candidate exists only because
+    // the judgment landed first and moved it into the described split.
+    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'] }])
+  })
+
+  it('notifies once a judgment lands after the wait has already expired', async () => {
+    const manual = new ManualRuntimeTimers()
+    const input = makeInput()
+    const { runtime, events } = await createRuntime(input, manual.time)
+    await armTriage(runtime, { probability: 0.95 })
+    appendReply(input.dbPath)
+
+    historyEvents.emit('newMail', 'primary@attn.test', ARRIVAL)
+    // The wait expires before the scripted service answers: the decision goes
+    // ahead on the assignment the thread has now, which notifies nobody.
+    manual.fire(SPLIT_TRIAGE_NOTIFY_WAIT_MS)
+    await flushPromises()
+    expect(notificationEvents(events)).toEqual([{ subjects: [] }])
+
+    await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
+    await flushMicrotasks()
+    expect(notificationEvents(events)).toEqual([{ subjects: [] }, { subjects: ['Alpha roadmap'] }])
+  })
+
+  it('stays quiet when a late judgment lands on a message that already notified', async () => {
+    const manual = new ManualRuntimeTimers()
+    const input = makeInput()
+    const { runtime, events } = await createRuntime(input, manual.time)
+    // Here the unjudged thread already sits in a split that notifies, so the
+    // arrival notified on its own before the judgment landed.
+    await armTriage(runtime, { probability: 0.95, notifyOther: true })
+    appendReply(input.dbPath)
+
+    historyEvents.emit('newMail', 'primary@attn.test', ARRIVAL)
+    manual.fire(SPLIT_TRIAGE_NOTIFY_WAIT_MS)
+    await flushPromises()
+    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'] }])
+
+    await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
+    await flushMicrotasks()
+    // The judgment moved the thread; it does not announce it a second time.
+    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'] }])
   })
 
   it('surfaces notification candidates for inactive accounts, roster members only', async () => {

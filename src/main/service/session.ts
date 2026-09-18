@@ -6,6 +6,7 @@ import type { ActionExecutor } from '../actions/executor'
 import type { DraftMirrorExecutor } from '../outbox/mirrorExecutor'
 import type { OutboxSender } from '../outbox/sender'
 import type { SnoozeScheduler } from '../scheduler'
+import type { SplitTriage } from '../sync/splitTriage'
 import type { SyncController } from '../syncController'
 
 export interface ServiceSession {
@@ -17,4 +18,6 @@ export interface ServiceSession {
   readonly draftMirrorExecutor: DraftMirrorExecutor
   readonly outboxSender: OutboxSender
   readonly snoozeScheduler: SnoozeScheduler
+  /** The smart-splits classifier pass; idle unless the user turned it on. */
+  readonly splitTriage: SplitTriage
 }

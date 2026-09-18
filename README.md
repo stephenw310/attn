@@ -13,7 +13,8 @@ Attn is in early development. You need your own Google OAuth client to connect G
 - Write rich-text messages with attachments, saved snippets, and Gmail signatures.
 - Save drafts locally, sync drafts with Gmail, and cancel sends during the undo-send delay.
 - Search cached mail or submit a search to Gmail for older mail.
-- Create inbox splits with rules and set follow-up reminders.
+- Create inbox splits with rules and set follow-up reminders. You can also describe a split in plain words
+  and let TypeSafe sort mail into it with your own key.
 - Use desktop notifications, unread badges, and light or dark themes.
 - Enable AI reply drafts or inline autocomplete with your own provider. Both are optional.
 
@@ -126,13 +127,15 @@ Personal macOS builds use an ad-hoc signature and are not notarized. Personal Wi
 
 ## Data and privacy
 
-Attn stores cached mail and local drafts in SQLite under your user data directory. The mail database is not encrypted by Attn. OAuth tokens and AI provider keys use Electron `safeStorage`, backed by the operating system.
+Attn stores cached mail and local drafts in SQLite under your user data directory. The mail database is not encrypted by Attn. OAuth tokens, your AI writing key, and your TypeSafe key for smart splits use Electron `safeStorage`, backed by the operating system. Each key has its own file.
 
 Attn has no hosted mail backend or telemetry. It connects to Google for mail. Signed release builds also contact their configured update feed.
 
 Remote images load directly from senders by default. You can block them in settings and allow individual senders.
 
 AI is disabled by default. If you enable it, Attn sends mail context to your chosen provider for requested reply drafts. Inline autocomplete has a separate opt-in and sends a limited excerpt of unsent text. Review generated text before you send it.
+
+Smart splits have their own opt-in and their own TypeSafe key. If you turn them on, Attn sends a limited summary of each Inbox conversation to TypeSafe in the background, without a command. Remove the TypeSafe key to stop it.
 
 Snooze and follow-up timers run locally. If Attn is closed when a reminder becomes due, it returns when Attn next starts.
 

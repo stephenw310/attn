@@ -95,6 +95,22 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
     from: 26,
     to: 27,
     sql: 'ALTER TABLE accounts DROP COLUMN created_at;'
+  },
+  {
+    from: 27,
+    to: 28,
+    sql: `
+      CREATE TABLE split_judgments (
+        account_id       TEXT NOT NULL,
+        thread_id        TEXT NOT NULL,
+        split_id         TEXT NOT NULL,
+        description_hash TEXT NOT NULL,
+        evidence_key     TEXT NOT NULL,
+        probability      REAL NOT NULL,
+        judged_at        INTEGER NOT NULL,
+        PRIMARY KEY (account_id, thread_id, split_id)
+      );
+    `
   }
 ]
 

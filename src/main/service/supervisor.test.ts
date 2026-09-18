@@ -2,7 +2,12 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '../../shared/ipc'
-import type { MainToServiceMessage, ServiceInitialize, ServiceReady } from './protocol'
+import {
+  type MainToServiceMessage,
+  SERVICE_PROTOCOL_VERSION,
+  type ServiceInitialize,
+  type ServiceReady
+} from './protocol'
 import { type ServiceChild, ServiceSupervisor } from './supervisor'
 
 vi.mock('electron', () => ({
@@ -23,13 +28,14 @@ const READY: ServiceReady = {
 
 function initialization(): ServiceInitialize {
   return {
-    protocolVersion: 4,
+    protocolVersion: SERVICE_PROTOCOL_VERSION,
     dbPath: '/tmp/attn-supervisor-test.db',
     userDataPath: '/tmp/attn-supervisor-test',
     downloadsPath: '/tmp',
     testMode: true,
     accounts: { config: null, accounts: [], activeAccountId: null },
-    focused: false
+    focused: false,
+    triageKey: null
   }
 }
 
@@ -144,6 +150,38 @@ describe('ServiceSupervisor', () => {
 
     await expect(started).rejects.toThrow('stopping')
     await expect(stopped).resolves.toBeUndefined()
+  })
+
+  it('relays the smart-splits key and re-sends it to a restarted utility', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const children = [new FakeChild(), new FakeChild()]
+    let nextChild = 0
+    const supervisor = new ServiceSupervisor('/utility.js', initialization(), {
+      fork: () => children[nextChild++],
+      restartDelayMs: 1
+    })
+    const started = supervisor.start()
+    children[0].ready()
+    await started
+    const boot = children[0].messages[0] as { type: 'initialize'; payload: ServiceInitialize }
+    expect(boot.payload.triageKey).toBeNull()
+
+    // The relay is an internal request; the crash below rejects it, which is
+    // not what this test is about.
+    const relayed = supervisor.applyTriageKey('ts-key-value').catch(() => undefined)
+    await vi.waitFor(() => expect(children[0].messages.length).toBe(2))
+    expect(children[0].messages[1]).toMatchObject({
+      type: 'internal-request',
+      operation: 'apply-triage-key',
+      args: ['ts-key-value']
+    })
+
+    // A restarted utility must re-receive the current key, not the boot-time one.
+    children[0].exit(1)
+    await relayed
+    await vi.waitFor(() => expect(children[1].messages.length).toBe(1))
+    const restart = children[1].messages[0] as { type: 'initialize'; payload: ServiceInitialize }
+    expect(restart.payload.triageKey).toBe('ts-key-value')
   })
 
   it('backs off and stops restarting after repeated post-ready crashes', async () => {

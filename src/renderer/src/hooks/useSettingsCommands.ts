@@ -48,6 +48,7 @@ export function useSettingsCommands(options: Options): void {
         createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
         createCommand('snippets.manage', () => openSettings('snippets')),
         createCommand('ai.settings', () => openSettings('aiWriting')),
+        createCommand('ai.triageSettings', () => openSettings('aiTriage')),
         createCommand('autocomplete.enable', () => openSettings('aiWriting')),
         createCommand('autocomplete.disable', () => {
           void window.attn?.ai

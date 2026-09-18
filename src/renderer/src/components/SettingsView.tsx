@@ -37,6 +37,7 @@ export type SettingsControl =
   | 'attnFooter'
   | 'snippets'
   | 'aiWriting'
+  | 'aiTriage'
   | 'remoteImages'
   | 'unreadBadge'
   | 'launchAtLogin'
@@ -65,6 +66,7 @@ const CONTROL_PAGE: Record<SettingsControl, SettingsPage> = {
   attnFooter: 'compose',
   snippets: 'snippets',
   aiWriting: 'ai',
+  aiTriage: 'ai',
   remoteImages: 'security',
   unreadBadge: 'notifications',
   launchAtLogin: 'background',

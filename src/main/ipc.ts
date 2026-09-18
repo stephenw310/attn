@@ -59,6 +59,8 @@ export interface IpcContext {
     setSetting: (key: unknown, value: unknown) => Promise<AiSettings>
     setKey: (key: string) => Promise<AiSettings>
     deleteKey: () => Promise<AiSettings>
+    setTriageKey: (key: string) => Promise<AiSettings>
+    deleteTriageKey: () => Promise<AiSettings>
     generate: (request: unknown) => Promise<{ requestId: string }>
     cancel: (requestId: unknown) => void
   }
@@ -96,6 +98,13 @@ export function registerIpc(context: IpcContext): () => void {
     return context.ai.setKey(key.trim())
   })
   handle(IPC_CHANNELS.aiDeleteKey, () => context.ai.deleteKey())
+  handle(IPC_CHANNELS.aiSetTriageKey, (_event, key) => {
+    if (typeof key !== 'string' || key.trim().length === 0 || key.length > 2_048) {
+      throw new Error('invalid TypeSafe key')
+    }
+    return context.ai.setTriageKey(key.trim())
+  })
+  handle(IPC_CHANNELS.aiDeleteTriageKey, () => context.ai.deleteTriageKey())
   handle(IPC_CHANNELS.aiGenerate, (_event, request) => context.ai.generate(request))
   handle(IPC_CHANNELS.aiCancel, (_event, requestId) => {
     context.ai.cancel(requestId)

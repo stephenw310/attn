@@ -1,9 +1,11 @@
-// Encrypted LLM-provider key custody (F17, §6). Follows the OAuth tokens'
-// encrypted-file pattern but stays deliberately separate: deleting the AI key
-// removes ai-key.bin and never touches tokens.bin or anything OAuth. The key
-// is never written to SQLite (the settings table is plaintext) and never
-// logged. The cipher is injected so unit tests run against a fake safeStorage
-// without Electron.
+// Encrypted provider key custody (F17, §6). Follows the OAuth tokens'
+// encrypted-file pattern but stays deliberately separate: each store owns one
+// file, so deleting a key removes only that file and never touches tokens.bin,
+// anything OAuth, or the other store's file. The writing-provider key lives in
+// ai-key.bin and the TypeSafe smart-splits key in typesafe-key.bin; removing
+// one leaves the other intact. A key is never written to SQLite (the settings
+// table is plaintext) and never logged. The cipher is injected so unit tests
+// run against a fake safeStorage without Electron.
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -14,16 +16,20 @@ export interface SecretCipher {
   decryptString(data: Buffer): string
 }
 
-const FILE = 'ai-key.bin'
+const AI_KEY_FILE = 'ai-key.bin'
+
+/** The smart-splits key file; deleting it never touches `ai-key.bin`. */
+export const TYPESAFE_KEY_FILE = 'typesafe-key.bin'
 
 export class AiKeyStore {
   constructor(
     private readonly userDataDir: string,
-    private readonly cipher: SecretCipher
+    private readonly cipher: SecretCipher,
+    private readonly file: string = AI_KEY_FILE
   ) {}
 
   private path(): string {
-    return join(this.userDataDir, FILE)
+    return join(this.userDataDir, this.file)
   }
 
   present(): boolean {

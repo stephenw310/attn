@@ -8,6 +8,7 @@ import type { SplitState } from '../../shared/splits'
 import { actionQueueStatus, clearUndo } from '../actions'
 import { ActionExecutor } from '../actions/executor'
 import { ActionRevertNotices } from '../actions/revertNotices'
+import { readAiStoredSettings } from '../aiSettings'
 import { notificationPausedUntil, setNotificationPausedUntil } from '../appSettings'
 import { type Db, openDatabase, schemaVersion } from '../db'
 import { accountOutboxSpoolIds, purgeAccountRows } from '../db/purgeAccount'
@@ -25,7 +26,13 @@ import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../set
 import { getSplitState, hasSplitSetup } from '../splits'
 import { historyEvents, type NewMail } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
-import { DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE } from '../sync/tuning'
+import { SplitTriage } from '../sync/splitTriage'
+import {
+  DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE,
+  SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS,
+  SPLIT_TRIAGE_NOTIFIED_MESSAGE_MEMORY,
+  SPLIT_TRIAGE_NOTIFY_WAIT_MS
+} from '../sync/tuning'
 import { SyncController } from '../syncController'
 import { type SchedulerTime, systemTime } from '../time'
 import { createServiceHandlers, type ServiceHandlers } from './handlers'
@@ -146,6 +153,18 @@ export class ServiceRuntime {
   private config: ServiceAccountsState['config']
   private activeAccountId: string | null = null
   private focused: boolean
+  /**
+   * The user's TypeSafe key for smart splits (Phase 3 reads it through
+   * `triageKey()`). Memory only: it is never written to SQLite, never sent in
+   * an event, and never logged — main owns its encrypted file.
+   */
+  private storedTriageKey: string | null
+  /**
+   * Message ids already offered to the notifier, so a judgment that lands
+   * after its arrival's decision cannot notify about the same message twice.
+   * Bounded: notifications are a live surface, not a history.
+   */
+  private readonly notifiedMessageIds = new Set<string>()
   private stopped = false
   private schedulersStarted = false
   private mailRevision = 0
@@ -162,13 +181,24 @@ export class ServiceRuntime {
     // per account per poll cycle by construction: each account's poller emits
     // its own newMail event, so one busy account summarizes while another's
     // two arrivals still show as detail toasts.
-    if (!this.sessions.has(accountId)) return
-    this.emit({
-      kind: 'notification-candidates',
-      accountId,
-      candidates: candidatesFor(this.db, accountId, newMail),
-      pausedUntil: notificationPausedUntil(this.db)
-    })
+    const session = this.sessions.get(accountId)
+    if (!session) return
+    // With smart splits off — the default — this stays exactly as synchronous
+    // as it was. Only a user who turned triage on waits, and only briefly, so
+    // the arrival is routed by its own judgment rather than the previous one.
+    if (!session.splitTriage.canJudge()) {
+      this.emitNotificationCandidates(accountId, newMail)
+      return
+    }
+    const threadIds = [...new Set(newMail.map((mail) => mail.threadId))]
+    void session.splitTriage
+      .judgeNow(threadIds, SPLIT_TRIAGE_NOTIFY_WAIT_MS)
+      .catch(() => {})
+      .then(() => {
+        // The account may have been removed or replaced while we waited.
+        if (this.sessions.get(accountId) !== session) return
+        this.emitNotificationCandidates(accountId, newMail)
+      })
   }
 
   static async create(
@@ -188,6 +218,7 @@ export class ServiceRuntime {
   ) {
     this.config = input.accounts.config
     this.focused = input.focused
+    this.storedTriageKey = input.triageKey
     this.db = openDatabase(input.dbPath)
 
     let seedIds: string[] = []
@@ -238,6 +269,9 @@ export class ServiceRuntime {
       activeSession: () => this.activeSession(),
       broadcastMailChanged: (serverSearchRequestId) =>
         this.broadcastMailChanged(this.activeAccountId, serverSearchRequestId),
+      // The AI settings are app-global (F18 rule 9), so a consent or model
+      // change reaches every session, not just the active one.
+      triageChanged: () => this.kickSplitTriage(),
       publishRemoteImagePolicy: () => this.emitRemoteImagePolicy(),
       broadcastOutboxChanged: (payload) => this.emit({ kind: 'outbox-changed', payload }),
       broadcastBodyHydrationFailed: (accountId, threadId) =>
@@ -285,6 +319,11 @@ export class ServiceRuntime {
     return this.handlers.invoke(channel, args)
   }
 
+  /** The relayed TypeSafe key, or null when no key is stored. */
+  triageKey(): string | null {
+    return this.storedTriageKey
+  }
+
   async internal(operation: ServiceOperation, args: unknown[]): Promise<unknown> {
     if (operation === 'resume-auth-failures') {
       // Sign-in names the account it reauthenticated — which need not be the
@@ -304,6 +343,18 @@ export class ServiceRuntime {
       // actually exist — main publishes AuthStatus from this response.
       await Promise.all(this.applyAccounts(state))
       return this.activeAccountId
+    }
+    if (operation === 'apply-triage-key') {
+      const key = args[0]
+      // A fixed message: the rejected value is the secret itself.
+      if (key !== null && (typeof key !== 'string' || key.length === 0)) {
+        throw new Error('invalid smart splits key')
+      }
+      this.storedTriageKey = key
+      // A new key also clears whatever a refused one paused: the pass reads
+      // the key through this field and re-opens its gate on the next kick.
+      if (key !== null) this.kickSplitTriage()
+      return undefined
     }
     if (operation === 'set-active-account') {
       const accountId = args[0]
@@ -402,7 +453,11 @@ export class ServiceRuntime {
       session.syncController.stop()
       session.actionExecutor.stop()
       session.snoozeScheduler.stop()
-      workers.push(session.draftMirrorExecutor.stop(), session.outboxSender.stop())
+      workers.push(
+        session.draftMirrorExecutor.stop(),
+        session.outboxSender.stop(),
+        session.splitTriage.stop()
+      )
     }
     const stopped = await Promise.allSettled(workers)
     for (const result of stopped) {
@@ -426,7 +481,80 @@ export class ServiceRuntime {
     // Seed main's request filter with the stored policy before any window
     // can mount a mail frame (T33).
     this.emitRemoteImagePolicy()
-    for (const session of this.sessions.values()) void session.syncController.resumeOnlineWork()
+    for (const session of this.sessions.values()) {
+      void session.syncController.resumeOnlineWork()
+      session.splitTriage.kick()
+    }
+  }
+
+  /** Smart-splits consent, model, or key changed: re-read the gate everywhere. */
+  private kickSplitTriage(): void {
+    for (const session of this.sessions.values()) session.splitTriage.kick()
+  }
+
+  private emitNotificationCandidates(accountId: string, newMail: readonly NewMail[]): void {
+    const candidates = candidatesFor(this.db, accountId, newMail)
+    this.rememberNotified(accountId, candidates)
+    this.emit({
+      kind: 'notification-candidates',
+      accountId,
+      candidates,
+      pausedUntil: notificationPausedUntil(this.db)
+    })
+  }
+
+  /**
+   * A judgment that landed after its arrival's notification decision already
+   * went ahead. The Inbox has already moved the thread; this asks whether the
+   * arrival should also have notified, and emits only what was never emitted.
+   */
+  private emitLateNotificationCandidates(accountId: string, threadIds: readonly string[]): void {
+    if (!this.sessions.has(accountId)) return
+    const latestUnread = this.db.prepare(
+      `SELECT m.id AS message_id, m.internal_date AS internal_date
+       FROM messages m
+       JOIN threads t ON t.account_id = m.account_id AND t.id = m.thread_id
+       WHERE m.account_id = ? AND m.thread_id = ? AND t.is_unread = 1
+       ORDER BY m.internal_date DESC, m.id DESC
+       LIMIT 1`
+    )
+    const now = this.time.now()
+    const newMail: NewMail[] = []
+    for (const threadId of threadIds) {
+      const row = latestUnread.get(accountId, threadId) as
+        | { message_id: string; internal_date: number | null }
+        | undefined
+      if (!row?.internal_date) continue
+      // Past this age the arrival is history: the judgment still moves the
+      // thread, but a notification for it would arrive out of nowhere.
+      if (now - row.internal_date > SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS) continue
+      if (this.notifiedMessageIds.has(notifiedKey(accountId, row.message_id))) continue
+      newMail.push({ threadId, messageId: row.message_id })
+    }
+    if (newMail.length === 0) return
+    const candidates = candidatesFor(this.db, accountId, newMail)
+    if (candidates.length === 0) return
+    this.rememberNotified(accountId, candidates)
+    this.emit({
+      kind: 'notification-candidates',
+      accountId,
+      candidates,
+      pausedUntil: notificationPausedUntil(this.db)
+    })
+  }
+
+  /** Bounded insertion-ordered memory: the oldest id leaves when it overflows. */
+  private rememberNotified(accountId: string, candidates: readonly { messageId: string }[]): void {
+    for (const candidate of candidates) {
+      const key = notifiedKey(accountId, candidate.messageId)
+      this.notifiedMessageIds.delete(key)
+      this.notifiedMessageIds.add(key)
+    }
+    while (this.notifiedMessageIds.size > SPLIT_TRIAGE_NOTIFIED_MESSAGE_MEMORY) {
+      const oldest = this.notifiedMessageIds.values().next()
+      if (oldest.done) break
+      this.notifiedMessageIds.delete(oldest.value)
+    }
   }
 
   private emitRemoteImagePolicy(): void {
@@ -501,6 +629,23 @@ export class ServiceRuntime {
       shouldPreemptIndexing: (accountId) => this.indexingSlot.hasPriorityWaiter(accountId),
       cleanOutboxSpool: (outboxId) => cleanOutboxSpool(this.input.userDataPath, outboxId)
     })
+    const splitTriage = new SplitTriage({
+      db: this.db,
+      accountId: id,
+      time: this.time,
+      // Resolved per request: the harness installs its fake after the session
+      // exists, and in test mode the seam owns one from the start, so no
+      // triage request can reach the network there whether or not a spec
+      // installed a script.
+      transport: () => this.test?.triageTransport() ?? fetch,
+      readSettings: () => readAiStoredSettings(this.db),
+      triageKey: () => this.storedTriageKey,
+      shouldYield: () => this.foregroundProviderWork.size > 0,
+      isActive: () => !this.stopped && this.sessions.get(id) === session,
+      onAssignmentsChanged: () => this.broadcastMailChanged(id),
+      onLateJudgment: (threadIds) => this.emitLateNotificationCandidates(id, threadIds),
+      log: (level, message) => this.log(level, message)
+    })
     const session: AccountSession = {
       id,
       auth,
@@ -510,7 +655,8 @@ export class ServiceRuntime {
       actionExecutor,
       draftMirrorExecutor,
       outboxSender,
-      snoozeScheduler
+      snoozeScheduler,
+      splitTriage
     }
     this.sessions.set(id, session)
     this.accountOrder.push(id)
@@ -519,6 +665,7 @@ export class ServiceRuntime {
       snoozeScheduler.start()
       outboxSender.start()
       void syncController.resumeOnlineWork()
+      splitTriage.kick()
     }
     return session
   }
@@ -534,7 +681,11 @@ export class ServiceRuntime {
     session.syncController.stop()
     session.actionExecutor.stop()
     session.snoozeScheduler.stop()
-    const retirement = Promise.allSettled([session.draftMirrorExecutor.stop(), session.outboxSender.stop()])
+    const retirement = Promise.allSettled([
+      session.draftMirrorExecutor.stop(),
+      session.outboxSender.stop(),
+      session.splitTriage.stop()
+    ])
       .then((results) => {
         for (const result of results) {
           if (result.status === 'rejected')
@@ -799,6 +950,11 @@ export class ServiceRuntime {
     this.mailRevision += 1
     if (accountId === null) this.mailSummaryByAccount.clear()
     else this.mailSummaryByAccount.delete(accountId)
+    // Mail arrived, moved, or a split rule changed: the classifier's queue may
+    // have grown. `kick` is idle-cheap and ignores its own broadcasts, so this
+    // cannot become a loop.
+    if (accountId === null) this.kickSplitTriage()
+    else this.sessions.get(accountId)?.splitTriage.kick()
     if (accountId === null || accountId === this.activeAccountId) {
       this.emit({
         kind: 'mail-changed',
@@ -914,6 +1070,11 @@ export class ServiceRuntime {
   private log(level: 'log' | 'warn' | 'error', message: string): void {
     this.emit({ kind: 'log', level, message })
   }
+}
+
+/** Message ids are only unique within an account, so the memory is keyed by both. */
+function notifiedKey(accountId: string, messageId: string): string {
+  return `${accountId} ${messageId}`
 }
 
 function isServiceAccountsState(value: unknown): value is ServiceAccountsState {

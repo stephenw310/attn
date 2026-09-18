@@ -38,6 +38,7 @@ function handlerContext(
     db,
     currentAccountId: () => ACCOUNT,
     accountStatuses: () => [],
+    triageChanged: () => {},
     publishRemoteImagePolicy: () => {},
     mailboxCounts: (accountId) => countSystemMailboxes(db, accountId),
     splitState: (accountId) => getSplitState(db, accountId),

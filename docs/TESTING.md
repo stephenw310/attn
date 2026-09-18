@@ -92,6 +92,9 @@ All `attn:test:*` controls live in `src/main/testIpc.ts`. `TestSeams` disables t
 | `runFtsBackfill` | Reset or pause real index backfill to test recovery |
 | `searchIndexStats`, `queryPerfStats` | Measure production index and query work inside the utility process |
 | `installFakeAiProvider`, `aiProviderRequests` | Control AI responses and inspect requests |
+| `installFakeTriageProvider` | Arm the scripted TypeSafe service that answers split descriptions |
+| `triageRequests` | Inspect the smart-splits request bodies that left the utility process |
+| `runTriagePass` | Run the classifier to quiescence before a split assertion |
 | `installSendProvider`, `setUndoSendDelay` | Control sends without Gmail or a wall-clock delay |
 | `setSyncState`, `focusThread` | Set sync conditions or route notification focus |
 | `crashUtility`, `utilityState` | Test utility-process restart and recovery |

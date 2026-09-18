@@ -551,6 +551,18 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   message must satisfy every condition. First matching split wins in the user's configured order. **Other**
   is the final fallback and cannot move ahead of a matching split, so every Inbox thread appears exactly
   once. Splits are views, so splitting never moves mail.
+- **Described splits (smart splits):** a condition can also be prose the user writes, such as "Anything from
+  my landlord". A background classifier answers that description for each Inbox conversation and stores the
+  yes-probability. The split claims the conversation at or above the stored threshold. A rule holds at most
+  one description, because one judgment is stored per conversation per split.
+- Smart splits stay off until the user gives separate consent and saves a TypeSafe key. They use their own
+  service, their own key, and their own switch. Enabling AI writing never enables them.
+- The classifier sends one request per conversation. The request carries the subject, the sender, the
+  recipient count, the Gmail categories, the mailing-list flag, the message count, and two bounded excerpts.
+  It never carries recipient addresses, attachments, or HTML. It asks one question per described split.
+- The classifier re-asks when the user edits the description or the conversation receives a message. It
+  judges an arriving conversation before Attn decides whether to notify, and waits at most two seconds. A
+  judgment that lands later still notifies, once, while the message is recent and unread.
 - Navigate: `Tab` moves to the next split, and `Shift+Tab` moves to the previous split. Navigation wraps at
   both ends. Outside Inbox, `Tab` returns to Inbox. `←` and `→` remain split-navigation aliases. Each split
   keeps its own selection and exact local unread count, and the context-aware shortcut footer shows the valid
@@ -567,6 +579,12 @@ The inbox is divided into **splits** — tabs above the list, each an independen
 - Users can edit or delete every starter preset. A changed or deleted preset stays changed or deleted after
   relaunch, sync, and an app update. Deleting all starter presets does not seed them again. Users can restore
   each preset explicitly.
+- Attn sends no smart-splits request while the consent is off, the key is absent, or no split holds a
+  description. Withdrawing consent stops the classifier at the next batch.
+- A refused key stops the classifier until the user saves a different key. A rate limit makes it wait and
+  continue. A lost network makes it retry later. None of these lose a stored judgment.
+- Local reads never wait for the classifier. A conversation keeps its current split until its judgment is
+  stored.
 
 ### F12 — Notifications & badging
 
@@ -632,6 +650,7 @@ Settings and the palette expose:
 - Snippet manager and theme. The split-rule manager opens from its columns icon beside the Inbox splits.
 - Background behavior: launch at login and the macOS menu-bar icon while the window is open (F16).
 - AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
+- Smart splits: a separate consent, its own TypeSafe key, and its judgment model (F11, F17).
 - Keyboard cheat sheet (`Mod+/`).
 
 Label account-specific controls with the owning email; other preferences apply app-wide. Settings reuse
@@ -732,10 +751,20 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   headroom for that thinking. A reply that reaches the provider's length limit surfaces as an error, never
   as a finished draft.
 - Disabling autocomplete cancels its timers and requests and clears previews without disabling explicit
-  reply drafting. The master AI switch stops both features; removing the key also disables both. Cancel
+  reply drafting. The master AI switch stops both features; removing the key also disables both. Neither
+  switch reaches smart splits, which hold their own consent and their own key. Cancel
   in-flight work and ignore late responses. Content already sent to a provider cannot be recalled.
   Deleting a key removes its encrypted stored copy without touching OAuth credentials. Draft text and
   suggestions are not logged.
+- **Smart splits keep a separate consent (F11).** They stay off until the user accepts their own disclosure
+  and saves a TypeSafe key, which lives in its own `safeStorage` file. Enabling AI writing or autocomplete
+  never enables them, and their consent enables no writing feature. The enable screen names what leaves the
+  machine: for each Inbox conversation, the subject, the sender's name and address, the recipient count,
+  Gmail's category labels, the mailing-list flag, the message count, and a bounded excerpt of the first and
+  latest message. It also states that judgments run in the background without a command, unlike reply
+  drafting. Removing the TypeSafe key withdraws the consent and stops the classifier; it touches neither the
+  writing key nor the OAuth credentials. The split-rule editor states that a description does not sort mail
+  while smart splits are off, and it opens that setting.
 - **Never auto-sends.** Accepted autocomplete text and generated replies use the normal editable draft
   and send flow, undo send included. Unaccepted suggestions are never sent.
 
@@ -754,6 +783,11 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   rejection of stale results after editing, switching drafts/accounts, closing, sending, or disabling.
 - Settings and palette commands expose autocomplete enable/disable; the cheat sheet explains `Tab` and
   `Esc` in the body editor. Suggestions remain legible in both built-in themes without moving focus.
+- Smart splits disabled, or their key absent → zero requests to TypeSafe, including after relaunch.
+  Enabling AI writing or autocomplete sends no TypeSafe request. Accepting the smart-splits disclosure
+  sends no writing-provider request.
+- Settings and a palette command expose the smart-splits consent, its key, and its model. Removing that key
+  turns the consent off and leaves AI writing enabled.
 
 ### F18 — Multiple accounts
 

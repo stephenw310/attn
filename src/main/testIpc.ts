@@ -156,7 +156,16 @@ export class TestSeams {
         })
       })
     }
-    for (const channel of [TEST_CHANNELS.installSendProvider, TEST_CHANNELS.runHistoryCycle]) {
+    // Smart splits run in the utility, so their seams forward there. The fake
+    // TypeSafe transport is installed on the utility's own seam object, which
+    // owns one from construction: under ATTN_TEST_USER_DATA no triage request
+    // can reach the network whether or not a spec installed a script.
+    for (const channel of [
+      TEST_CHANNELS.installSendProvider,
+      TEST_CHANNELS.runHistoryCycle,
+      TEST_CHANNELS.installFakeTriageProvider,
+      TEST_CHANNELS.runTriagePass
+    ]) {
       ipcMain.on(channel, (_event, request: unknown, done?: (error?: string) => void) => {
         void this.forward(channel, [request])
           .then(() => done?.())
@@ -182,7 +191,8 @@ export class TestSeams {
     for (const channel of [
       TEST_CHANNELS.runFtsBackfill,
       TEST_CHANNELS.searchIndexStats,
-      TEST_CHANNELS.queryPerfStats
+      TEST_CHANNELS.queryPerfStats,
+      TEST_CHANNELS.triageRequests
     ]) {
       ipcMain.on(channel, (_event, request: unknown, done?: (result: unknown) => void) => {
         void this.forward(channel, [request])

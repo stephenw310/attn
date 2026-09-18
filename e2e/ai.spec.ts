@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from './electron'
 import { aiRequests, installFakeAi } from './seams'
@@ -177,4 +179,52 @@ test('autocomplete consent is separate, gates its own requests, and survives rel
   await installFakeAi(relaunchedApp)
   expect(await generateError(relaunched, autocompleteRequest)).toContain('autocomplete')
   expect(await aiRequests(relaunchedApp)).toHaveLength(0)
+})
+
+test('smart splits keep their own key and consent, separate from AI writing', async ({ page }) => {
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
+  await openAiSettings(page)
+
+  // Without a TypeSafe key there is nothing to consent to, so the toggle is off
+  // and unusable — and the AI-writing key is a different field entirely.
+  await expect(page.getByTestId('settings-ai-triage-enabled')).toBeDisabled()
+  await expect(page.getByTestId('settings-ai-triage-enabled')).not.toBeChecked()
+  await expect(page.getByTestId('settings-ai-triage-model')).toHaveAttribute('placeholder', 'jev-latest')
+
+  // The key round trip shows presence only, never the value.
+  await page.getByTestId('settings-ai-triage-key').fill('ts-test-key-e2e')
+  await page.getByTestId('settings-ai-triage-key-save').click()
+  await expect(page.getByTestId('settings-ai-triage-key-present')).toHaveText('ts-t••••••••-e2e')
+  await expect(page.getByTestId('settings-ai-triage-key')).toHaveCount(0)
+  await expect(page.getByTestId('settings-ai-triage-enabled')).toBeEnabled()
+
+  // Enabling is a consent flow: the checkbox alone writes nothing.
+  await page.getByTestId('settings-ai-triage-enabled').click()
+  const disclosure = page.getByTestId('settings-ai-triage-enable-confirm')
+  await expect(disclosure).toBeVisible()
+  await expect(disclosure).toContainText('sent to TypeSafe using your own key')
+  await expect(disclosure).toContainText('recipient count')
+  await expect(disclosure).toContainText('in the background without a command')
+  await expect(disclosure).toContainText('cannot be recalled')
+  await expect(page.getByTestId('settings-ai-triage-enabled')).not.toBeChecked()
+  await page.getByTestId('settings-ai-triage-enable-apply').click()
+  await expect(page.getByTestId('settings-ai-triage-enabled')).toBeChecked()
+
+  const artifacts = join(__dirname, '.artifacts')
+  mkdirSync(artifacts, { recursive: true })
+  await page.getByTestId('settings-ai-triage-enabled').scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(artifacts, 'settings-ai-smart-splits.png') })
+
+  // Smart splits never turn AI writing on, and they carry a separate key.
+  await expect(page.getByTestId('settings-ai-enabled')).not.toBeChecked()
+  await expect(page.getByTestId('settings-ai-key-input')).toBeVisible()
+
+  // Removing the key withdraws the consent and blocks the toggle again.
+  await page.getByTestId('settings-ai-triage-key-remove').click()
+  await expect(page.getByTestId('settings-ai-triage-key')).toBeVisible()
+  await expect(page.getByTestId('settings-ai-triage-enabled')).not.toBeChecked()
+  await expect(page.getByTestId('settings-ai-triage-enabled')).toBeDisabled()
+  const settings = await page.evaluate(() => window.attn.ai.getSettings())
+  expect(settings.triageEnabled).toBe(false)
+  expect(settings.triageKeyPresent).toBe(false)
 })

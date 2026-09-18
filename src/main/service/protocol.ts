@@ -3,7 +3,7 @@ import type { InvokeChannel, MailChangeReason } from '../../shared/ipc'
 import type { OAuthConfig, TokenSet } from '../auth/googleAuth'
 import type { NotificationCandidate } from './notificationQueries'
 
-export const SERVICE_PROTOCOL_VERSION = 4
+export const SERVICE_PROTOCOL_VERSION = 5
 
 /** One signed-in account's credentials as main relays them to the utility. */
 export interface ServiceAccountAuth {
@@ -36,6 +36,12 @@ export interface ServiceInitialize {
   testSeed?: string
   accounts: ServiceAccountsState
   focused: boolean
+  /**
+   * The user's TypeSafe key for smart splits, decrypted by main and held in
+   * the utility's memory only — it is never written to SQLite and never
+   * logged. Null when no key is stored.
+   */
+  triageKey: string | null
 }
 
 export type ServiceControl =
@@ -46,6 +52,7 @@ export type ServiceControl =
 export type ServiceOperation =
   | 'resume-auth-failures'
   | 'apply-accounts'
+  | 'apply-triage-key'
   | 'set-active-account'
   | 'remove-account-data'
   | 'mark-login-item-registered'

@@ -140,6 +140,8 @@ const api = {
       invoke(IPC_CHANNELS.aiSetSetting, key, value),
     setKey: (key: string): Promise<AiSettings> => invoke(IPC_CHANNELS.aiSetKey, key),
     deleteKey: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiDeleteKey),
+    setTriageKey: (key: string): Promise<AiSettings> => invoke(IPC_CHANNELS.aiSetTriageKey, key),
+    deleteTriageKey: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiDeleteTriageKey),
     generate: (request: AiGenerateRequest): Promise<{ requestId: string }> =>
       invoke(IPC_CHANNELS.aiGenerate, request),
     cancel: (requestId: string): Promise<void> => invoke(IPC_CHANNELS.aiCancel, requestId),

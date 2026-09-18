@@ -63,6 +63,8 @@ export const IPC_CHANNELS = {
   aiSetSetting: 'ai:setSetting',
   aiSetKey: 'ai:setKey',
   aiDeleteKey: 'ai:deleteKey',
+  aiSetTriageKey: 'ai:setTriageKey',
+  aiDeleteTriageKey: 'ai:deleteTriageKey',
   aiGenerate: 'ai:generate',
   aiCancel: 'ai:cancel',
   aiStyleExamples: 'ai:styleExamples',
@@ -172,6 +174,9 @@ export const TEST_CHANNELS = {
   runHistoryCycle: 'attn:test:runHistoryCycle',
   installFakeAiProvider: 'attn:test:installFakeAiProvider',
   aiProviderRequests: 'attn:test:aiProviderRequests',
+  installFakeTriageProvider: 'attn:test:installFakeTriageProvider',
+  triageRequests: 'attn:test:triageRequests',
+  runTriagePass: 'attn:test:runTriagePass',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
   runExistenceSweep: 'attn:test:runExistenceSweep',
   runFtsBackfill: 'attn:test:runFtsBackfill',
@@ -228,6 +233,10 @@ export interface InvokeChannels {
   }
   [IPC_CHANNELS.aiSetKey]: { args: [key: string]; result: AiSettings }
   [IPC_CHANNELS.aiDeleteKey]: { args: []; result: AiSettings }
+  // Smart splits keep their own TypeSafe key in a second encrypted file, so
+  // removing one key never disturbs the other feature.
+  [IPC_CHANNELS.aiSetTriageKey]: { args: [key: string]; result: AiSettings }
+  [IPC_CHANNELS.aiDeleteTriageKey]: { args: []; result: AiSettings }
   [IPC_CHANNELS.aiGenerate]: { args: [request: AiGenerateRequest]; result: { requestId: string } }
   [IPC_CHANNELS.aiCancel]: { args: [requestId: string]; result: undefined }
   // T37 voice matching: the active account's recent sent replies, selected

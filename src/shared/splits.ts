@@ -6,6 +6,13 @@ export const SPLIT_PRESET_IDS = ['preset:calendar', 'preset:github', 'preset:new
 export type SplitPresetId = (typeof SPLIT_PRESET_IDS)[number]
 type SplitOperator = 'any' | 'all'
 
+/**
+ * Bounds on a described split. The lower bound rejects a fragment no model can
+ * answer against; the upper bound keeps one question inside a single judgment.
+ */
+export const SPLIT_DESCRIPTION_MIN_LENGTH = 3
+export const SPLIT_DESCRIPTION_MAX_LENGTH = 500
+
 export type SplitCondition =
   | { type: 'senderAddress'; value: string }
   | { type: 'senderDomain'; value: string }
@@ -14,6 +21,9 @@ export type SplitCondition =
   | { type: 'label'; value: string }
   | { type: 'attachmentMimeType'; value: string }
   | { type: 'attachmentFilenameSuffix'; value: string }
+  // Prose the user writes and a background classifier answers per thread. The
+  // stored yes-probability, not the text, is what the compiled rule reads.
+  | { type: 'description'; value: string }
 
 export interface SplitMatchExpression {
   version: 1

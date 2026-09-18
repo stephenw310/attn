@@ -15,7 +15,7 @@ import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../
 import type { AppSettingUpdate } from '../shared/settings'
 import type { PaletteId, ThemePreference } from '../shared/theme'
 import { AccountRoster } from './accountRoster'
-import { AiKeyStore } from './ai/keyStore'
+import { AiKeyStore, type SecretCipher, TYPESAFE_KEY_FILE } from './ai/keyStore'
 import { AiManager } from './ai/manager'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, type OAuthConfig, signInWithGoogle } from './auth/googleAuth'
@@ -353,6 +353,28 @@ async function initialize(): Promise<void> {
   const ownedNotifier = new MailNotifier(showMainWindow, focusInboxThread)
   mailNotifier = ownedNotifier
   ownedNotifier.start()
+  // Under the e2e seam the container has no OS keyring, so a reversible
+  // stand-in keeps the key-custody flows testable; production always uses
+  // safeStorage and still refuses plaintext storage when it is unavailable.
+  const secretCipher: SecretCipher = testUserData
+    ? {
+        isAvailable: () => true,
+        encryptString: (text) => Buffer.from(`test:${Buffer.from(text, 'utf8').toString('base64')}`),
+        decryptString: (data) => {
+          const stored = data.toString('utf8')
+          if (!stored.startsWith('test:')) throw new Error('not test ciphertext')
+          return Buffer.from(stored.slice(5), 'base64').toString('utf8')
+        }
+      }
+    : {
+        isAvailable: () => safeStorage.isEncryptionAvailable(),
+        encryptString: (text) => safeStorage.encryptString(text),
+        decryptString: (data) => safeStorage.decryptString(data)
+      }
+  const aiKeyStore = new AiKeyStore(userDataPath, secretCipher)
+  // Smart splits use their own TypeSafe key in a second file, so removing one
+  // key leaves the other feature working.
+  const triageKeyStore = new AiKeyStore(userDataPath, secretCipher, TYPESAFE_KEY_FILE)
   const ownedService = new ServiceSupervisor(join(__dirname, 'service/utility.js'), {
     protocolVersion: SERVICE_PROTOCOL_VERSION,
     dbPath: join(userDataPath, 'attn.db'),
@@ -361,7 +383,10 @@ async function initialize(): Promise<void> {
     testMode: Boolean(testUserData),
     ...(testUserData && process.env.ATTN_TEST_SEED ? { testSeed: process.env.ATTN_TEST_SEED } : {}),
     accounts: { ...roster.serviceAccountsState(), activeAccountId: null },
-    focused: false
+    focused: false,
+    // Relayed at startup so the classifier (Phase 3) has the key without a
+    // round trip; the utility keeps it in memory only.
+    triageKey: triageKeyStore.load()
   })
   service = ownedService
   ownedService.onEvent(handleServiceEvent)
@@ -407,27 +432,6 @@ async function initialize(): Promise<void> {
       ownedNotifier.setBadgeEnabled(update.value)
     }
   }
-  // Under the e2e seam the container has no OS keyring, so a reversible
-  // stand-in keeps the key-custody flows testable; production always uses
-  // safeStorage and still refuses plaintext storage when it is unavailable.
-  const aiKeyStore = new AiKeyStore(
-    userDataPath,
-    testUserData
-      ? {
-          isAvailable: () => true,
-          encryptString: (text) => Buffer.from(`test:${Buffer.from(text, 'utf8').toString('base64')}`),
-          decryptString: (data) => {
-            const stored = data.toString('utf8')
-            if (!stored.startsWith('test:')) throw new Error('not test ciphertext')
-            return Buffer.from(stored.slice(5), 'base64').toString('utf8')
-          }
-        }
-      : {
-          isAvailable: () => safeStorage.isEncryptionAvailable(),
-          encryptString: (text) => safeStorage.encryptString(text),
-          decryptString: (data) => safeStorage.decryptString(data)
-        }
-  )
   const ownedAiManager = new AiManager({
     keyStore: aiKeyStore,
     readSettings: () => ownedService.invoke(IPC_CHANNELS.aiGetSettings),
@@ -439,7 +443,9 @@ async function initialize(): Promise<void> {
   const aiSettingsSnapshot = async (): Promise<AiSettings> => ({
     ...(await ownedService.invoke(IPC_CHANNELS.aiGetSettings)),
     keyPresent: aiKeyStore.present(),
-    keyPreview: aiKeyStore.preview()
+    keyPreview: aiKeyStore.preview(),
+    triageKeyPresent: triageKeyStore.present(),
+    triageKeyPreview: triageKeyStore.preview()
   })
   // T39: only an explicit, packaged release build constructs an updater —
   // personal, dev, and seeded builds make zero feed requests (§6 Packaging).
@@ -497,7 +503,13 @@ async function initialize(): Promise<void> {
         else if (update.key === 'autocompleteEnabled' && update.value === false) {
           ownedAiManager.cancelAll('autocomplete')
         }
-        return { ...stored, keyPresent: aiKeyStore.present(), keyPreview: aiKeyStore.preview() }
+        return {
+          ...stored,
+          keyPresent: aiKeyStore.present(),
+          keyPreview: aiKeyStore.preview(),
+          triageKeyPresent: triageKeyStore.present(),
+          triageKeyPreview: triageKeyStore.preview()
+        }
       },
       setKey: async (key) => {
         aiKeyStore.save(key)
@@ -510,6 +522,21 @@ async function initialize(): Promise<void> {
         ownedAiManager.cancelAll()
         await ownedService.invoke(IPC_CHANNELS.aiSetSetting, 'enabled', false)
         await ownedService.invoke(IPC_CHANNELS.aiSetSetting, 'autocompleteEnabled', false)
+        return aiSettingsSnapshot()
+      },
+      setTriageKey: async (key) => {
+        // Save first: a refused save (no OS encryption) must not relay a key
+        // the app cannot keep. The key is never logged on either side.
+        triageKeyStore.save(key)
+        await ownedService.applyTriageKey(key)
+        return aiSettingsSnapshot()
+      },
+      deleteTriageKey: async () => {
+        // Removing the TypeSafe key withdraws smart-splits consent and leaves
+        // AI writing and OAuth credentials untouched by design.
+        triageKeyStore.delete()
+        await ownedService.applyTriageKey(null)
+        await ownedService.invoke(IPC_CHANNELS.aiSetSetting, 'triageEnabled', false)
         return aiSettingsSnapshot()
       },
       generate: (request) => ownedAiManager.generate(request),

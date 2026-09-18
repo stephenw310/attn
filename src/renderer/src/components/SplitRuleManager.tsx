@@ -6,6 +6,7 @@ import {
   IMPORTANT_SPLIT_ID,
   OTHER_SPLIT_ID,
   type SaveSplitInput,
+  SPLIT_DESCRIPTION_MAX_LENGTH,
   type SplitCondition,
   type SplitPresetId,
   type SplitRule,
@@ -22,9 +23,16 @@ interface SplitRuleManagerProps {
   onDelete: (id: string) => Promise<void>
   onReorder: (ids: string[]) => Promise<void>
   onRestore: (id: SplitPresetId) => Promise<void>
+  /** The `ai.triageSettings` path, so a described rule can reach its consent. */
+  onOpenTriageSettings: () => void
   onClose: () => void
 }
 
+/**
+ * Every condition this editor offers, hard matches first and the described one
+ * last — the select reads this order. The map stays exhaustive, so a new
+ * condition fails to compile until it is labelled here.
+ */
 const CONDITION_LABELS: Record<SplitCondition['type'], string> = {
   senderAddress: 'Sender address',
   senderDomain: 'Sender domain',
@@ -32,7 +40,8 @@ const CONDITION_LABELS: Record<SplitCondition['type'], string> = {
   listIdPresent: 'Has List-Id',
   label: 'Gmail label',
   attachmentMimeType: 'Attachment MIME type',
-  attachmentFilenameSuffix: 'Filename suffix'
+  attachmentFilenameSuffix: 'Filename suffix',
+  description: 'Matches description'
 }
 
 const CONDITION_TYPES = Object.keys(CONDITION_LABELS) as SplitCondition['type'][]
@@ -85,6 +94,11 @@ function conditionNeedsValue(
   condition: SplitCondition
 ): condition is Exclude<SplitCondition, { type: 'listIdPresent' }> {
   return condition.type !== 'listIdPresent'
+}
+
+/** True when a row other than `index` already holds the rule's one description. */
+function describedElsewhere(conditions: DraftCondition[], index: number): boolean {
+  return conditions.some((entry, other) => other !== index && entry.condition.type === 'description')
 }
 
 interface SplitRuleRowProps {
@@ -233,7 +247,7 @@ function SortableSplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
 }
 
 export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Element {
-  const { state, onSave, onNotify, onDelete, onReorder, onRestore, onClose } = props
+  const { state, onSave, onNotify, onDelete, onReorder, onRestore, onOpenTriageSettings, onClose } = props
   const [draft, setDraft] = useState<RuleDraft | null>(() => {
     const first = state.splits[0]
     return first && first.id !== IMPORTANT_SPLIT_ID && first.id !== OTHER_SPLIT_ID ? draftFor(first) : null
@@ -244,6 +258,10 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
   const builtIn = state.splits.find((split) => split.id === builtInId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Whether a description actually sorts mail today. Read once when the
+  // manager opens: null while the answer is outstanding, so the warning never
+  // flashes at a user who already gave consent.
+  const [triageUsable, setTriageUsable] = useState<boolean | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -297,6 +315,20 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
   useEffect(() => {
     if (editorOpen && !draft?.id) nameInputRef.current?.focus()
   }, [editorOpen, draft?.id])
+
+  useEffect(() => {
+    if (!window.attn) return
+    let stale = false
+    window.attn.ai
+      .getSettings()
+      .then((loaded) => {
+        if (!stale) setTriageUsable(loaded.triageEnabled && loaded.triageKeyPresent)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [])
 
   const run = async (operation: () => Promise<void>): Promise<boolean> => {
     setBusy(true)
@@ -533,7 +565,9 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   <div
                     key={key}
                     data-testid="split-rule-condition"
-                    className="grid grid-cols-[145px_minmax(0,1fr)_24px] items-center gap-2.5"
+                    className={`grid grid-cols-[145px_minmax(0,1fr)_24px] gap-2.5 ${
+                      condition.type === 'description' ? 'items-start' : 'items-center'
+                    }`}
                   >
                     <select
                       aria-label={`Condition ${index + 1} type`}
@@ -547,13 +581,41 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                       }}
                       className="h-9 w-full rounded-md border border-edge bg-ground px-2 text-xs text-ink"
                     >
-                      {CONDITION_TYPES.map((type) => (
+                      {CONDITION_TYPES.filter(
+                        // A rule holds one description, so a second is never
+                        // offered — the store's refusal stays unreachable here.
+                        (type) => type !== 'description' || !describedElsewhere(draft.conditions, index)
+                      ).map((type) => (
                         <option key={type} value={type}>
                           {CONDITION_LABELS[type]}
                         </option>
                       ))}
                     </select>
-                    {conditionNeedsValue(condition) ? (
+                    {condition.type === 'description' ? (
+                      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                        <textarea
+                          data-testid="split-rule-description"
+                          aria-label={`Condition ${index + 1} description`}
+                          rows={3}
+                          maxLength={SPLIT_DESCRIPTION_MAX_LENGTH}
+                          value={condition.value}
+                          onChange={(event) => {
+                            const conditions = [...draft.conditions]
+                            conditions[index] = {
+                              key,
+                              condition: { ...condition, value: event.target.value }
+                            }
+                            setDraft({ ...draft, conditions })
+                          }}
+                          placeholder="Anything from my landlord"
+                          className="w-full resize-none rounded-md border border-edge bg-ground px-3 py-2 text-[11px] leading-[1.5] text-ink outline-none focus:border-accent"
+                        />
+                        <span className="max-w-[420px] text-[11px] leading-[1.65] text-ink-dim">
+                          Describe what belongs here, and give an example. The classifier reads the words
+                          literally, so avoid ‘not …’.
+                        </span>
+                      </div>
+                    ) : conditionNeedsValue(condition) ? (
                       <input
                         aria-label={`Condition ${index + 1} value`}
                         value={condition.value}
@@ -602,6 +664,25 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               >
                 ＋ Add condition
               </button>
+              {triageUsable === false &&
+                draft.conditions.some(({ condition }) => condition.type === 'description') && (
+                  <div
+                    data-testid="split-rule-triage-off"
+                    className="mb-6 flex flex-wrap items-center gap-2.5 rounded-md border border-accent/40 bg-accent/10 px-3 py-2"
+                  >
+                    <span className="text-[11px] leading-[1.65] text-ink-dim">
+                      Smart splits are off, so this description does not sort mail yet.
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="split-rule-triage-setup"
+                      onClick={onOpenTriageSettings}
+                      className="cursor-pointer rounded-md border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent hover:bg-accent/20"
+                    >
+                      Set up smart splits
+                    </button>
+                  </div>
+                )}
               <p className="mb-[27px] text-[11px] leading-[1.65] text-ink-dim">
                 {draft.operator === 'all'
                   ? 'The same message must satisfy every condition.'
@@ -647,6 +728,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                 )}
                 <button
                   type="submit"
+                  data-testid="split-rule-save"
                   disabled={busy}
                   className="h-9 cursor-pointer rounded-md bg-accent px-4 text-xs text-on-accent disabled:opacity-50"
                 >

@@ -150,6 +150,9 @@ export const COMMAND_SPECS = {
   'privacy.remoteImages.overrides': { title: 'Manage remote-image overrides…', context: 'global' },
   'snippets.manage': { title: 'Manage snippets…', context: 'global' },
   'ai.settings': { title: 'Set up AI writing…', context: 'global' },
+  // Smart splits are a separate consent from AI writing, so they get their own
+  // command; both open the AI settings pane.
+  'ai.triageSettings': { title: 'Set up smart splits…', context: 'global' },
   // T37A: enabling routes through the settings consent flow (the disclosure
   // must precede the traffic); disabling is immediate.
   'autocomplete.enable': { title: 'Enable inline AI autocomplete…', context: 'global' },

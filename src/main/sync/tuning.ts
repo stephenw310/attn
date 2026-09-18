@@ -148,3 +148,60 @@ export const SEARCH_RESULT_LIMIT = 100
  * this window mark the response partial.
  */
 export const SEARCH_RECENT_MESSAGE_LIMIT = 2_000
+
+// ---------------------------------------------------------------------------
+// Split triage
+// ---------------------------------------------------------------------------
+
+/**
+ * The yes-probability a stored judgment needs before a described split claims
+ * the thread. This is an untuned starting value: a dogfood eval over real mail
+ * sets the shipped number, so do not read 0.7 as a measured operating point.
+ */
+export const SPLIT_TRIAGE_THRESHOLD = 0.7
+
+/**
+ * How much of one message the judgment state carries. The model reads state
+ * literally and unrelated detail costs accuracy, so this is a deliberate cut
+ * rather than the largest excerpt the request limit would allow.
+ */
+export const SPLIT_TRIAGE_EXCERPT_CHARS = 1_500
+
+/** One thread's judgment request, aborted at this deadline. */
+export const SPLIT_TRIAGE_REQUEST_TIMEOUT_MS = 10_000
+
+/** Threads selected per batch, and requests in flight inside one batch. */
+export const SPLIT_TRIAGE_BATCH_SIZE = 20
+export const SPLIT_TRIAGE_CONCURRENCY = 4
+
+/**
+ * Floor between split-revision bumps while a pass runs. Each bump invalidates
+ * the renderer's cached Inbox pages, so a pass that moved fifty threads still
+ * re-renders about once a second rather than fifty times.
+ */
+export const SPLIT_TRIAGE_BROADCAST_INTERVAL_MS = 1_000
+
+/** A judged thread's retry ladder for 429 and 529, and the Retry-After cap. */
+export const SPLIT_TRIAGE_RATE_LIMIT_BASE_MS = 1_000
+export const SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS = 3
+export const SPLIT_TRIAGE_RATE_LIMIT_MAX_WAIT_MS = 60_000
+
+/** A pass paused by a network failure resumes after this delay. */
+export const SPLIT_TRIAGE_OFFLINE_RETRY_MS = 60_000
+
+/**
+ * How long an arriving message waits for its judgment before the notification
+ * decision goes ahead without it. Short on purpose: a notification that lands
+ * a minute late is worse than one routed by the previous assignment.
+ */
+export const SPLIT_TRIAGE_NOTIFY_WAIT_MS = 2_000
+
+/**
+ * A judgment that lands after that wait may still notify, while the message is
+ * recent enough for a notification to make sense. Past this age the arrival is
+ * history, so a late judgment changes the Inbox and stays silent.
+ */
+export const SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS = 10 * 60_000
+
+/** Message ids the runtime remembers to keep a late judgment from notifying twice. */
+export const SPLIT_TRIAGE_NOTIFIED_MESSAGE_MEMORY = 500

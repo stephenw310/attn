@@ -1,7 +1,7 @@
 // Current schema snapshot for new profiles. Every change bumps this version and
 // adds the matching ordered step in migrations.ts; the registry test makes a
 // version-only bump fail.
-export const CURRENT_SCHEMA_VERSION = 27
+export const CURRENT_SCHEMA_VERSION = 28
 
 // The oldest profile this build can upgrade in place. Keep the complete path
 // from this version to CURRENT_SCHEMA_VERSION in migrations.ts.
@@ -71,6 +71,21 @@ CREATE TABLE split_rules (
   PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
+
+-- One classifier judgment per split per thread. description_hash names the
+-- description text the judgment answered, so editing a split's prose retires
+-- its old answers instead of inheriting them. evidence_key is the latest
+-- message id the judgment saw, so a new message on the thread re-judges it.
+CREATE TABLE split_judgments (
+  account_id       TEXT NOT NULL,
+  thread_id        TEXT NOT NULL,
+  split_id         TEXT NOT NULL,
+  description_hash TEXT NOT NULL,
+  evidence_key     TEXT NOT NULL,
+  probability      REAL NOT NULL,
+  judged_at        INTEGER NOT NULL,
+  PRIMARY KEY (account_id, thread_id, split_id)
+);
 
 CREATE TABLE split_config (
   account_id  TEXT PRIMARY KEY,

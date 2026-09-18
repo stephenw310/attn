@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { isValidEmail, normalizeEmailKey } from '../shared/address'
 import {
   canonicalizeListIdValue,
@@ -7,6 +7,8 @@ import {
   OTHER_SPLIT_ID,
   type ReorderSplitsInput,
   type SaveSplitInput,
+  SPLIT_DESCRIPTION_MAX_LENGTH,
+  SPLIT_DESCRIPTION_MIN_LENGTH,
   SPLIT_PRESET_IDS,
   type SplitCondition,
   type SplitKind,
@@ -19,6 +21,7 @@ import {
 } from '../shared/splits'
 import type { Db } from './db'
 import { messageHasLabelSql } from './db/labelSql'
+import { SPLIT_TRIAGE_THRESHOLD } from './sync/tuning'
 
 /** Rules are compiled against `messages m` joined to the listed thread `t`. */
 const THREAD_KEY = { accountId: 't.account_id', id: 't.id' }
@@ -45,7 +48,8 @@ const CONDITION_TYPES = new Set<SplitCondition['type']>([
   'listIdPresent',
   'label',
   'attachmentMimeType',
-  'attachmentFilenameSuffix'
+  'attachmentFilenameSuffix',
+  'description'
 ])
 
 const STARTER_RULES: readonly SplitRule[] = [
@@ -126,6 +130,23 @@ export function canonicalListId(raw: string): string | null {
   return value || null
 }
 
+/**
+ * The stored form of a described split: one space between words, no surrounding
+ * space, original case. The model reads this text, so case carries meaning.
+ */
+function collapsedDescription(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+/**
+ * Names the exact description text a judgment answered. Editing a split's prose
+ * changes the hash, so its earlier judgments stop matching and the classifier
+ * asks the new question instead of inheriting answers to the old one.
+ */
+export function descriptionHash(value: string): string {
+  return createHash('sha256').update(collapsedDescription(value)).digest('hex')
+}
+
 function normalizedCondition(condition: SplitCondition): SplitCondition | null {
   if (!CONDITION_TYPES.has(condition.type)) return null
   if (condition.type === 'listIdPresent') return { type: 'listIdPresent' }
@@ -145,6 +166,15 @@ function normalizedCondition(condition: SplitCondition): SplitCondition | null {
     return value ? { type: 'listId', value } : null
   }
   if (condition.type === 'label') return { type: 'label', value: trimmed.slice(0, 200) }
+  if (condition.type === 'description') {
+    // Too long is a mistake to report, not something to silently truncate: a
+    // cut description asks a different question than the one the user wrote.
+    const value = collapsedDescription(trimmed)
+    if (value.length < SPLIT_DESCRIPTION_MIN_LENGTH || value.length > SPLIT_DESCRIPTION_MAX_LENGTH) {
+      return null
+    }
+    return { type: 'description', value }
+  }
   return { type: condition.type, value: trimmed.toLowerCase().slice(0, 500) } as SplitCondition
 }
 
@@ -168,6 +198,10 @@ export function normalizeSplitMatch(value: unknown): SplitMatchExpression | null
     if (!condition) return null
     conditions.push(condition)
   }
+  // One description per rule. `split_judgments` keys one judgment per (thread,
+  // split), so a second description would have nowhere to store its answer and
+  // would silently read the first one's.
+  if (conditions.filter((condition) => condition.type === 'description').length > 1) return null
   return { version: 1, operator: candidate.operator, conditions }
 }
 
@@ -306,7 +340,7 @@ export function splitRevision(db: Db, accountId: string): number {
   return row?.revision ?? 0
 }
 
-function compileCondition(condition: SplitCondition): { sql: string; params: unknown[] } {
+function compileCondition(condition: SplitCondition, splitId: string): { sql: string; params: unknown[] } {
   if (condition.type === 'senderAddress') {
     return { sql: "lower(trim(COALESCE(m.from_email, ''))) = ?", params: [condition.value] }
   }
@@ -346,6 +380,23 @@ function compileCondition(condition: SplitCondition): { sql: string; params: unk
       params: [condition.value]
     }
   }
+  if (condition.type === 'description') {
+    // The judgment is per (thread, split), so this test reads the same row for
+    // every `messages m` the enclosing expression walks. It is constant across
+    // those rows, which keeps `all` honest: a described condition combined with
+    // message-level ones still asks about the one message satisfying the rest.
+    return {
+      sql: `EXISTS (
+        SELECT 1 FROM split_judgments j
+        WHERE j.account_id = ${THREAD_KEY.accountId}
+          AND j.thread_id = ${THREAD_KEY.id}
+          AND j.split_id = ?
+          AND j.description_hash = ?
+          AND j.probability >= ?
+      )`,
+      params: [splitId, descriptionHash(condition.value), SPLIT_TRIAGE_THRESHOLD]
+    }
+  }
   const filename = "lower(trim(COALESCE(json_extract(split_attachment.value, '$.filename'), '')))"
   return {
     sql: `EXISTS (
@@ -357,8 +408,10 @@ function compileCondition(condition: SplitCondition): { sql: string; params: unk
   }
 }
 
-function compileRuleMatch(match: SplitMatchExpression): { sql: string; params: unknown[] } {
-  const compiled = match.conditions.map(compileCondition)
+/** Takes the whole rule, not just its expression: a described condition reads judgments keyed by split id. */
+function compileRuleMatch(rule: SplitRule): { sql: string; params: unknown[] } {
+  const match = rule.match
+  const compiled = match.conditions.map((condition) => compileCondition(condition, rule.id))
   return {
     sql: `EXISTS (
       SELECT 1 FROM messages m
@@ -379,7 +432,7 @@ export function compileSplitAssignment(rules: readonly SplitRule[]): SplitAssign
   const branches: string[] = []
   const params: unknown[] = []
   for (const rule of matching) {
-    const compiled = compileRuleMatch(rule.match)
+    const compiled = compileRuleMatch(rule)
     branches.push(`WHEN ${compiled.sql} THEN ?`)
     params.push(...compiled.params, rule.id)
   }
@@ -610,7 +663,39 @@ export function notificationEnabledSplitIds(db: Db, accountId: string): string[]
     .map((rule) => rule.id)
 }
 
-function splitIdForThread(db: Db, accountId: string, threadId: string): string | null {
+/**
+ * The described splits the classifier has to answer for, in rule order. Each
+ * carries the exact hash a judgment must record, so a caller never re-derives
+ * it from the prose and risks disagreeing with the compiled condition.
+ */
+export interface DescribedSplitRule {
+  splitId: string
+  name: string
+  description: string
+  descriptionHash: string
+}
+
+export function describedSplitRules(db: Db, accountId: string): DescribedSplitRule[] {
+  return visibleRules(db, accountId).flatMap((rule) => {
+    const described = rule.match.conditions.find((condition) => condition.type === 'description')
+    if (described?.type !== 'description') return []
+    return [
+      {
+        splitId: rule.id,
+        name: rule.name,
+        description: described.value,
+        descriptionHash: descriptionHash(described.value)
+      }
+    ]
+  })
+}
+
+/** Announce that split membership changed underneath the renderer's cached pages. */
+export function bumpSplitRevision(db: Db, accountId: string): void {
+  bumpRevision(db, accountId)
+}
+
+export function splitIdForThread(db: Db, accountId: string, threadId: string): string | null {
   const assignment = splitAssignmentForAccount(db, accountId)
   const row = db
     .prepare(

@@ -165,6 +165,16 @@ export class ServiceSupervisor {
     return this.internal('apply-accounts', accounts)
   }
 
+  /**
+   * Relay the decrypted TypeSafe key. The restart snapshot is updated first,
+   * so a utility that restarts later re-receives the current key instead of
+   * the boot-time one. The key itself is never logged.
+   */
+  applyTriageKey(triageKey: string | null): Promise<unknown> {
+    this.initialize.triageKey = triageKey
+    return this.internal('apply-triage-key', triageKey)
+  }
+
   cacheTokens(accountId: string, tokens: TokenSet): void {
     this.initialize.accounts = {
       ...this.initialize.accounts,

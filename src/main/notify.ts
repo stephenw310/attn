@@ -201,6 +201,8 @@ export class MailNotifier {
   // Stay cleared until the utility returns the persisted preference. This
   // prevents a disabled badge flashing briefly during startup events.
   private badgeEnabled = false
+  /** Serial number of the notification decisions this process has logged. */
+  private decisions = 0
   private readonly shown = new BoundedRetainer<Notification>(NOTIFICATION_RETENTION)
 
   constructor(
@@ -278,8 +280,18 @@ export class MailNotifier {
   }
 
   notify(accountId: string, candidates: readonly NotificationCandidate[], pausedUntil: number | null): void {
+    // Banners are invisible to headless e2e, so this line is the assertable
+    // surface, exactly as the badge change log is. It names ids only: no
+    // subject, sender, or snippet reaches the log (F17). The serial number
+    // makes one decision distinguishable from the next, so a reader of the
+    // log counts announcements rather than matching repeated text.
+    const decision = ++this.decisions
+    const offered = candidates.map((candidate) => candidate.threadId).join(' ') || '(none)'
     const account = this.accounts.find((candidate) => candidate.id === accountId)
-    if (!account || !Notification.isSupported()) return
+    if (!account || !Notification.isSupported()) {
+      console.log(`[notify] decision ${decision} ${accountId} ${offered} → suppressed`)
+      return
+    }
     const planned = planNotifications(candidates, {
       focused: BrowserWindow.getAllWindows().some((win) => win.isFocused()),
       pausedUntil,
@@ -287,6 +299,7 @@ export class MailNotifier {
       // to "which inbox is this?" before the click switches there (F12).
       accountLabel: this.accounts.length > 1 ? account.email : null
     })
+    console.log(`[notify] decision ${decision} ${accountId} ${offered} → shown ${planned.length}`)
     for (const item of planned) {
       const notification = new Notification({ title: item.title, body: item.body })
       const threadId = item.threadId
