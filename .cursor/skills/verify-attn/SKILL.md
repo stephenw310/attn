@@ -1,7 +1,7 @@
 ---
 name: verify-attn
 description: Drive the built Attn desktop app (Electron Gmail client) through the control-attn CLI against a throwaway profile and capture screenshots plus store reads as proof. Use to verify a mail feature or UI change on the real app, to reproduce a reported defect, or when a change claims to work and needs runtime evidence rather than a passing unit test.
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Verify Attn
@@ -62,8 +62,8 @@ Common moves:
 - Open the command palette with `press ControlOrMeta+K`.
 - Run a palette command with `press ControlOrMeta+K`, `fill command-palette-input <query>`, `press Enter`.
 - Go to a mailbox with a G chord, for example `press g` then `press i` for Inbox.
-- Send without Gmail or an undo delay with `seam setUndoSendDelay 0 --fire` then `seam installSendProvider`.
-- Script AI replies with `seam installFakeAiProvider '{"chunks":["..."]}'`.
+- Send without Gmail or an undo delay with `seam setUndoSendDelay 0 --fire` then `seam installSendProvider --fire`.
+- Script AI replies with `seam installFakeAiProvider '{"chunks":["..."]}' --fire`.
 - Make Gmail reject the next action on a thread with `seam failNextAction t-roadmap`.
 
 `seam <name>` reaches the test-only controls listed in `docs/TESTING.md`. The name maps to the `attn:test:<name>` channel. Extra arguments are parsed as JSON when they parse, otherwise passed as strings.
@@ -92,6 +92,8 @@ Each run writes to `e2e/.artifacts/verify-attn/<runId>/`. `launch` prints that p
 - `eval` prints a JSON result. Copy it into the evidence dir when you need a file.
 - `log` prints the last lines of the profile `main.log`.
 - `daemon.log`, `main-stdio.log`, and `renderer-errors.log` land in the evidence dir.
+- `trace stop` writes `trace.json`. `profile stop` writes `cpu-profile.json`. `perf-metrics` writes `perf-metrics.json`.
+- `launch --video` records the window under `video/` in the evidence dir.
 
 Proof standards for this app:
 
@@ -123,6 +125,7 @@ Never `pkill Electron` or kill by process name. The developer's own Attn or anot
 | `press` / `type` / `click` / `fill` / `wait` | `node .cursor/skills/verify-attn/control-attn.mjs press j` | Drive the window |
 | `eval` / `seam` / `info` / `log` | `node .cursor/skills/verify-attn/control-attn.mjs eval "window.attn.mail.getUnreadCount()"` | Store reads and test seams |
 | `snapshot` / `screenshot` | `node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-inbox-list` | Evidence |
+| `trace` / `profile` / `perf-metrics` | `node .cursor/skills/verify-attn/control-attn.mjs perf-metrics` | CDP timeline, CPU profile, metrics |
 | `close` | `node .cursor/skills/verify-attn/control-attn.mjs close` | Quit and delete the profile |
 | `cleanup` | `node .cursor/skills/verify-attn/control-attn.mjs cleanup` | Remove leftover profiles |
 | `help` | `node .cursor/skills/verify-attn/control-attn.mjs help` | Usage for every command |

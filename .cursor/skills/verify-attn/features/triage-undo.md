@@ -25,19 +25,19 @@ Preconditions:
 - Seed `inbox`. `eval "document.querySelectorAll('[data-testid=thread-row]').length"` returns 8 and the second row contains `Northstar Books`.
 - `eval "document.querySelectorAll('[data-testid=pending-count]').length"` returns 0.
 
-- **Archive.** Press E.
+- **Archive.** Press E. Re-run the row-count `eval` until it settles on 7. The exit animation keeps the row in the DOM for a few hundred milliseconds.
 
   ```sh
   node .cursor/skills/verify-attn/control-attn.mjs press e
   node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-row]').length"
-  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=thread-row]')?.textContent"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=thread-row]')?.textContent?.includes('Northstar')"
   node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=thread-row]')?.hasAttribute('data-selected')"
   node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
   ```
 
-  Rows drop to 7, the first row contains `Northstar Books` and has `data-selected="true"`, and `pending-count` contains `1 pending`.
+  Rows settle at 7, the first row contains `Northstar Books` and is selected, and `pending-count` contains `1 pending`.
 
-- **Undo.** Press Z.
+- **Undo.** Press Z. Re-run the row-count `eval` until it settles on 8.
 
   ```sh
   node .cursor/skills/verify-attn/control-attn.mjs press z
@@ -45,7 +45,7 @@ Preconditions:
   node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
   ```
 
-  Rows return to 8 and `pending-count` contains `2 pending`.
+  Rows settle at 8 and `pending-count` contains `2 pending`.
 
 - **Multi-select.** Press X then Shift+J seven times.
 
@@ -63,7 +63,7 @@ Preconditions:
 
   `selection-count` reads `8 selected`.
 
-- **Archive all.** Press E.
+- **Archive all.** Press E. Re-run the row-count `eval` until it settles on 0.
 
   ```sh
   node .cursor/skills/verify-attn/control-attn.mjs press e
@@ -71,7 +71,7 @@ Preconditions:
   node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=thread-date-group]').length"
   ```
 
-  Rows drop to 0 and `thread-date-group` has count 0.
+  Rows settle at 0 and `thread-date-group` has count 0.
 
 - **Snooze.** From a fresh baseline, press H and choose the tomorrow preset.
 

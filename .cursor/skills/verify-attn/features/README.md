@@ -44,3 +44,10 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Command palette](./command-palette.md) covers opening the palette, running a navigation command, and running a command with an inline argument.
 - [Compose and send](./compose-send.md) covers a new message, recipients, the undo-send window, and a send through the outbox.
 - [Search](./search.md) covers local search as typed, opening a result, restoring the mailbox, and the search-all-Gmail prompt.
+- [Labels and move](./labels-and-move.md) covers the label picker, apply, and undo.
+- [Follow-up reminders](./follow-up-reminders.md) covers setting a follow-up on a reply and finding it in reminders.
+- [Split inbox](./splits.md) covers the split strip, tab switching, and split rules.
+- [Settings and themes](./settings-and-themes.md) covers Mod+, settings and Light/Dark/System themes.
+- [Multiple accounts](./multiple-accounts.md) covers switching accounts with Mod+N.
+- [AI drafting](./ai-drafting.md) covers Mod+J reply drafting under the fake provider.
+- [Onboarding](./onboarding.md) covers the signed-out login screen without an OAuth client.

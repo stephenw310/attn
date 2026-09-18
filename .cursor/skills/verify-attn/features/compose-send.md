@@ -35,7 +35,7 @@ Preconditions:
 
   `composer` is visible and `composer-subject` is empty.
 
-- **Recipients.** Type an address and press Enter.
+- **Recipients.** Fill the To field and press Enter. `fill composer-to` finds the nested input when the field is collapsed.
 
   ```sh
   node .cursor/skills/verify-attn/control-attn.mjs fill composer-to undo@example.com
@@ -61,26 +61,29 @@ Preconditions:
   node .cursor/skills/verify-attn/control-attn.mjs press ControlOrMeta+Enter
   node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=composer]').length"
   node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid toast
-  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=outbox-count]')?.textContent"
   ```
 
-  `composer` has count 0, `toast` matches `/Sending in \d+ secondsUndo Z/`, and `pending-count` contains `1 pending`.
+  `composer` has count 0, `toast` reads `Sending in 5 secondsUndo Z`, and `outbox-count` reads `1 in Outbox`.
 
 - **Undo.** Select Undo on the toast.
 
   ```sh
   node .cursor/skills/verify-attn/control-attn.mjs click toast-undo
   node .cursor/skills/verify-attn/control-attn.mjs wait composer
+  node .cursor/skills/verify-attn/control-attn.mjs eval "[...document.querySelectorAll('[data-testid=recipient-chip]')].map(c => c.getAttribute('data-email'))"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=composer-subject]')?.value"
+  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=composer-editor]')?.textContent"
   node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=pending-count]').length"
   ```
 
   `composer` is visible with the same recipients, subject, and body, and `pending-count` is gone.
 
-- **Send through the provider.** Arm the fake provider first.
+- **Send through the provider.** Arm the fake provider first. Both seams need `--fire`.
 
   ```sh
   node .cursor/skills/verify-attn/control-attn.mjs seam setUndoSendDelay 0 --fire
-  node .cursor/skills/verify-attn/control-attn.mjs seam installSendProvider
+  node .cursor/skills/verify-attn/control-attn.mjs seam installSendProvider --fire
   node .cursor/skills/verify-attn/control-attn.mjs press ControlOrMeta+Enter
   node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=composer]').length"
   node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelectorAll('[data-testid=pending-count]').length"
@@ -96,23 +99,22 @@ Preconditions:
   node .cursor/skills/verify-attn/control-attn.mjs fill composer-subject "Draft subject"
   node .cursor/skills/verify-attn/control-attn.mjs press Escape
   node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid toast
-  node .cursor/skills/verify-attn/control-attn.mjs snapshot --testid pending-count
   ```
 
-  `toast` reads `Draft saved` and `pending-count` contains `1 pending`.
+  `toast` reads `Draft saved`.
 
-- **Proof.** Snapshot the composer, the countdown toast, and the reopened draft. Save the `outbox-count` text before and after.
+- **Proof.** Snapshot the composer, the countdown toast, and the reopened draft.
 
   ```sh
   node .cursor/skills/verify-attn/control-attn.mjs screenshot 01-composer
   node .cursor/skills/verify-attn/control-attn.mjs screenshot 02-undo-toast
   node .cursor/skills/verify-attn/control-attn.mjs screenshot 03-reopened-draft
-  node .cursor/skills/verify-attn/control-attn.mjs eval "document.querySelector('[data-testid=outbox-count]')?.textContent"
   ```
 
 ## Gotchas
 
-- Without `seam setUndoSendDelay 0 --fire` and `seam installSendProvider` the send sits in the Outbox for the undo window and never reaches a provider. The countdown toast is the proof of that state. Do not wait it out on the wall clock.
+- Without `seam setUndoSendDelay 0 --fire` and `seam installSendProvider --fire` the send sits in the Outbox for the undo window and never reaches a provider. The countdown toast is the proof of that state. Do not wait it out on the wall clock.
+- `seam installSendProvider` without `--fire` can hang. Always pass `--fire` for both send seams.
 - Hidden windows do not dispatch `selectionchange`. To edit at a position, click it and type one character first, then delete through it.
 - Whether the fake provider's send appears in the Sent mailbox is not established by this map. Treat an Outbox count of 0 as the delivery proof until a recipe proves the Sent row.
 - Chips expose the address in `data-email`. Assert that attribute, not the visible text.

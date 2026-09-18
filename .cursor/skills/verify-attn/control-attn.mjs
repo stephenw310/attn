@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url'
  *   seed: string | null
  *   evidenceDir: string
  *   visible: boolean
+ *   video: boolean
  *   startedAt: string
  * }} RunFile
  *
@@ -445,6 +446,10 @@ async function serve(runPath) {
   let app
   /** @type {import('@playwright/test').Page} */
   let page
+  /** @type {import('@playwright/test').CDPSession | null} */
+  let cdp = null
+  let tracing = false
+  let profiling = false
 
   let shuttingDown = false
   /** Converges on no app, no profile, no socket, no run file. Safe to call from any exit path. */
@@ -475,12 +480,18 @@ async function serve(runPath) {
   if (run.seed) env.ATTN_TEST_SEED = run.seed
 
   try {
-    app = await electron.launch({ args, env, cwd: ROOT })
+    /** @type {Parameters<typeof electron.launch>[0]} */
+    const launchOptions = { args, env, cwd: ROOT }
+    if (run.video) {
+      launchOptions.recordVideo = { dir: join(run.evidenceDir, 'video') }
+    }
+    app = await electron.launch(launchOptions)
     const child = app.process()
     child.stdout?.on('data', (d) => appendFileSync(stdioLog, d.toString()))
     child.stderr?.on('data', (d) => appendFileSync(stdioLog, d.toString()))
     page = await app.firstWindow({ timeout: 30_000 })
     await page.emulateMedia({ colorScheme: 'dark' })
+    cdp = await page.context().newCDPSession(page)
     page.on('console', (msg) => {
       if (msg.type() !== 'error') return
       if (isFixtureHostUnreachable(msg.location().url)) return
@@ -496,6 +507,11 @@ async function serve(runPath) {
   } catch (err) {
     await failBoot(err)
     return
+  }
+
+  const ensureCdp = () => {
+    if (!cdp) throw new CmdError('No CDP session', 'Relaunch the app')
+    return cdp
   }
 
   const replyError = (err) => {
@@ -626,6 +642,64 @@ async function serve(runPath) {
       await page.getByTestId(args.testid).waitFor({ state, timeout })
       return {}
     },
+    'trace-start': async () => {
+      if (tracing) throw new CmdError('A Chrome trace is already running', 'Run: control-attn trace stop')
+      await ensureCdp().send('Tracing.start', {
+        transferMode: 'ReturnAsStream',
+        categories: '-*,devtools.timeline,disabled-by-default-devtools.timeline,v8.execute,blink.user_timing'
+      })
+      tracing = true
+      return {}
+    },
+    'trace-stop': async () => {
+      if (!tracing) throw new CmdError('No Chrome trace is running', 'Run: control-attn trace start')
+      const session = ensureCdp()
+      const path = join(run.evidenceDir, 'trace.json')
+      const streamHandle = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Tracing.tracingComplete timed out')), 15_000)
+        session.on('Tracing.tracingComplete', (event) => {
+          clearTimeout(timeout)
+          resolve(event.stream)
+        })
+        session.send('Tracing.end').catch((err) => {
+          clearTimeout(timeout)
+          reject(err)
+        })
+      })
+      tracing = false
+      const chunks = []
+      for (;;) {
+        const read = await session.send('IO.read', { handle: streamHandle })
+        if (read.data) chunks.push(Buffer.from(read.data, read.base64Encoded ? 'base64' : 'utf8'))
+        if (read.eof) break
+      }
+      await session.send('IO.close', { handle: streamHandle })
+      writeFileSync(path, Buffer.concat(chunks))
+      return { path }
+    },
+    'perf-metrics': async () => {
+      const session = ensureCdp()
+      await session.send('Performance.enable')
+      const metrics = await session.send('Performance.getMetrics')
+      const path = join(run.evidenceDir, 'perf-metrics.json')
+      writeFileSync(path, `${JSON.stringify(metrics, null, 2)}\n`)
+      return { path, metrics: metrics.metrics }
+    },
+    'profile-start': async () => {
+      if (profiling) throw new CmdError('A CPU profile is already running', 'Run: control-attn profile stop')
+      await ensureCdp().send('Profiler.enable')
+      await ensureCdp().send('Profiler.start')
+      profiling = true
+      return {}
+    },
+    'profile-stop': async () => {
+      if (!profiling) throw new CmdError('No CPU profile is running', 'Run: control-attn profile start')
+      const result = await ensureCdp().send('Profiler.stop')
+      profiling = false
+      const path = join(run.evidenceDir, 'cpu-profile.json')
+      writeFileSync(path, `${JSON.stringify(result.profile, null, 2)}\n`)
+      return { path }
+    },
     close: async () => ({})
   }
 
@@ -707,6 +781,7 @@ async function cmdLaunch(opts) {
     seed,
     evidenceDir,
     visible: Boolean(opts.visible),
+    video: Boolean(opts.video),
     startedAt: new Date().toISOString()
   }
   writeRunFile(run)
@@ -854,8 +929,9 @@ Global flags
   --json       Print JSON even for snapshot and log.
 
 Commands
-  launch [--seed <name|path>] [--visible]
+  launch [--seed <name|path>] [--visible] [--video]
     Boot out/main/index.js against a throwaway profile.
+    --video records the window into the evidence dir.
     Example: node .cursor/skills/verify-attn/control-attn.mjs launch --seed inbox
 
   doctor
@@ -897,6 +973,18 @@ Commands
   info
     Example: node .cursor/skills/verify-attn/control-attn.mjs info
 
+  trace start|stop
+    Chrome DevTools timeline. stop writes trace.json in the evidence dir.
+    Example: node .cursor/skills/verify-attn/control-attn.mjs trace start
+
+  profile start|stop
+    V8 CPU profile. stop writes cpu-profile.json in the evidence dir.
+    Example: node .cursor/skills/verify-attn/control-attn.mjs profile start
+
+  perf-metrics
+    Writes Performance.getMetrics to perf-metrics.json.
+    Example: node .cursor/skills/verify-attn/control-attn.mjs perf-metrics
+
   close
     Quit the app and delete the profile. Evidence stays.
     Example: node .cursor/skills/verify-attn/control-attn.mjs close
@@ -918,6 +1006,7 @@ function parseArgv(argv) {
   const flags = {
     json: false,
     visible: false,
+    video: false,
     fire: false,
     dryRun: false,
     all: false
@@ -927,6 +1016,7 @@ function parseArgv(argv) {
     const arg = argv[i]
     if (arg === '--json') flags.json = true
     else if (arg === '--visible') flags.visible = true
+    else if (arg === '--video') flags.video = true
     else if (arg === '--fire') flags.fire = true
     else if (arg === '--dry-run') flags.dryRun = true
     else if (arg === '--all') flags.all = true
@@ -1014,7 +1104,7 @@ async function main() {
 
   try {
     if (cmd === 'launch') {
-      const result = await cmdLaunch({ seed: named.seed, visible: flags.visible })
+      const result = await cmdLaunch({ seed: named.seed, visible: flags.visible, video: flags.video })
       ok(result)
       return
     }
@@ -1107,6 +1197,21 @@ async function main() {
     }
     if (cmd === 'info') {
       printCommandReply(await send('info', {}, named.run), undefined, flags.json)
+    }
+    if (cmd === 'trace') {
+      if (rest[0] !== 'start' && rest[0] !== 'stop') {
+        throw new CmdError('trace needs start or stop', 'Run: control-attn trace start')
+      }
+      printCommandReply(await send(`trace-${rest[0]}`, {}, named.run), undefined, flags.json)
+    }
+    if (cmd === 'profile') {
+      if (rest[0] !== 'start' && rest[0] !== 'stop') {
+        throw new CmdError('profile needs start or stop', 'Run: control-attn profile start')
+      }
+      printCommandReply(await send(`profile-${rest[0]}`, {}, named.run), undefined, flags.json)
+    }
+    if (cmd === 'perf-metrics') {
+      printCommandReply(await send('perf-metrics', {}, named.run), undefined, flags.json)
     }
     if (cmd === 'close') {
       printCommandReply(await send('close', {}, named.run), undefined, flags.json)
