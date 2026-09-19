@@ -77,9 +77,10 @@ CREATE TABLE split_rules (
 CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
 
 -- One classifier judgment per split per thread. description_hash names the
--- description text the judgment answered, so editing a split's prose retires
--- its old answers instead of inheriting them. evidence_key is the latest
--- message id the judgment saw, so a new message on the thread re-judges it.
+-- question the judgment answered -- the split's name and its description text
+-- -- so renaming a split or editing its prose retires its old answers instead
+-- of inheriting them. evidence_key is the latest message id the judgment saw,
+-- so a new message on the thread re-judges it.
 CREATE TABLE split_judgments (
   account_id       TEXT NOT NULL,
   thread_id        TEXT NOT NULL,

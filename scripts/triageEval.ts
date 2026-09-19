@@ -22,13 +22,13 @@
 // After `judge`, fill the `truth` column with the split names that truly apply,
 // separated by `;`, or leave it empty for none. Then run `score`.
 
-import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { judgeThread, TypeSafeAuthError, TypeSafeRateLimitError } from '../src/main/ai/typesafeClient'
 import type { Db } from '../src/main/db'
+import { judgmentHash } from '../src/main/splits'
 import { readTriageThread } from '../src/main/sync/splitTriage'
 import {
   buildPackedTriageRequest,
@@ -144,11 +144,13 @@ function loadRules(path: string): TriageRule[] {
       throw new Error(`splits.json entry ${index} needs name and description strings`)
     }
     const text = collapse(description)
+    const collapsedName = collapse(name)
     return {
       splitId: `eval:${index}`,
-      name: collapse(name),
+      name: collapsedName,
       description: text,
-      descriptionHash: createHash('sha256').update(text).digest('hex')
+      // The shipped identity, so an eval rule hashes exactly as a saved one.
+      descriptionHash: judgmentHash(collapsedName, text)
     }
   })
 }

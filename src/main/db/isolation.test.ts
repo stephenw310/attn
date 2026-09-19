@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { IMPORTANT_SPLIT_ID } from '../../shared/splits'
 import { loadSeed } from '../dev/seed'
-import { descriptionHash, ensureSplitSetup, saveSplit } from '../splits'
+import { ensureSplitSetup, judgmentHash, saveSplit } from '../splits'
 import { runFtsBackfill } from '../sync/ftsBackfill'
 import { THREAD_LIST_LIMIT } from '../sync/tuning'
 import { type Db, openDatabase } from './index'
@@ -196,10 +196,10 @@ describe('two-account read isolation', () => {
 
       // Beta's judgment names alpha's thread and alpha's split id. An unscoped
       // read would honor it; the compiled rule must not see it at all.
-      judge.run(B, splitId, descriptionHash(description))
+      judge.run(B, splitId, judgmentHash('Described', description))
       expect(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, splitId)).toEqual([])
 
-      judge.run(A, splitId, descriptionHash(description))
+      judge.run(A, splitId, judgmentHash('Described', description))
       onlyAlpha(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, splitId))
       expect(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, splitId).map((row) => row.id)).toEqual([
         'alpha-t2'

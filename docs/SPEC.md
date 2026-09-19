@@ -571,7 +571,9 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   attachments, or HTML. It asks one question per conversation and described split.
 - A stored judgment changes the split counts in place. The Inbox list re-reads only while it is the
   surface on screen, and otherwise when the user returns to it.
-- The classifier re-asks when the user edits the description or the conversation receives a message. It
+- The classifier re-asks when the user edits the description, renames the split, or the conversation
+  receives a message. The name is part of the question the classifier asks, so a rename re-judges the
+  split's conversations. A deleted split or a deleted conversation loses its stored judgments. It
   judges an arriving conversation before Attn decides whether to notify, and waits at most two seconds. A
   judgment that lands later still notifies, once, while the message is recent and unread.
 - Navigate: `Tab` moves to the next split, and `Shift+Tab` moves to the previous split. Navigation wraps at

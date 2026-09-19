@@ -7,8 +7,8 @@
 //
 // The gate is re-read at the start of every pass and every batch, and again
 // after a rate-limit wait: withdrawing consent, deleting the key, changing the
-// model, or editing a description stops the work at the next boundary rather
-// than at the next restart.
+// model, or editing a split's name or description stops the work at the next
+// boundary rather than at the next restart.
 
 import type { AiStoredSettings } from '../../shared/ai'
 import { TYPESAFE_DEFAULT_MODEL } from '../../shared/ai'
@@ -28,6 +28,7 @@ import {
   describedSplitRules,
   pendingJudgmentPredicate,
   splitIdForThread,
+  storedJudgmentHash,
   triageCandidateSql
 } from '../splits'
 import type { SchedulerTime, TimerHandle } from '../time'
@@ -109,6 +110,11 @@ interface FailureRecord {
 
 interface PriorityRequest {
   pending: Set<string>
+  /**
+   * The latest message id each waiting thread held when the wait was made. The
+   * caller asked about that arrival, so only a judgment of it answers the wait.
+   */
+  evidence: Map<string, string>
   judgedLate: string[]
   resolved: boolean
   resolve: () => void
@@ -208,20 +214,16 @@ function rulesKeyOf(rules: readonly DescribedSplitRule[]): string {
 
 /**
  * Whether the consent captured before a wait is still the consent in force.
- * The rules compare by identity, prose and name, in order: the request carries
- * the split's name, so a rename asks a different question.
+ * The rules compare by identity and question hash, in order: the hash covers
+ * the name as well as the prose, so a rename reads as a changed question.
  */
 function sameGate(captured: TriageGate, current: TriageGate): boolean {
   if (captured.key !== current.key || captured.model !== current.model) return false
   if (captured.rules.length !== current.rules.length) return false
   return captured.rules.every((rule, index) => {
     const other = current.rules[index]
-    return (
-      other !== undefined &&
-      rule.splitId === other.splitId &&
-      rule.descriptionHash === other.descriptionHash &&
-      rule.name === other.name
-    )
+    if (other === undefined || rule.splitId !== other.splitId) return false
+    return rule.descriptionHash === other.descriptionHash
   })
 }
 
@@ -344,8 +346,15 @@ export class SplitTriage {
   async judgeNow(threadIds: readonly string[], deadlineMs: number): Promise<void> {
     if (this.stopped || threadIds.length === 0) return
     if (!this.gate()) return
+    // The wait is for a judgment of the mail that prompted it. A pack claimed
+    // before this arrival is already in flight against the message before it,
+    // and its answer is not the one this caller asked for.
+    const evidence = this.priorityEvidence(threadIds)
+    // Nothing stored to judge: no message, or no longer an Inbox conversation.
+    if (evidence.size === 0) return
     const request: PriorityRequest = {
-      pending: new Set(threadIds),
+      pending: new Set(evidence.keys()),
+      evidence,
       judgedLate: [],
       resolved: false,
       resolve: () => {}
@@ -354,7 +363,7 @@ export class SplitTriage {
       request.resolve = resolve
     })
     this.priority.push(request)
-    for (const threadId of threadIds) this.priorityThreads.add(threadId)
+    for (const threadId of evidence.keys()) this.priorityThreads.add(threadId)
     this.kick()
     const deadline = this.time.timers.setTimeout(() => {
       if (request.resolved) return
@@ -366,6 +375,25 @@ export class SplitTriage {
     } finally {
       this.time.timers.clearTimeout(deadline)
     }
+  }
+
+  /**
+   * The evidence each waiting thread is judged against: its latest message id,
+   * read exactly the way the work query reads it, so the id a wait records is
+   * the id the pack that judges it will store.
+   */
+  private priorityEvidence(threadIds: readonly string[]): Map<string, string> {
+    const rows = this.db
+      .prepare(
+        `SELECT thread_id, latest_message_id
+         FROM (${triageCandidateSql('AND t.id IN (SELECT value FROM json_each(?))')})
+         WHERE latest_message_id IS NOT NULL`
+      )
+      .all(this.accountId, JSON.stringify([...new Set(threadIds)])) as {
+      thread_id: string
+      latest_message_id: string
+    }[]
+    return new Map(rows.map((row) => [row.thread_id, row.latest_message_id]))
   }
 
   // -------------------------------------------------------------------------
@@ -714,7 +742,7 @@ export class SplitTriage {
         })
         loaded.forEach((entry, threadIndex) => {
           this.writeJudgments(entry.row, threadIndex, targets, probabilities)
-          this.settleThread(entry.row.threadId, true)
+          this.settleThread(entry.row.threadId, true, entry.row.latestMessageId)
         })
         this.maybeBroadcast()
         return 'ok'
@@ -790,7 +818,15 @@ export class SplitTriage {
     return readTriageThread(this.db, this.accountId, threadId)
   }
 
-  /** One thread's answers out of the pack's, in their own transaction. */
+  /**
+   * One thread's answers out of the pack's, in their own transaction.
+   *
+   * The pack was claimed before the request went out, so the split it answers
+   * for can have been deleted, renamed or reworded, and the conversation can
+   * have been deleted, while it was in flight. Each row is written only while
+   * its split still asks that exact question and the thread still exists;
+   * anything else is dropped rather than stored as an orphan.
+   */
   private writeJudgments(
     row: WorkRow,
     threadIndex: number,
@@ -807,13 +843,16 @@ export class SplitTriage {
          probability = excluded.probability,
          judged_at = excluded.judged_at`
     )
+    const threadRow = this.db.prepare('SELECT 1 AS present FROM threads WHERE account_id = ? AND id = ?')
     const judgedAt = this.time.now()
     const changed = this.db.transaction(() => {
+      if (!threadRow.get(this.accountId, row.threadId)) return false
       const before = splitIdForThread(this.db, this.accountId, row.threadId)
       for (const [questionId, target] of Object.entries(targets)) {
         if (target.threadIndex !== threadIndex) continue
         const probability = probabilities[questionId]
         if (probability === undefined) continue
+        if (storedJudgmentHash(this.db, this.accountId, target.splitId) !== target.descriptionHash) continue
         upsert.run(
           this.accountId,
           row.threadId,
@@ -857,12 +896,26 @@ export class SplitTriage {
     }
   }
 
-  private settleThread(threadId: string, judged: boolean): void {
+  /**
+   * One conversation leaves the queue. `evidenceKey` names the latest message
+   * the judgment read: a wait registered for a newer message stays pending, so
+   * the answer to the message before it cannot release the caller. That thread
+   * also stays in `priorityThreads` — it is still pending in the anti-join, so
+   * the next pack picks it up and answers the question actually asked.
+   *
+   * An unjudged settle releases every wait as before: nothing is coming.
+   */
+  private settleThread(threadId: string, judged: boolean, evidenceKey?: string): void {
     // An answer spends the budget back: the next failure starts the ladder again.
     if (judged) this.failures.delete(threadId)
-    this.priorityThreads.delete(threadId)
+    let stillWaiting = false
     for (const request of [...this.priority]) {
-      if (!request.pending.delete(threadId)) continue
+      if (!request.pending.has(threadId)) continue
+      if (judged && request.evidence.get(threadId) !== evidenceKey) {
+        stillWaiting = true
+        continue
+      }
+      request.pending.delete(threadId)
       if (judged && request.resolved) request.judgedLate.push(threadId)
       if (request.pending.size > 0) continue
       const index = this.priority.indexOf(request)
@@ -874,6 +927,7 @@ export class SplitTriage {
       }
       if (request.judgedLate.length > 0) this.options.onLateJudgment([...request.judgedLate])
     }
+    if (!stillWaiting) this.priorityThreads.delete(threadId)
   }
 
   /** Nothing more will be judged for these callers now: let them proceed. */

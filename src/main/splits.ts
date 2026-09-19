@@ -95,10 +95,10 @@ export function canonicalListId(raw: string): string | null {
 }
 
 /**
- * The stored form of a described split: one space between words, no surrounding
+ * The stored form of a split's prose: one space between words, no surrounding
  * space, original case. The model reads this text, so case carries meaning.
  */
-function collapsedDescription(value: string): string {
+function collapsedText(value: string): string {
   return value.trim().replace(/\s+/g, ' ')
 }
 
@@ -109,7 +109,7 @@ function collapsedDescription(value: string): string {
  */
 export function normalizeDescription(value: unknown): string | null {
   if (typeof value !== 'string') return null
-  const collapsed = collapsedDescription(value)
+  const collapsed = collapsedText(value)
   if (collapsed.length < SPLIT_DESCRIPTION_MIN_LENGTH || collapsed.length > SPLIT_DESCRIPTION_MAX_LENGTH) {
     return null
   }
@@ -117,12 +117,16 @@ export function normalizeDescription(value: unknown): string | null {
 }
 
 /**
- * Names the exact description text a judgment answered. Editing a split's prose
- * changes the hash, so its earlier judgments stop matching and the classifier
- * asks the new question instead of inheriting answers to the old one.
+ * Names the exact question a judgment answered: the split's name and its
+ * description text. The request carries both — the name is in the instructions
+ * the model reads — so a rename asks a different question just as an edited
+ * description does. Either change alters the hash, so the earlier judgments
+ * stop matching and the classifier asks again instead of inheriting answers to
+ * a question nobody asks. The stored column keeps the name `description_hash`.
  */
-export function descriptionHash(value: string): string {
-  return createHash('sha256').update(collapsedDescription(value)).digest('hex')
+export function judgmentHash(name: string, description: string): string {
+  const question = `${collapsedText(name)}\n${collapsedText(description)}`
+  return createHash('sha256').update(question).digest('hex')
 }
 
 function normalizedCondition(condition: SplitCondition): SplitCondition | null {
@@ -402,7 +406,7 @@ function compileRuleMatch(rule: SplitRule): { sql: string; params: unknown[] } {
           AND j.description_hash = ?
           AND j.probability >= ?
       )`,
-      params: [rule.id, descriptionHash(rule.description), SPLIT_TRIAGE_THRESHOLD]
+      params: [rule.id, judgmentHash(rule.name, rule.description), SPLIT_TRIAGE_THRESHOLD]
     }
   }
   const match = rule.match
@@ -596,6 +600,9 @@ export function deleteSplit(db: Db, accountId: string, id: string): SplitState {
   }
   db.transaction(() => {
     db.prepare('DELETE FROM split_rules WHERE account_id = ? AND id = ?').run(accountId, id)
+    // A judgment answers one split's question. Left behind it is an orphan the
+    // account carries for good, and a new split that reused the id would read it.
+    db.prepare('DELETE FROM split_judgments WHERE account_id = ? AND split_id = ?').run(accountId, id)
     compactPositions(db, accountId)
     bumpRevision(db, accountId)
   })()
@@ -699,6 +706,7 @@ export interface DescribedSplitRule {
   splitId: string
   name: string
   description: string
+  /** `judgmentHash(name, description)`: the stored `description_hash` value. */
   descriptionHash: string
 }
 
@@ -711,10 +719,25 @@ export function describedSplitRules(db: Db, accountId: string): DescribedSplitRu
             splitId: rule.id,
             name: rule.name,
             description: rule.description,
-            descriptionHash: descriptionHash(rule.description)
+            descriptionHash: judgmentHash(rule.name, rule.description)
           }
         ]
   )
+}
+
+/**
+ * The judgment identity one stored rule asks under right now, or null when the
+ * split is gone, is not the user's to describe, or no longer carries prose.
+ * The classifier re-reads this inside its write transaction: a pack claimed
+ * before a delete or an edit must not land a row answering the old question.
+ */
+export function storedJudgmentHash(db: Db, accountId: string, splitId: string): string | null {
+  const row = db
+    .prepare('SELECT name, kind, description FROM split_rules WHERE account_id = ? AND id = ?')
+    .get(accountId, splitId) as { name: string; kind: string; description: string | null } | undefined
+  if (!row || !validKind(row.kind) || !userOwnedKind(row.kind)) return null
+  const description = normalizeDescription(row.description)
+  return description === null ? null : judgmentHash(row.name, description)
 }
 
 /**

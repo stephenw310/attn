@@ -9,9 +9,9 @@ import { listInboxThreads } from './db/queries'
 import {
   canonicalListId,
   deleteSplit,
-  descriptionHash,
   ensureSplitSetup,
   getSplitState,
+  judgmentHash,
   normalizeDescription,
   notificationEnabledSplitIds,
   reorderSplits,
@@ -67,13 +67,15 @@ describe('split inbox', () => {
   }
 
   /**
-   * A stored classifier answer. `evidenceKey` defaults to a value no message
-   * id can equal, so a compiled rule reads it while the triage counts still
-   * call the thread unjudged; pass the real message id to answer it for good.
+   * A stored classifier answer. The name and the description together name the
+   * question it answered. `evidenceKey` defaults to a value no message id can
+   * equal, so a compiled rule reads it while the triage counts still call the
+   * thread unjudged; pass the real message id to answer it for good.
    */
   const insertJudgment = (
     threadId: string,
     splitId: string,
+    name: string,
     description: string,
     probability: number,
     evidenceKey = `${threadId}-evidence`
@@ -81,8 +83,12 @@ describe('split inbox', () => {
     db.prepare(
       `INSERT INTO split_judgments
        (account_id, thread_id, split_id, description_hash, evidence_key, probability, judged_at)
-       VALUES ('account', ?, ?, ?, ?, ?, 1)`
-    ).run(threadId, splitId, descriptionHash(description), evidenceKey, probability)
+       VALUES ('account', ?, ?, ?, ?, ?, 1)
+       ON CONFLICT (account_id, thread_id, split_id) DO UPDATE SET
+         description_hash = excluded.description_hash,
+         evidence_key = excluded.evidence_key,
+         probability = excluded.probability`
+    ).run(threadId, splitId, judgmentHash(name, description), evidenceKey, probability)
   }
 
   const describedSplit = (name: string, description: string): string => {
@@ -320,7 +326,7 @@ describe('split inbox', () => {
   it('switches a split between the two modes and never keeps both definitions', () => {
     insertThread('vendor', 100, [{ id: 'vendor-message', from: 'alerts@vendor.test' }])
     const splitId = describedSplit('Alerts', 'Something is broken')
-    insertJudgment('vendor', splitId, 'Something is broken', 0.95)
+    insertJudgment('vendor', splitId, 'Alerts', 'Something is broken', 0.95)
     expect(listInboxThreads(db, 'account', 10, null, splitId).map((row) => row.id)).toEqual(['vendor'])
 
     // Rules mode clears the prose, so the stored judgment stops counting.
@@ -378,7 +384,7 @@ describe('split inbox', () => {
 
     // A judgment counts only when it answered this description against the
     // thread's latest message, which is the queue's own definition of current.
-    insertJudgment('judged', splitId, 'Invoices I have to pay', 0.1, 'judged-message')
+    insertJudgment('judged', splitId, 'Invoices', 'Invoices I have to pay', 0.1, 'judged-message')
     expect(splitTriageCounts(db, 'account')).toEqual({
       describedSplits: 1,
       judgedThreads: 1,
@@ -386,7 +392,7 @@ describe('split inbox', () => {
       failedThreads: 0
     })
 
-    insertJudgment('waiting', splitId, 'A different question', 0.99, 'waiting-message')
+    insertJudgment('waiting', splitId, 'Invoices', 'A different question', 0.99, 'waiting-message')
     expect(splitTriageCounts(db, 'account').pendingThreads).toBe(1)
   })
 
@@ -394,7 +400,7 @@ describe('split inbox', () => {
     insertThread('judged', 300, [{ id: 'judged-message', from: 'billing@supplier.test' }])
     insertThread('waiting', 200, [{ id: 'waiting-message', from: 'friend@example.com' }])
     const splitId = describedSplit('Invoices', 'Invoices I have to pay')
-    insertJudgment('judged', splitId, 'Invoices I have to pay', 0.1, 'judged-message')
+    insertJudgment('judged', splitId, 'Invoices', 'Invoices I have to pay', 0.1, 'judged-message')
 
     expect(splitTriageCounts(db, 'account', new Set(['waiting']))).toEqual({
       describedSplits: 1,
@@ -421,12 +427,18 @@ describe('split inbox', () => {
     })
   })
 
-  it('hashes a description through its normalized form and separates different texts', () => {
-    const canonical = descriptionHash('Invoices from suppliers')
+  it('hashes the name and the description together, each through its normalized form', () => {
+    const canonical = judgmentHash('Invoices', 'Invoices from suppliers')
     expect(canonical).toMatch(/^[0-9a-f]{64}$/)
-    expect(descriptionHash('  Invoices   from\n suppliers  ')).toBe(canonical)
-    expect(descriptionHash('invoices from suppliers')).not.toBe(canonical)
-    expect(descriptionHash('Invoices from customers')).not.toBe(canonical)
+    expect(judgmentHash('  Invoices  ', '  Invoices   from\n suppliers  ')).toBe(canonical)
+    expect(judgmentHash('Invoices', 'invoices from suppliers')).not.toBe(canonical)
+    expect(judgmentHash('Invoices', 'Invoices from customers')).not.toBe(canonical)
+    // The name rides in the instructions the model reads, so it asks its own
+    // question: renaming a split retires the answers given under the old name.
+    expect(judgmentHash('Bills', 'Invoices from suppliers')).not.toBe(canonical)
+    // The separator is not part of either text, so no split of one string
+    // between the two fields can collide with another.
+    expect(judgmentHash('Invoices\nInvoices from', 'suppliers')).not.toBe(canonical)
   })
 
   it('saves a description-only rule and claims threads judged at or above the threshold', () => {
@@ -435,8 +447,8 @@ describe('split inbox', () => {
     insertThread('unjudged', 100, [{ id: 'unjudged-message', from: 'stranger@example.com' }])
 
     const splitId = describedSplit('Invoices', 'Invoices I have to pay')
-    insertJudgment('judged', splitId, 'Invoices I have to pay', 0.7)
-    insertJudgment('unsure', splitId, 'Invoices I have to pay', 0.69)
+    insertJudgment('judged', splitId, 'Invoices', 'Invoices I have to pay', 0.7)
+    insertJudgment('unsure', splitId, 'Invoices', 'Invoices I have to pay', 0.69)
 
     expect(listInboxThreads(db, 'account', 10, null, splitId).map((row) => row.id)).toEqual(['judged'])
     expect(listInboxThreads(db, 'account', 10, null, 'fallback:other').map((row) => row.id)).toEqual([
@@ -454,23 +466,58 @@ describe('split inbox', () => {
     const splitId = describedSplit('Receipts', 'Receipts for things I bought')
     // The judgment is a yes, but it answered the description the split had
     // before the user rewrote it, so the rule must not inherit it.
-    insertJudgment('stale', splitId, 'Anything about money', 0.99)
+    insertJudgment('stale', splitId, 'Receipts', 'Anything about money', 0.99)
 
     expect(listInboxThreads(db, 'account', 10, null, splitId)).toEqual([])
     expect(listInboxThreads(db, 'account', 10, null, 'fallback:other').map((row) => row.id)).toEqual([
       'stale'
     ])
 
-    insertJudgment('stale', 'other-split', 'Receipts for things I bought', 0.99)
+    insertJudgment('stale', 'other-split', 'Receipts', 'Receipts for things I bought', 0.99)
     expect(listInboxThreads(db, 'account', 10, null, splitId)).toEqual([])
+  })
+
+  it('retires the judgments of a renamed split and asks its question again', () => {
+    insertThread('renamed', 100, [{ id: 'renamed-message', from: 'billing@supplier.test' }])
+    const description = 'Bills I have to pay'
+    const splitId = describedSplit('Invoices', description)
+    insertJudgment('renamed', splitId, 'Invoices', description, 0.99, 'renamed-message')
+    expect(listInboxThreads(db, 'account', 10, null, splitId).map((row) => row.id)).toEqual(['renamed'])
+    expect(splitTriageCounts(db, 'account').pendingThreads).toBe(0)
+
+    // The name rides in the question, so renaming asks something else. The
+    // answer given under the old name no longer counts, and the conversation
+    // goes back in the classifier's queue.
+    saveSplit(db, 'account', { id: splitId, name: 'Bills', mode: 'description', description, notify: false })
+    expect(listInboxThreads(db, 'account', 10, null, splitId)).toEqual([])
+    expect(splitTriageCounts(db, 'account').pendingThreads).toBe(1)
+
+    insertJudgment('renamed', splitId, 'Bills', description, 0.99, 'renamed-message')
+    expect(listInboxThreads(db, 'account', 10, null, splitId).map((row) => row.id)).toEqual(['renamed'])
+    expect(splitTriageCounts(db, 'account').pendingThreads).toBe(0)
+  })
+
+  it('deletes the judgments of a deleted split', () => {
+    insertThread('judged', 100, [{ id: 'judged-message', from: 'billing@supplier.test' }])
+    const splitId = describedSplit('Invoices', 'Bills I have to pay')
+    const other = describedSplit('Receipts', 'Proof of payment')
+    insertJudgment('judged', splitId, 'Invoices', 'Bills I have to pay', 0.99)
+    insertJudgment('judged', other, 'Receipts', 'Proof of payment', 0.99)
+
+    deleteSplit(db, 'account', splitId)
+
+    const rows = db.prepare('SELECT split_id FROM split_judgments WHERE account_id = ?').all('account') as {
+      split_id: string
+    }[]
+    expect(rows.map((row) => row.split_id)).toEqual([other])
   })
 
   it('keeps first-match order when two described splits both hold a yes judgment', () => {
     insertThread('contested', 100, [{ id: 'contested-message', from: 'friend@example.com' }])
     const firstId = describedSplit('Urgent', 'Needs an answer today')
     const secondId = describedSplit('Money', 'Anything about money')
-    insertJudgment('contested', firstId, 'Needs an answer today', 0.91)
-    insertJudgment('contested', secondId, 'Anything about money', 0.99)
+    insertJudgment('contested', firstId, 'Urgent', 'Needs an answer today', 0.91)
+    insertJudgment('contested', secondId, 'Money', 'Anything about money', 0.99)
 
     expect(listInboxThreads(db, 'account', 10, null, firstId).map((row) => row.id)).toEqual(['contested'])
     expect(listInboxThreads(db, 'account', 10, null, secondId)).toEqual([])

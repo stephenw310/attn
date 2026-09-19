@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AI_SETTINGS_DEFAULTS, type AiStoredSettings } from '../../shared/ai'
 import type { TypeSafeTransport } from '../ai/typesafeClient'
 import { type Db, openDatabase } from '../db'
-import { descriptionHash, saveSplit, splitRevision } from '../splits'
+import { deleteSplit, judgmentHash, saveSplit, splitRevision, splitTriageCounts } from '../splits'
 import type { SchedulerTime, TimerHandle } from '../time'
+import { deleteThread } from './persist'
 import { SplitTriage, type SplitTriageOptions } from './splitTriage'
 import {
   SPLIT_TRIAGE_BATCH_SIZE,
@@ -142,6 +143,29 @@ describe('split triage pass', () => {
     }
   }
 
+  /** A reply landing on a stored conversation: evidence no judgment has read. */
+  const appendMessage = (accountId: string, threadId: string, messageId: string, at: number): void => {
+    db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
+                             body_text, recipients_json, attachments_json, labels_json)
+       VALUES (?, ?, ?, 'Grace', 'grace@example.com', 's', ?, 'reply', '{}', '[]', '["INBOX"]')`
+    ).run(accountId, messageId, threadId, at)
+  }
+
+  /** A transport that hands every request back to the test to release. */
+  const heldTransport = (
+    held: Array<() => void>,
+    probability: (request: number) => number
+  ): TypeSafeTransport => {
+    let requests = 0
+    return (url, init) => {
+      const answer = scriptedTransport(() => probability(++requests), recorded)
+      return new Promise<Response>((resolve) => {
+        held.push(() => void answer(url, init).then(resolve))
+      })
+    }
+  }
+
   const describedSplit = (accountId: string, name: string, description: string): string => {
     const state = saveSplit(db, accountId, { name, mode: 'description', description, notify: true })
     const rule = state.splits.find((split) => split.name === name)
@@ -249,7 +273,7 @@ describe('split triage pass', () => {
         account_id: 'account',
         thread_id: 't-1',
         split_id: invoices,
-        description_hash: descriptionHash('Bills I have to pay'),
+        description_hash: judgmentHash('Invoices', 'Bills I have to pay'),
         evidence_key: 'm-1',
         probability: 0.93,
         judged_at: timers.nowMs
@@ -258,7 +282,7 @@ describe('split triage pass', () => {
         account_id: 'account',
         thread_id: 't-2',
         split_id: invoices,
-        description_hash: descriptionHash('Bills I have to pay'),
+        description_hash: judgmentHash('Invoices', 'Bills I have to pay'),
         evidence_key: 'm-2',
         probability: 0.04,
         judged_at: timers.nowMs
@@ -629,7 +653,7 @@ describe('split triage pass', () => {
     await triage.settled()
     expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS + 1)
     expect(judgments('account')).toHaveLength(1)
-    expect(judgments('account')[0]?.description_hash).toBe(descriptionHash(edited))
+    expect(judgments('account')[0]?.description_hash).toBe(judgmentHash('Invoices', edited))
   })
 
   it('charges the same budget when the rate-limit ladder runs out', async () => {
@@ -707,6 +731,175 @@ describe('split triage pass', () => {
     await triage.settled()
     expect(judgments('account')).toHaveLength(1)
     expect(late).toEqual([['t-1']])
+  })
+
+  it('holds a priority wait open until the message it asked about is judged', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const held: Array<() => void> = []
+    const triage = makeTriage(
+      'account',
+      heldTransport(held, (request) => (request === 1 ? 0.1 : 0.9))
+    )
+
+    triage.kick()
+    await flush()
+    expect(held).toHaveLength(1)
+
+    // A reply lands while the pack that reads m-1 is still in flight, and the
+    // notification path asks for a judgment of that reply.
+    appendMessage('account', 't-1', 'm-2', 200)
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+
+    held[0]()
+    await flush()
+    // The answer for m-1 is stored, but it answers the message before the one
+    // the caller waits for, so the wait stays open and nothing is reported late.
+    expect(judgments('account')[0]?.evidence_key).toBe('m-1')
+    expect(resolved).toBe(false)
+    expect(late).toEqual([])
+
+    // The thread is still pending, so the same pass asks about m-2 next.
+    expect(held).toHaveLength(2)
+    held[1]()
+    await waiting
+    await triage.settled()
+    expect(resolved).toBe(true)
+    expect(judgments('account')).toHaveLength(1)
+    expect(judgments('account')[0]?.evidence_key).toBe('m-2')
+    expect(judgments('account')[0]?.probability).toBe(0.9)
+    expect(late).toEqual([])
+  })
+
+  it('reports the late judgment of the message the caller waited for, not the one before it', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const held: Array<() => void> = []
+    const triage = makeTriage(
+      'account',
+      heldTransport(held, (request) => (request === 1 ? 0.1 : 0.9))
+    )
+
+    triage.kick()
+    await flush()
+    appendMessage('account', 't-1', 'm-2', 200)
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+
+    timers.fire(2_000)
+    await waiting
+    expect(resolved).toBe(true)
+
+    held[0]()
+    await flush()
+    // A stale answer is no answer to this caller: the notification decision it
+    // already made was about m-2, and m-2 is still unjudged.
+    expect(late).toEqual([])
+
+    held[1]()
+    await triage.settled()
+    expect(late).toEqual([['t-1']])
+    expect(judgments('account')[0]?.evidence_key).toBe('m-2')
+  })
+
+  it('re-judges a conversation when the split is renamed', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    const description = 'Bills I have to pay'
+    const invoices = describedSplit('account', 'Invoices', description)
+    const triage = makeTriage(
+      'account',
+      scriptedTransport(() => 0.9, recorded)
+    )
+
+    triage.kick()
+    await triage.settled()
+    expect(recorded).toHaveLength(1)
+    expect(splitTriageCounts(db, 'account').pendingThreads).toBe(0)
+
+    // The name is in the instructions, so the renamed split asks a question
+    // the stored judgment never answered.
+    saveSplit(db, 'account', {
+      id: invoices,
+      name: 'Bills',
+      mode: 'description',
+      description,
+      notify: true
+    })
+    expect(splitTriageCounts(db, 'account').pendingThreads).toBe(1)
+
+    triage.kick()
+    await triage.settled()
+    expect(recorded).toHaveLength(2)
+    expect(recorded[1]?.questions.t0_s0?.instructions).toContain('"Bills"')
+    expect(judgments('account')).toHaveLength(1)
+    expect(judgments('account')[0]?.description_hash).toBe(judgmentHash('Bills', description))
+  })
+
+  it('drops an in-flight judgment for a split the user deleted', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    const invoices = describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const held: Array<() => void> = []
+    const triage = makeTriage(
+      'account',
+      heldTransport(held, () => 0.9)
+    )
+
+    triage.kick()
+    await flush()
+    expect(held).toHaveLength(1)
+
+    deleteSplit(db, 'account', invoices)
+    held[0]()
+    await triage.settled()
+
+    // The question was withdrawn while it was in flight: no orphan row, and
+    // no rule left to read one.
+    expect(judgments('account')).toHaveLength(0)
+  })
+
+  it('drops an in-flight judgment for a conversation that is gone', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    insertThread('account', 't-2', 'Another invoice', [{ id: 'm-2', at: 90 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const held: Array<() => void> = []
+    const triage = makeTriage(
+      'account',
+      heldTransport(held, () => 0.9)
+    )
+
+    triage.kick()
+    await flush()
+    expect(held).toHaveLength(1)
+
+    // Gmail reports the conversation as gone while its judgment is in flight.
+    deleteThread(db, 'account', 't-1')
+    held[0]()
+    await triage.settled()
+
+    expect(judgments('account').map((row) => row.thread_id)).toEqual(['t-2'])
+  })
+
+  it('deletes the judgments of a conversation Gmail removed', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const triage = makeTriage(
+      'account',
+      scriptedTransport(() => 0.9, recorded)
+    )
+
+    triage.kick()
+    await triage.settled()
+    expect(judgments('account')).toHaveLength(1)
+
+    deleteThread(db, 'account', 't-1')
+    expect(judgments('account')).toHaveLength(0)
   })
 
   it('sends a waiting thread in the next pack, ahead of the backlog still queued', async () => {
