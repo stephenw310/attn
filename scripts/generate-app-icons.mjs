@@ -2,9 +2,9 @@
 /**
  * Regenerate palette app icons with only Node built-ins.
  *
- * The source alpha channel is retained exactly. The mark and tab are found
- * from the source pixels, while the old glossy ground is flattened to each
- * palette's ground color. Run with `node scripts/generate-app-icons.mjs`.
+ * The source alpha, texture, shading, and reflective rim are retained.
+ * Neutral tones are regraded into each palette; the orange tab becomes its
+ * pale accent. Run with `node scripts/generate-app-icons.mjs`.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -116,76 +116,30 @@ function hexColor(value) {
   ]
 }
 
-function connectedComponent(seedX, seedY, candidate, width, height) {
-  const labels = Buffer.alloc(width * height)
-  const seen = Buffer.alloc(width * height)
-  const queue = [[seedX, seedY]]
-  while (queue.length) {
-    const [x, y] = queue.pop()
-    if (x < 0 || x >= width || y < 0 || y >= height) continue
-    const index = y * width + x
-    if (seen[index]) continue
-    seen[index] = 1
-    if (!candidate[index]) continue
-    labels[index] = 1
-    queue.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1])
-  }
-  return labels
-}
-
-function labelsFor(source) {
-  const { width, height, pixels } = source
-  const markCandidate = Buffer.alloc(width * height)
-  const tabCandidate = Buffer.alloc(width * height)
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const index = (y * width + x) * 4
-      const red = pixels[index]
-      const green = pixels[index + 1]
-      const blue = pixels[index + 2]
-      const alpha = pixels[index + 3]
-      if (!alpha) continue
-      const high = Math.max(red, green, blue)
-      const low = Math.min(red, green, blue)
-      if (high > 80 && high - low < 42) markCandidate[y * width + x] = 1
-      if (red > green + 12 && green > blue + 10) tabCandidate[y * width + x] = 1
-    }
-  }
-  const mark = connectedComponent(400, 300, markCandidate, width, height)
-  const tab = connectedComponent(800, 500, tabCandidate, width, height)
-  const labels = Buffer.alloc(width * height)
-  for (let index = 0; index < labels.length; index += 1) labels[index] = mark[index] || (tab[index] ? 2 : 0)
-  for (let pass = 0; pass < 3; pass += 1) {
-    const next = Buffer.from(labels)
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        const index = y * width + x
-        if (labels[index]) continue
-        const pixel = index * 4
-        const high = Math.max(pixels[pixel], pixels[pixel + 1], pixels[pixel + 2])
-        const low = Math.min(pixels[pixel], pixels[pixel + 1], pixels[pixel + 2])
-        if (!pixels[pixel + 3] || (high < 40 && high - low < 25)) continue
-        const counts = [0, 0, 0]
-        for (let dy = -1; dy <= 1; dy += 1)
-          for (let dx = -1; dx <= 1; dx += 1) counts[labels[(y + dy) * width + x + dx]] += 1
-        next[index] = counts[2] > counts[1] && counts[2] > counts[0] ? 2 : counts[1] > counts[0] ? 1 : 0
-      }
-    }
-    next.copy(labels)
-  }
-  return labels
-}
-
-function recolor(source, labels, colors) {
-  const targets = colors.map(hexColor)
+/** Regrade the source lighting without thresholding the mark or its antialiasing. */
+function recolor(source, colors) {
+  const [ground, mark, tab] = colors.map(hexColor)
   const pixels = Buffer.alloc(source.pixels.length)
-  for (let index = 0; index < labels.length; index += 1) {
-    const sourceIndex = index * 4
-    const color = targets[labels[index]]
-    pixels[sourceIndex] = color[0]
-    pixels[sourceIndex + 1] = color[1]
-    pixels[sourceIndex + 2] = color[2]
-    pixels[sourceIndex + 3] = source.pixels[sourceIndex + 3]
+  const neutral = (value, channel) => {
+    // The original dark material sits near 20/255. Retain its shadows below
+    // that point and the full highlight range, including the pearl mark's texture.
+    if (value <= 20) return ground[channel] * (0.6 + (0.4 * value) / 20)
+    const light = (value - 20) / 235
+    return ground[channel] + (mark[channel] - ground[channel]) * light
+  }
+  for (let index = 0; index < source.pixels.length; index += 4) {
+    const [red, green, blue, alpha] = source.pixels.subarray(index, index + 4)
+    if (alpha === 0) continue
+    // Orange is the source tab. Its chroma supplies a continuous coverage
+    // mask, preserving the fold, texture, and blended boundary pixels.
+    const tabCoverage = red > green && green > blue ? (red - blue) / 255 : 0
+    const shade = tabCoverage > 0 ? blue : (red + green + blue) / 3
+    for (let channel = 0; channel < 3; channel += 1) {
+      pixels[index + channel] = Math.round(
+        neutral(shade, channel) * (1 - tabCoverage) + tab[channel] * tabCoverage
+      )
+    }
+    pixels[index + 3] = alpha
   }
   return { width: source.width, height: source.height, pixels }
 }
@@ -273,11 +227,10 @@ function writeIcns(icon) {
 }
 
 const source = decodePng(readFileSync(sourcePath))
-const labels = labelsFor(source)
 for (const [name, colors] of Object.entries(palettes)) {
-  const icon = recolor(source, labels, colors)
+  const icon = recolor(source, colors)
   writeFileSync(join(root, 'resources', `icon-${name}.png`), encodePng(icon))
   if (name === 'matcha') writeFileSync(join(root, 'resources', 'icon.png'), encodePng(icon))
 }
-writeIco(recolor(source, labels, palettes.matcha))
-writeIcns(recolor(source, labels, palettes.matcha))
+writeIco(recolor(source, palettes.matcha))
+writeIcns(recolor(source, palettes.matcha))
