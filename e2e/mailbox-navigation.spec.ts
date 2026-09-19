@@ -166,7 +166,7 @@ test('collapses the sidebar and keeps that choice across relaunch', async ({ boo
   if (process.platform === 'darwin') expect(titleBarPadding.left).toBeGreaterThan(24)
   if (process.platform === 'win32') expect(titleBarPadding.right).toBeGreaterThan(24)
   const sidebar = page.getByTestId('mail-sidebar')
-  await expect(page.getByTestId('sidebar-brand')).toHaveText('attn:')
+  await expect(page.getByTestId('sidebar-brand')).toHaveText('Attn')
   await expect(page.getByTestId('sidebar-brand')).toHaveCSS('font-size', '26px')
   expect((await sidebar.boundingBox())?.width).toBe(190)
   await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', 'Collapse sidebar')

@@ -630,7 +630,7 @@ test.describe('"Sent with Attn" footer', () => {
     page
   }) => {
     await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
-    await setSendAsSignature(app, '<div>Best,</div><div>Chao</div>')
+    await setSendAsSignature(app, '<div>Best,</div><div>Alex</div>')
     // An absent preference is enabled: attribution is the default for every
     // newly added account.
     await expectStoredFooter(page, 'primary@attn.test', true)
@@ -641,8 +641,8 @@ test.describe('"Sent with Attn" footer', () => {
     await composer.openNew()
     await expect(composer.signature).toHaveCount(1)
     await composer.expectSignatureCollapsed()
-    await expect(footer(page)).toHaveText('Sent with Attn:')
-    await expect(footer(page).getByRole('link', { name: 'Attn:' })).toHaveAttribute(
+    await expect(footer(page)).toHaveText('Sent with Attn')
+    await expect(footer(page).getByRole('link', { name: 'Attn' })).toHaveAttribute(
       'href',
       'https://github.com/stephenw310/attn'
     )
@@ -685,7 +685,7 @@ test.describe('"Sent with Attn" footer', () => {
     page
   }, testInfo) => {
     await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
-    await setSendAsSignature(app, '<div>Best,</div><div>Chao</div>')
+    await setSendAsSignature(app, '<div>Best,</div><div>Alex</div>')
     await page.evaluate(() =>
       window.attn.settings.setAccount('primary@attn.test', 'attnSignatureEnabled', true)
     )
@@ -757,7 +757,7 @@ test.describe('"Sent with Attn" footer', () => {
     await page.mouse.click(footerBox.x + 1, footerY)
     await page.keyboard.insertText('x')
     await page.keyboard.press('Backspace')
-    for (let index = 0; index < 'Sent with Attn:'.length; index += 1) {
+    for (let index = 0; index < 'Sent with Attn'.length; index += 1) {
       await page.keyboard.press('Delete')
     }
     await expect(composer.editor).not.toContainText('Sent with Attn')

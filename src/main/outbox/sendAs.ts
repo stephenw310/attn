@@ -18,7 +18,7 @@ export const ATTN_SIGNATURE_SETTING = 'attnSignatureEnabled'
     secondary; the marker attribute is what identity survives on. */
 const ATTN_FOOTER_HTML =
   '<div data-attn-signature="footer"><br><span style="color:#888888">Sent with ' +
-  `<a href="${ATTN_SIGNATURE_URL}" style="color:#888888;text-decoration:underline">Attn:</a></span></div>`
+  `<a href="${ATTN_SIGNATURE_URL}" style="color:#888888;text-decoration:underline">Attn</a></span></div>`
 const ATTN_FOOTER_SELECTOR = '[data-attn-signature="footer"]'
 
 export function attnSignatureEnabled(db: Db, accountId: string): boolean {

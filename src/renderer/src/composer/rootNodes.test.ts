@@ -86,7 +86,7 @@ describe('root-level node normalization', () => {
     // carries: body, signature, a top-level <br>, then the quoted history.
     const html =
       '<div>Sounds good.</div>' +
-      '<div class="gmail_signature">Chao</div>' +
+      '<div class="gmail_signature">Alex</div>' +
       '<br>' +
       '<blockquote class="gmail_quote"><div>Earlier message</div></blockquote>'
 
@@ -111,11 +111,11 @@ describe('root-level node normalization', () => {
       '<div dir="ltr"><div>Hi there,</div><div>This is a test of email format.</div>' +
       '<div>Hopefully it looks good</div><div><br></div><div>' +
       '<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">' +
-      '<div dir="ltr"><div>Bests,</div>Chao Wu<div><a href="https://chaowu.xyz">' +
-      'https://chaowu.xyz</a><br></div></div></div></div></div>'
+      '<div dir="ltr"><div>Bests,</div>Alex Morgan<div><a href="https://alexmorgan.example">' +
+      'https://alexmorgan.example</a><br></div></div></div></div></div>'
 
     expect(loadDraftText(html)).toBe(
-      'Hi there,\nThis is a test of email format.\nHopefully it looks good\n\nBests,\nChao Wu\nhttps://chaowu.xyz'
+      'Hi there,\nThis is a test of email format.\nHopefully it looks good\n\nBests,\nAlex Morgan\nhttps://alexmorgan.example'
     )
   })
 })

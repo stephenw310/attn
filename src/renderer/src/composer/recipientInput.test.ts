@@ -24,13 +24,13 @@ describe('shouldCommitOnComma', () => {
 
 describe('isCompleteRecipient', () => {
   it('recognizes text that is already one address', () => {
-    expect(isCompleteRecipient('chao@attn.test')).toBe(true)
-    expect(isCompleteRecipient('Chao Wu <chao@attn.test>')).toBe(true)
+    expect(isCompleteRecipient('alex@attn.test')).toBe(true)
+    expect(isCompleteRecipient('Alex Morgan <alex@attn.test>')).toBe(true)
   })
 
   it('leaves partial or invalid text to the suggestions', () => {
     expect(isCompleteRecipient('')).toBe(false)
-    expect(isCompleteRecipient('chao')).toBe(false)
-    expect(isCompleteRecipient('chao@')).toBe(false)
+    expect(isCompleteRecipient('alex')).toBe(false)
+    expect(isCompleteRecipient('alex@')).toBe(false)
   })
 })

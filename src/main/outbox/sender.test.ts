@@ -320,7 +320,7 @@ describe('OutboxSender effect layer', () => {
       db.prepare('INSERT INTO settings (account_id, key, value) VALUES (?, ?, ?)').run(
         'me@example.com',
         'sendAsDisplayName',
-        'Chao Zhou'
+        'Alex Morgan'
       )
       const id = saveDraft(
         db,
@@ -341,7 +341,7 @@ describe('OutboxSender effect layer', () => {
       )
       const getSendAs = vi.fn()
       const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
-        expect(Buffer.from(raw, 'base64url').toString()).toContain('From: Chao Zhou <me@example.com>')
+        expect(Buffer.from(raw, 'base64url').toString()).toContain('From: Alex Morgan <me@example.com>')
         return 'created-draft'
       })
       const sender = new OutboxSender(
@@ -370,7 +370,7 @@ describe('OutboxSender effect layer', () => {
       db.prepare(
         `INSERT INTO messages
            (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
-         VALUES (?, 'gmail-sent', 'identity-thread', 'Chao Zhou', ?, ?, '["SENT"]')`
+         VALUES (?, 'gmail-sent', 'identity-thread', 'Alex Morgan', ?, ?, '["SENT"]')`
       ).run('me@example.com', 'me@example.com', NOW - 1)
       // persistThread writes the thread's label union beside its messages.
       db.prepare(
@@ -398,11 +398,11 @@ describe('OutboxSender effect layer', () => {
       const getSendAs = vi.fn(async () => ({
         sendAsEmail: 'me@example.com',
         displayName: '',
-        signature: '<div>Best, Chao</div>',
+        signature: '<div>Best, Alex</div>',
         isPrimary: true
       }))
       const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
-        expect(Buffer.from(raw, 'base64url').toString()).toContain('From: Chao Zhou <me@example.com>')
+        expect(Buffer.from(raw, 'base64url').toString()).toContain('From: Alex Morgan <me@example.com>')
         return 'created-draft'
       })
       const remote = provider({
@@ -457,12 +457,12 @@ describe('OutboxSender effect layer', () => {
         db
           .prepare("SELECT value FROM settings WHERE account_id = ? AND key = 'sendAsDisplayName'")
           .get('me@example.com')
-      ).toEqual({ value: 'Chao Zhou' })
+      ).toEqual({ value: 'Alex Morgan' })
       expect(
         db
           .prepare("SELECT value FROM settings WHERE account_id = ? AND key = 'sendAsSignatureHtml'")
           .get('me@example.com')
-      ).toEqual({ value: expect.stringContaining('Best, Chao') })
+      ).toEqual({ value: expect.stringContaining('Best, Alex') })
       expect(db.prepare('SELECT body_text FROM messages WHERE id = ?').get('sent-message')).toEqual({
         body_text: 'Fresh reply'
       })

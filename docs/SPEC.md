@@ -67,7 +67,7 @@ Initial sync fetches recent Inbox bodies. Older bodies and attachment bytes down
 
 ### D6. Layout and themes
 
-The Tide visual direction uses quiet, palette-tinted backgrounds, readable secondary text, and the `attn:` wordmark. Built-in palettes share semantic color tokens. Secondary actions use a subtle hover fill without a resting border. Fields and shortcut keycaps retain visible boundaries.
+The Tide visual direction uses quiet, palette-tinted backgrounds, readable secondary text, and the `Attn` wordmark. Built-in palettes share semantic color tokens. Secondary actions use a subtle hover fill without a resting border. Fields and shortcut keycaps retain visible boundaries.
 
 A 190-pixel sidebar contains mailboxes and user labels. A persistent control and `Mod+B` toggle the sidebar outside the composer. The saved choice also applies to the reader. The logo hides with the sidebar; there is no compact icon rail. Mailboxes use icons and names. The flat label list uses the same colors as message label chips. System mailbox entries show their chord shortcuts on hover. Settings and split editing hide the mail sidebar without changing the saved preference.
 
@@ -713,7 +713,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   the reply-only command.
   Generation, refinement, and undo affect the authored reply region above the signature. Preserve the
   Gmail signature and optional Attn footer, including user edits or removal (F6).
-- **Voice profile:** tone preset (concise / friendly / formal) plus free-text standing rules ("sign off with 'Best, Chao'", "never use exclamation marks").
+- **Voice profile:** tone preset (concise / friendly / formal) plus free-text standing rules ("sign off with 'Best, Alex'", "never use exclamation marks").
 - Reply, refinement, and autocomplete context stop at the message being answered. Earlier cached messages remain context; later messages are excluded, including after reopening a saved reply.
 - **Voice matching:** a handful of the user's recent sent replies from other conversations in the draft's owning account, selected locally, accompany the reply request as style examples (toggleable). Exclude the current conversation so later replies and their quoted history cannot enter through style examples. Autocomplete never includes these examples.
   Strip recognized quoted history, forwarded content, and signatures from each example before applying

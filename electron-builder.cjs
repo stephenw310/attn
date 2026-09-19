@@ -26,7 +26,7 @@ function releaseFeed() {
 
 /** @type {import('electron-builder').Configuration} */
 const config = {
-  appId: 'com.stephenw310.attn',
+  appId: 'com.useattn.attn',
   productName: 'Attn',
 
   directories: {

@@ -24,15 +24,15 @@ describe('GmailMailProvider.getSendAs', () => {
   it('reads the sender identity for the exact account address', async () => {
     const get = vi.fn(async () => ({
       sendAsEmail: 'me+alias@example.com',
-      displayName: 'Chao Zhou',
-      signature: '<div>Best, Chao</div>',
+      displayName: 'Alex Morgan',
+      signature: '<div>Best, Alex</div>',
       isPrimary: true
     }))
     const provider = new GmailMailProvider({ get } as unknown as GmailClient)
 
     await expect(provider.getSendAs('me+alias@example.com', { priority: 'send' })).resolves.toMatchObject({
-      displayName: 'Chao Zhou',
-      signature: '<div>Best, Chao</div>'
+      displayName: 'Alex Morgan',
+      signature: '<div>Best, Alex</div>'
     })
     expect(get).toHaveBeenCalledWith('/settings/sendAs/me%2Balias%40example.com', undefined, {
       priority: 'send'

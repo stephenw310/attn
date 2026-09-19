@@ -312,7 +312,7 @@ export function AiSettingsSection({ onOpenSplits }: { onOpenSplits: () => void }
             data-testid="settings-ai-voice-rules"
             aria-label="AI standing rules"
             rows={4}
-            placeholder={'e.g. sign off with "Best, Chao"; never use exclamation marks'}
+            placeholder={'e.g. sign off with "Best, Alex"; never use exclamation marks'}
             disabled={!settings}
             value={rulesValue}
             onChange={(event) => setRulesDraft(event.target.value)}

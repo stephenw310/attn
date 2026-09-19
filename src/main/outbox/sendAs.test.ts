@@ -16,14 +16,14 @@ import {
 
 const ACCOUNT = 'me@example.com'
 const SIGNATURE =
-  '<div style="position:fixed;color:#123456">Best,</div><div><a href="https://attn.test">Chao</a></div><script>alert(1)</script>'
+  '<div style="position:fixed;color:#123456">Best,</div><div><a href="https://attn.test">Alex</a></div><script>alert(1)</script>'
 
 describe('primary Gmail send-as settings', () => {
   it('caches the display name and a safe editable signature', async () => {
     const db = openDatabase(':memory:')
     const getSendAs = vi.fn(async () => ({
       sendAsEmail: ACCOUNT,
-      displayName: ' Chao Wu ',
+      displayName: ' Alex Morgan ',
       signature: SIGNATURE,
       isPrimary: true
     }))
@@ -31,7 +31,7 @@ describe('primary Gmail send-as settings', () => {
       await syncPrimarySendAs(db, ACCOUNT, { getSendAs }, { priority: 'polling' })
 
       expect(getSendAs).toHaveBeenCalledWith(ACCOUNT, { priority: 'polling' })
-      expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Chao Wu')
+      expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Alex Morgan')
       const { draft } = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
       expect(draft.bodyHtml).toContain(
         '<div dir="ltr"><div><br></div><div><div dir="ltr" class="gmail_signature"'
@@ -40,7 +40,7 @@ describe('primary Gmail send-as settings', () => {
       expect(draft.bodyHtml).toContain('Best,')
       expect(draft.bodyHtml).toContain('color:#123456')
       expect(draft.bodyHtml).not.toMatch(/position|script|alert/i)
-      expect(draft.bodyText).toBe(`\nBest,\nChao\n\n${ATTN_SIGNATURE_LINE}`)
+      expect(draft.bodyText).toBe(`\nBest,\nAlex\n\n${ATTN_SIGNATURE_LINE}`)
     } finally {
       db.close()
     }
@@ -52,7 +52,7 @@ describe('primary Gmail send-as settings', () => {
       db.prepare(
         `INSERT INTO messages
            (account_id, id, thread_id, from_name, from_email, internal_date, labels_json)
-         VALUES (?, 'gmail-sent', 'thread-1', 'Chao Wu', ?, 10, '["SENT"]')`
+         VALUES (?, 'gmail-sent', 'thread-1', 'Alex Morgan', ?, 10, '["SENT"]')`
       ).run(ACCOUNT, ACCOUNT)
       const insertAttnSent = db.prepare(
         `INSERT INTO messages
@@ -71,7 +71,7 @@ describe('primary Gmail send-as settings', () => {
       }
 
       cachePrimarySendAs(db, ACCOUNT, { sendAsEmail: ACCOUNT, displayName: '', signature: '' })
-      expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Chao Wu')
+      expect(readAccountSetting(db, ACCOUNT, SEND_AS_DISPLAY_NAME_SETTING)).toBe('Alex Morgan')
 
       cachePrimarySendAs(db, ACCOUNT, {
         sendAsEmail: ACCOUNT,
@@ -133,14 +133,14 @@ describe('primary Gmail send-as settings', () => {
       writeSetting(db, ACCOUNT, ATTN_SIGNATURE_SETTING, 'false')
       cachePrimarySendAs(db, ACCOUNT, {
         sendAsEmail: ACCOUNT,
-        signature: '<div style="color:#123456">Best,</div><div><a href="https://attn.test">Chao</a></div>'
+        signature: '<div style="color:#123456">Best,</div><div><a href="https://attn.test">Alex</a></div>'
       })
       const prepared = prepareDraftWithCachedPrimarySignature(db, ACCOUNT, emptyDraftInput())
       const normalized = {
         ...emptyDraftInput(),
         bodyHtml:
-          '<p><br></p><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><p><span style="color: rgb(18, 52, 86)">Best,</span></p><p><a href="https://attn.test">Chao</a></p></div></div>',
-        bodyText: '\nBest,\nChao'
+          '<p><br></p><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><p><span style="color: rgb(18, 52, 86)">Best,</span></p><p><a href="https://attn.test">Alex</a></p></div></div>',
+        bodyText: '\nBest,\nAlex'
       }
       expect(hasOnlyDefaultPrimarySignature(normalized, prepared.defaultSignatureFingerprint)).toBe(true)
       expect(
@@ -160,7 +160,7 @@ describe('primary Gmail send-as settings', () => {
               '<p><span style="color: rgb(18, 52, 86)">Best,</span></p>',
               '<ul><li><span style="color: rgb(18, 52, 86)">Best,</span></li></ul>'
             ),
-            bodyText: '\n- Best,\nChao'
+            bodyText: '\n- Best,\nAlex'
           },
           prepared.defaultSignatureFingerprint
         )
@@ -294,7 +294,7 @@ describe('optional "Sent with Attn" footer (F6/T32B)', () => {
         expect(signatureAt).toBeGreaterThanOrEqual(0)
         expect(footerAt).toBeGreaterThan(signatureAt)
         expect(draft.bodyHtml.slice(footerAt)).toContain(`href="${ATTN_SIGNATURE_URL}"`)
-        expect(draft.bodyHtml.slice(footerAt)).toContain('>Attn:</a>')
+        expect(draft.bodyHtml.slice(footerAt)).toContain('>Attn</a>')
         expect(draft.bodyHtml.slice(footerAt)).not.toMatch(/<img\b/)
         expect(draft.bodyText.endsWith(`\n\n${ATTN_SIGNATURE_LINE}`)).toBe(true)
       }
@@ -362,7 +362,7 @@ describe('optional "Sent with Attn" footer (F6/T32B)', () => {
         hasOnlyDefaultPrimarySignature(
           {
             ...prepared.draft,
-            bodyHtml: prepared.draft.bodyHtml.replace('Attn:</a>', 'love</a>')
+            bodyHtml: prepared.draft.bodyHtml.replace('Attn</a>', 'love</a>')
           },
           prepared.defaultSignatureFingerprint
         )
