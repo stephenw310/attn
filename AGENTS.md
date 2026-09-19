@@ -122,6 +122,8 @@ npm run verify
 
 The command runs all three TypeScript project checks, Biome, unit tests, a production build, and the Electron end-to-end suite.
 
+For runtime proof of a behavior change, follow `.cursor/skills/verify-attn/SKILL.md`. It drives the built app against a throwaway profile and writes evidence to `e2e/.artifacts/verify-attn/`. Turn a drive that proves new behavior into an end-to-end test, then delete the drive.
+
 After a UI change, inspect every affected screenshot in `e2e/.artifacts/`. Confirm the layout and colors. Do not leave text-selection highlights in screenshots. Find screenshot writers with `rg -n '\.artifacts' e2e --glob '*.spec.ts'`.
 
 For failures, inspect `e2e/.results/`. The tests attach main-process logs to failed cases. See [the test guide](docs/TESTING.md) for focused commands and fixture rules.
