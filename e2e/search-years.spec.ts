@@ -14,10 +14,10 @@ test.beforeAll(() => {
     JSON.stringify({
       account: 'seed@attn.test',
       threads: [0, 1, 2].map((offset) => ({
-        id: 'year-' + offset,
+        id: `year-${offset}`,
         messages: [
           {
-            id: 'message-' + offset,
+            id: `message-${offset}`,
             labelIds: ['INBOX'],
             receivedDaysAgo: Math.round(
               (today.getTime() - new Date(now.getFullYear() - offset, 0, 1).getTime()) / 86400000
@@ -25,7 +25,7 @@ test.beforeAll(() => {
             receivedAt: '09:00',
             from: 'Planning <planning@example.test>',
             to: 'seed@attn.test',
-            subject: 'Annual review ' + (now.getFullYear() - offset),
+            subject: `Annual review ${now.getFullYear() - offset}`,
             bodyText: 'Annual review notes for the team.'
           }
         ]
@@ -34,8 +34,8 @@ test.beforeAll(() => {
   )
 })
 for (const theme of ['Light', 'Dark']) {
-  test('search timestamps distinguish calendar years ' + theme, async ({ page }) => {
-    await runPaletteCommand(page, 'Use ' + theme + ' theme')
+  test(`search timestamps distinguish calendar years ${theme}`, async ({ page }) => {
+    await runPaletteCommand(page, `Use ${theme} theme`)
     await runPaletteCommand(page, 'Use Matcha color palette')
     await page.keyboard.press('/')
     await page.getByTestId('search-input').fill('Annual review')
@@ -43,7 +43,7 @@ for (const theme of ['Light', 'Dark']) {
     const year = new Date().getFullYear()
     for (const offset of [1, 2]) {
       await expect(
-        page.locator('[data-thread-id="year-' + offset + '"]').getByTestId('thread-time')
+        page.locator(`[data-thread-id="year-${offset}"]`).getByTestId('thread-time')
       ).toContainText(String(year - offset))
     }
     await expect(page.locator('[data-thread-id="year-0"]').getByTestId('thread-time')).not.toContainText(
@@ -52,7 +52,7 @@ for (const theme of ['Light', 'Dark']) {
     await expect(page.getByTestId('thread-date-group')).toHaveCount(0)
     await page.mouse.move(0, 0)
     await page.screenshot({
-      path: join(__dirname, '.artifacts', 'search-years-' + theme.toLowerCase() + '.png')
+      path: join(__dirname, '.artifacts', `search-years-${theme.toLowerCase()}.png`)
     })
   })
 }
