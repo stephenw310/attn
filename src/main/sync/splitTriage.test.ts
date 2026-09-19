@@ -171,6 +171,17 @@ describe('split triage pass', () => {
       ...overrides
     })
 
+  /** Drive the queued conversations to their attempt cap through the ladder. */
+  const exhaustAttempts = async (triage: SplitTriage): Promise<void> => {
+    triage.kick()
+    await triage.settled()
+    for (const step of SPLIT_TRIAGE_FAILURE_BACKOFF_MS.slice(0, SPLIT_TRIAGE_MAX_ATTEMPTS - 1)) {
+      timers.nowMs += step
+      timers.fire(step)
+      await triage.settled()
+    }
+  }
+
   const judgments = (accountId: string): Record<string, unknown>[] =>
     db
       .prepare('SELECT * FROM split_judgments WHERE account_id = ? ORDER BY thread_id, split_id')
@@ -379,6 +390,32 @@ describe('split triage pass', () => {
     expect(judgments('account')).toHaveLength(1)
   })
 
+  it('does not retry the rate-limited pack when consent is withdrawn during the wait', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) => {
+      attempts++
+      return attempts === 1 ? failingTransport(429, { 'retry-after': '2' })(url, init) : answer(url, init)
+    })
+
+    triage.kick()
+    await flush()
+    expect(attempts).toBe(1)
+
+    // The user turns smart splits off while the pass sleeps on Retry-After.
+    settings = { ...settings, triageEnabled: false }
+    timers.fire(2_000)
+    await triage.settled()
+
+    // The captured gate never sends a second request, and the pass is over.
+    expect(attempts).toBe(1)
+    expect(judgments('account')).toHaveLength(0)
+    // Unjudged, but no attempt charged: nothing is waiting to ask again.
+    expect(timers.armed).toBe(0)
+  })
+
   it('retries a rejected pack one conversation at a time', async () => {
     for (let index = 0; index < 3; index++) {
       insertThread('account', `t-${index}`, 'Q3 invoice', [{ id: `m-${index}`, at: 100 - index }])
@@ -509,13 +546,7 @@ describe('split triage pass', () => {
       }
     )
 
-    triage.kick()
-    await triage.settled()
-    for (const step of SPLIT_TRIAGE_FAILURE_BACKOFF_MS.slice(0, SPLIT_TRIAGE_MAX_ATTEMPTS - 1)) {
-      timers.nowMs += step
-      timers.fire(step)
-      await triage.settled()
-    }
+    await exhaustAttempts(triage)
 
     expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS)
     expect([...triage.failedThreadIds()]).toEqual(['t-1'])
@@ -533,6 +564,72 @@ describe('split triage pass', () => {
     expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS + 1)
     expect(triage.failedThreadIds().size).toBe(0)
     expect(judgments('account')).toHaveLength(1)
+  })
+
+  it('judges a conversation past its cap again once a new message arrives', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    let rejecting = true
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) => {
+      attempts++
+      return rejecting ? failingTransport(400)(url, init) : answer(url, init)
+    })
+
+    await exhaustAttempts(triage)
+    expect([...triage.failedThreadIds()]).toEqual(['t-1'])
+
+    // The reply is evidence none of the failed attempts read.
+    db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
+                             body_text, recipients_json, attachments_json, labels_json)
+       VALUES ('account', 'm-2', 't-1', 'Grace', 'grace@example.com', 's', 200, 'reply', '{}', '[]', '[]')`
+    ).run()
+    // The record answered for the old message, so it no longer applies.
+    expect(triage.failedThreadIds().size).toBe(0)
+    expect(triage.failedCauses()).toEqual([])
+
+    rejecting = false
+    triage.kick()
+    await triage.settled()
+    // Judged on an ordinary pass, with no user retry.
+    expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS + 1)
+    expect(judgments('account')).toHaveLength(1)
+    expect(judgments('account')[0]?.evidence_key).toBe('m-2')
+  })
+
+  it('judges a conversation past its cap again once the description changes', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    const invoices = describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    let rejecting = true
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) => {
+      attempts++
+      return rejecting ? failingTransport(400)(url, init) : answer(url, init)
+    })
+
+    await exhaustAttempts(triage)
+    expect([...triage.failedThreadIds()]).toEqual(['t-1'])
+
+    const edited = 'Bills and receipts I have to file'
+    saveSplit(db, 'account', {
+      id: invoices,
+      name: 'Invoices',
+      mode: 'description',
+      description: edited,
+      notify: true
+    })
+    // The record answered a question the user no longer asks.
+    expect(triage.failedThreadIds().size).toBe(0)
+
+    rejecting = false
+    triage.kick()
+    await triage.settled()
+    expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS + 1)
+    expect(judgments('account')).toHaveLength(1)
+    expect(judgments('account')[0]?.description_hash).toBe(descriptionHash(edited))
   })
 
   it('charges the same budget when the rate-limit ladder runs out', async () => {

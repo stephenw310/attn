@@ -634,12 +634,20 @@ describe('ServiceRuntime with several accounts', () => {
   /** A reply landing on the seeded thread: new evidence, so a fresh judgment. */
   function appendReply(dbPath: string): void {
     const db = openDatabase(dbPath)
+    // The seed stamps the original message at 09:00 today, so a reply stamped
+    // with the clock alone is older than its thread before that hour and is
+    // not new evidence. Stamp it after whatever the thread already holds.
+    const latest = db
+      .prepare(
+        "SELECT MAX(internal_date) AS at FROM messages WHERE account_id = 'primary@attn.test' AND thread_id = 't-alpha'"
+      )
+      .get() as { at: number | null }
     db.prepare(
       `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
                              body_text, recipients_json, attachments_json, labels_json)
        VALUES ('primary@attn.test', 'm-alpha-2', 't-alpha', 'Ada', 'ada@example.com', 'Reply snippet', ?,
                'More on the roadmap', '{"to":[],"cc":[],"bcc":[],"replyTo":[]}', '[]', '["INBOX","UNREAD"]')`
-    ).run(Date.now())
+    ).run(Math.max(Date.now(), (latest.at ?? 0) + 1_000))
     db.close()
   }
 

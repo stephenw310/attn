@@ -5,9 +5,10 @@
 // time, and writes the answers back as `split_judgments` rows. Nothing it does
 // depends on Gmail, and nothing it writes is mail content.
 //
-// The gate is re-read at the start of every pass and every batch: withdrawing
-// consent, deleting the key, or removing the last described split stops the
-// work at the next boundary rather than at the next restart.
+// The gate is re-read at the start of every pass and every batch, and again
+// after a rate-limit wait: withdrawing consent, deleting the key, changing the
+// model, or editing a description stops the work at the next boundary rather
+// than at the next restart.
 
 import type { AiStoredSettings } from '../../shared/ai'
 import { TYPESAFE_DEFAULT_MODEL } from '../../shared/ai'
@@ -77,6 +78,8 @@ interface TriageGate {
   key: string
   model: string
   rules: DescribedSplitRule[]
+  /** The questions these rules ask: `splitId:descriptionHash` joined, in order. */
+  rulesKey: string
 }
 
 interface WorkRow {
@@ -88,11 +91,20 @@ interface WorkRow {
  * What one conversation has spent of its retry budget. The record outlives the
  * pass that made it: the defect it fixes was a pack dropped for the rest of the
  * session while the status counted its conversations as still pending.
+ *
+ * It names the inputs the failed attempt was judged against, so it stops
+ * applying once a reply arrives or a description is edited. A record kept on
+ * the thread id alone held a conversation out of the queue even after the
+ * question, or the evidence to answer it with, had changed.
  */
 interface FailureRecord {
   attempts: number
   nextAttemptAt: number
   cause: SplitTriageFailureCause
+  /** The thread's latest message id when the attempt failed. */
+  evidenceKey: string
+  /** The described splits that attempt asked about. */
+  rulesKey: string
 }
 
 interface PriorityRequest {
@@ -189,6 +201,30 @@ export function readTriageThread(db: Db, accountId: string, threadId: string): T
   }
 }
 
+/** The questions a gate asks, in rule order. A judgment answers exactly these. */
+function rulesKeyOf(rules: readonly DescribedSplitRule[]): string {
+  return rules.map((rule) => `${rule.splitId}:${rule.descriptionHash}`).join('|')
+}
+
+/**
+ * Whether the consent captured before a wait is still the consent in force.
+ * The rules compare by identity, prose and name, in order: the request carries
+ * the split's name, so a rename asks a different question.
+ */
+function sameGate(captured: TriageGate, current: TriageGate): boolean {
+  if (captured.key !== current.key || captured.model !== current.model) return false
+  if (captured.rules.length !== current.rules.length) return false
+  return captured.rules.every((rule, index) => {
+    const other = current.rules[index]
+    return (
+      other !== undefined &&
+      rule.splitId === other.splitId &&
+      rule.descriptionHash === other.descriptionHash &&
+      rule.name === other.name
+    )
+  })
+}
+
 export class SplitTriage {
   private readonly db: Db
   private readonly accountId: string
@@ -266,7 +302,7 @@ export class SplitTriage {
    */
   failedThreadIds(): ReadonlySet<string> {
     const ids = new Set<string>()
-    for (const [threadId, record] of this.failures) {
+    for (const { threadId, record } of this.applicableFailures()) {
       if (record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS) ids.add(threadId)
     }
     return ids
@@ -275,7 +311,7 @@ export class SplitTriage {
   /** The distinct causes behind those conversations, for the surface to name. */
   failedCauses(): SplitTriageFailureCause[] {
     const causes = new Set<SplitTriageFailureCause>()
-    for (const record of this.failures.values()) {
+    for (const { record } of this.applicableFailures()) {
       if (record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS) causes.add(record.cause)
     }
     return [...causes].sort()
@@ -344,7 +380,19 @@ export class SplitTriage {
     if (!settings.triageEnabled) return null
     const rules = describedSplitRules(this.db, this.accountId)
     if (rules.length === 0) return null
-    return { key, model: settings.triageModel ?? TYPESAFE_DEFAULT_MODEL, rules }
+    const model = settings.triageModel ?? TYPESAFE_DEFAULT_MODEL
+    return { key, model, rules, rulesKey: rulesKeyOf(rules) }
+  }
+
+  /**
+   * Whether the consent a pack was claimed under still holds. The gate is read
+   * again after every wait: withdrawing consent, replacing the key, changing
+   * the model or editing a description while a request sleeps on a rate limit
+   * must stop the retry rather than send the captured request.
+   */
+  private gateUnchanged(gate: TriageGate): boolean {
+    const current = this.gate()
+    return current !== null && sameGate(gate, current)
   }
 
   private async runPass(): Promise<void> {
@@ -393,24 +441,81 @@ export class SplitTriage {
     this.retryTimer = null
   }
 
-  /** True while this thread is out of the queue: backing off, or given up on. */
-  private isBlocked(threadId: string): boolean {
-    const record = this.failures.get(threadId)
+  /** Whether this record still holds its conversation out of the queue. */
+  private stillBlocking(record: FailureRecord, now: number): boolean {
+    return record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS || record.nextAttemptAt > now
+  }
+
+  /**
+   * True while this thread is out of the queue: backing off, or given up on.
+   * A record answers for the evidence and the questions it was made against,
+   * so a reply or an edited description puts the conversation straight back.
+   */
+  private isBlocked(gate: TriageGate, row: WorkRow): boolean {
+    const record = this.failures.get(row.threadId)
     if (!record) return false
-    return record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS || record.nextAttemptAt > this.time.now()
+    if (record.rulesKey !== gate.rulesKey || record.evidenceKey !== row.latestMessageId) return false
+    return this.stillBlocking(record, this.time.now())
+  }
+
+  /** Every record still asking the current questions. The rest are forgotten. */
+  private liveFailures(rulesKey: string): { threadId: string; record: FailureRecord }[] {
+    const live: { threadId: string; record: FailureRecord }[] = []
+    for (const [threadId, record] of [...this.failures]) {
+      if (record.rulesKey === rulesKey) live.push({ threadId, record })
+      else this.failures.delete(threadId)
+    }
+    return live
+  }
+
+  /**
+   * The records that still describe work nobody is doing: the same questions,
+   * against the same latest message the failed attempt read. The status calls
+   * these conversations failed, so a record whose inputs changed must not
+   * appear — the next pass judges that conversation without a user retry.
+   */
+  private applicableFailures(): { threadId: string; record: FailureRecord }[] {
+    const live = this.liveFailures(rulesKeyOf(describedSplitRules(this.db, this.accountId)))
+    if (live.length === 0) return []
+    // One query for every id: mail arrives between passes, so the evidence a
+    // record names is checked against the store rather than assumed current.
+    const rows = this.db
+      .prepare(
+        `SELECT thread_id, latest_message_id
+         FROM (${triageCandidateSql('AND t.id IN (SELECT value FROM json_each(?))')})`
+      )
+      .all(this.accountId, JSON.stringify(live.map(({ threadId }) => threadId))) as {
+      thread_id: string
+      latest_message_id: string | null
+    }[]
+    const latest = new Map(rows.map((row) => [row.thread_id, row.latest_message_id]))
+    return live.filter(({ threadId, record }) => latest.get(threadId) === record.evidenceKey)
   }
 
   /**
    * Charge one attempt to this conversation and put it back after its backoff.
-   * Past the budget it leaves the queue for good, and the status says so.
+   * Past the budget it leaves the queue for good, and the status says so. The
+   * budget belongs to the attempt's inputs, not to the thread id: a new message
+   * or an edited description starts the ladder again from one.
    */
-  private recordFailure(threadId: string, cause: SplitTriageFailureCause): void {
-    const attempts = (this.failures.get(threadId)?.attempts ?? 0) + 1
+  private recordFailure(gate: TriageGate, row: WorkRow, cause: SplitTriageFailureCause): void {
+    const previous = this.failures.get(row.threadId)
+    const spent =
+      previous && previous.rulesKey === gate.rulesKey && previous.evidenceKey === row.latestMessageId
+        ? previous.attempts
+        : 0
+    const attempts = spent + 1
     const step = Math.min(attempts, SPLIT_TRIAGE_FAILURE_BACKOFF_MS.length) - 1
     const backoff = SPLIT_TRIAGE_FAILURE_BACKOFF_MS[step] ?? 0
-    this.failures.set(threadId, { attempts, cause, nextAttemptAt: this.time.now() + backoff })
+    this.failures.set(row.threadId, {
+      attempts,
+      cause,
+      nextAttemptAt: this.time.now() + backoff,
+      evidenceKey: row.latestMessageId,
+      rulesKey: gate.rulesKey
+    })
     if (attempts === SPLIT_TRIAGE_MAX_ATTEMPTS) {
-      this.log('warn', `[triage] gave up on conversation ${threadId} after ${attempts} attempts`)
+      this.log('warn', `[triage] gave up on conversation ${row.threadId} after ${attempts} attempts`)
     }
   }
 
@@ -418,12 +523,15 @@ export class SplitTriage {
     const rows: WorkRow[] = []
     const seen = new Set<string>()
     const waiting = [...this.priorityThreads]
-      .filter((threadId) => !this.inFlight.has(threadId) && !this.isBlocked(threadId))
+      .filter((threadId) => !this.inFlight.has(threadId))
       .slice(0, SPLIT_TRIAGE_BATCH_SIZE)
     if (waiting.length > 0) {
       for (const row of this.selectWork(gate, waiting, SPLIT_TRIAGE_BATCH_SIZE)) {
-        rows.push(row)
         seen.add(row.threadId)
+        // A blocked thread stays in `priorityThreads`, so the backlog query
+        // below leaves it alone too; its timer, not this batch, brings it back.
+        if (this.isBlocked(gate, row)) continue
+        rows.push(row)
       }
       // A waiting thread the query does not return needs no judgment — it is
       // already answered, or it left the Inbox. Release its caller now.
@@ -446,17 +554,17 @@ export class SplitTriage {
    */
   private selectWork(gate: TriageGate, threadIds: string[] | null, limit: number): WorkRow[] {
     if (limit <= 0) return []
-    // A whole Inbox can be backing off at once, so the exclusion travels as one
-    // JSON parameter rather than one bound id per thread.
-    const excluded = threadIds
+    // A whole Inbox can be backing off at once, so each exclusion travels as
+    // one JSON parameter rather than one bound id per thread.
+    const busy = threadIds ? [] : [...new Set([...this.inFlight, ...this.priorityThreads])]
+    // A failure names the evidence it answered for, so it takes the thread out
+    // of the queue only while that message is still the latest one.
+    const now = this.time.now()
+    const backingOff = threadIds
       ? []
-      : [
-          ...new Set([
-            ...[...this.failures.keys()].filter((threadId) => this.isBlocked(threadId)),
-            ...this.inFlight,
-            ...this.priorityThreads
-          ])
-        ]
+      : this.liveFailures(gate.rulesKey)
+          .filter(({ record }) => this.stillBlocking(record, now))
+          .map(({ threadId, record }) => ({ t: threadId, e: record.evidenceKey }))
     const params: unknown[] = [this.accountId]
     const filters: string[] = []
     if (threadIds) {
@@ -467,15 +575,27 @@ export class SplitTriage {
       threadId: 'candidate.thread_id',
       evidenceKey: 'candidate.latest_message_id'
     })
-    const exclusion = excluded.length > 0 ? 'AND thread_id NOT IN (SELECT value FROM json_each(?))' : ''
-    const exclusionParams = excluded.length > 0 ? [JSON.stringify(excluded)] : []
+    const busyFilter = busy.length > 0 ? 'AND thread_id NOT IN (SELECT value FROM json_each(?))' : ''
+    const backoffFilter =
+      backingOff.length > 0
+        ? `AND NOT EXISTS (
+             SELECT 1 FROM json_each(?) blocked
+             WHERE json_extract(blocked.value, '$.t') = thread_id
+               AND json_extract(blocked.value, '$.e') = latest_message_id
+           )`
+        : ''
+    const exclusionParams = [
+      ...(busy.length > 0 ? [JSON.stringify(busy)] : []),
+      ...(backingOff.length > 0 ? [JSON.stringify(backingOff)] : [])
+    ]
     const rows = this.db
       .prepare(
         `WITH candidate AS (${triageCandidateSql(filters.join(' '))})
          SELECT thread_id, latest_message_id
          FROM candidate
          WHERE latest_message_id IS NOT NULL
-           ${exclusion}
+           ${busyFilter}
+           ${backoffFilter}
            AND (${unanswered.sql})
          ORDER BY sort_at DESC, thread_id DESC
          LIMIT ?`
@@ -493,15 +613,21 @@ export class SplitTriage {
    * seconds cannot afford to sit behind a forty-thread backlog.
    */
   private nextPriorityRow(gate: TriageGate): WorkRow | null {
+    // Whether a thread is blocked depends on the evidence the query returns, so
+    // a blocked one is passed over here rather than filtered out in advance.
+    const skipped = new Set<string>()
     for (;;) {
-      if (this.priorityThreads.size === 0) return null
-      const threadId = [...this.priorityThreads].find((id) => !this.inFlight.has(id) && !this.isBlocked(id))
+      const threadId = [...this.priorityThreads].find((id) => !this.inFlight.has(id) && !skipped.has(id))
       if (!threadId) return null
       const [row] = this.selectWork(gate, [threadId], 1)
-      if (row) return row
-      // Already answered, or gone from the Inbox: release its caller and look
-      // at the next one. `settleThread` drops it, so this terminates.
-      this.settleThread(threadId, false)
+      if (!row) {
+        // Already answered, or gone from the Inbox: release its caller and look
+        // at the next one. `settleThread` drops it, so this terminates.
+        this.settleThread(threadId, false)
+        continue
+      }
+      if (!this.isBlocked(gate, row)) return row
+      skipped.add(threadId)
     }
   }
 
@@ -569,7 +695,7 @@ export class SplitTriage {
       for (const entry of loaded) this.settleThread(entry.row.threadId, false)
     }
     const chargeAll = (cause: SplitTriageFailureCause): void => {
-      for (const entry of loaded) this.recordFailure(entry.row.threadId, cause)
+      for (const entry of loaded) this.recordFailure(gate, entry.row, cause)
     }
     const { state, questions, targets } = buildPackedTriageRequest(
       loaded.map((entry) => entry.state),
@@ -608,7 +734,10 @@ export class SplitTriage {
             return 'ok'
           }
           await this.wait(rateLimitWaitMs(error.retryAfterMs, attempt))
-          if (this.stopped) {
+          // Consent, the key, the model and the descriptions can all change
+          // while we sleep. The captured gate is no authority to ask again, so
+          // the pack goes back unjudged and uncharged.
+          if (!this.gateUnchanged(gate)) {
             settleAll()
             return 'stop'
           }
@@ -632,7 +761,9 @@ export class SplitTriage {
         if (error instanceof TypeSafeRequestError && loaded.length > 1) {
           this.log('warn', `[triage] ${describeError(error)}; retrying ${count} one at a time`)
           for (const [index, entry] of loaded.entries()) {
-            const halted = this.stopped || !this.options.isActive()
+            // Every singleton is a fresh request, so each one asks again
+            // whether the consent that filled this pack still holds.
+            const halted = !this.gateUnchanged(gate)
             if (halted || (await this.judgePack(gate, [entry.row])) === 'stop') {
               // The singleton settled its own row; release the ones never tried.
               for (const rest of loaded.slice(halted ? index : index + 1)) {
