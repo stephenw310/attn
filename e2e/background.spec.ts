@@ -5,10 +5,14 @@ import { expect, test } from './electron'
 import { runPaletteCommand } from './nav'
 
 test('closing the window keeps the app alive until an explicit quit', async ({ app, page }) => {
+  await expect(page.getByTestId('login-screen')).toBeVisible()
   expect(await app.evaluate(({ app: electronApp }) => electronApp.isPackaged)).toBe(false)
 
   if (process.platform === 'win32' || process.platform === 'darwin') {
     await app.evaluate(({ app: electronApp }) => electronApp.emit('activate'))
+    await expect
+      .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()))
+      .toBe(true)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
     await expect
       .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()))

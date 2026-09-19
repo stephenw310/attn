@@ -392,6 +392,15 @@ async function armNotifyingSplit(app: ElectronApplication, page: Page): Promise<
     })
   }, INVITES)
   await runTriagePass(app)
+  // Notifications are suppressed while any app window is focused.
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const window of BrowserWindow.getAllWindows()) window.blur()
+  })
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((win) => win.isFocused()))
+    )
+    .toBe(false)
 }
 
 interface NotifyDecision {
