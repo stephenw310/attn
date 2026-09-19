@@ -30,8 +30,7 @@ describe('styleExampleText', () => {
     '-- The Support Team --\nCompany details',
     'Sent from my iPhone',
     'Get Outlook for Android',
-    'Sent with Attn',
-    'Sent with Attn:'
+    'Sent with Attn'
   ])('removes a plain-text trail starting with %s', (trail) => {
     expect(styleExampleText(`My own answer.\r\n\r\n${trail}`, null)).toBe('My own answer.')
   })
@@ -55,8 +54,7 @@ describe('styleExampleText', () => {
     '<div class="moz-signature">My signature</div>',
     '<div id="AppleMailSignature">My signature</div>',
     '<div id="Signature">My signature</div>',
-    '<div data-attn-signature="footer">Sent with Attn</div>',
-    '<div data-attn-signature="footer">Sent with Attn:</div>'
+    '<div data-attn-signature="footer">Sent with Attn</div>'
   ])('removes structural HTML quotes and signatures: %s', (excluded) => {
     expect(styleExampleText('Flattened copy contains other writing.', `<p>My answer.</p>${excluded}`)).toBe(
       'My answer.'

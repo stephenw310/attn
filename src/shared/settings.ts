@@ -82,12 +82,6 @@ export const LIFETIME_THREAD_CAP_ALL_MAIL = 0
  */
 /** The exact optional footer line and its only link target (F6). */
 export const ATTN_SIGNATURE_LINE = 'Sent with Attn'
-/** The line earlier builds wrote. Saved drafts and sent mail can still contain it. */
-export const LEGACY_ATTN_SIGNATURE_LINE = 'Sent with Attn:'
-
-export function isAttnSignatureLine(line: string): boolean {
-  return line === ATTN_SIGNATURE_LINE || line === LEGACY_ATTN_SIGNATURE_LINE
-}
 export const ATTN_SIGNATURE_URL = 'https://github.com/stephenw310/attn'
 
 export interface AccountSettings {

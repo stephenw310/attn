@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DraftSaveInput } from '../../shared/drafts'
-import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL, isAttnSignatureLine } from '../../shared/settings'
+import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL } from '../../shared/settings'
 import type { Db } from '../db'
 import { textFromRaw } from '../gmail/parse'
 import { readAccountSetting, writeAccountSetting } from '../settings'
@@ -131,7 +131,7 @@ function signatureContainsFooterLine(signatureHtml: string): boolean {
   if (!signature) return false
   return textFromRaw('text/html', signature.innerHTML)
     .split('\n')
-    .some((line) => isAttnSignatureLine(line.trim()))
+    .some((line) => line.trim() === ATTN_SIGNATURE_LINE)
 }
 
 /** Append a visibly separated footer after the signature wrapper, inside the body envelope. */

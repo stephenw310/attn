@@ -1,5 +1,5 @@
 import { type DefaultTreeAdapterTypes, parseFragment } from 'parse5'
-import { isAttnSignatureLine } from '../../shared/settings'
+import { ATTN_SIGNATURE_LINE } from '../../shared/settings'
 
 /** Combined UTF-8 size of both body alternatives, before trimming or parsing. */
 export const STYLE_EXAMPLE_MAX_INPUT_BYTES = 64 * 1024
@@ -69,7 +69,7 @@ function authoredPlainText(text: string): string {
       /^--\s+.*\b(?:team|staff|support|customer (?:care|service))\b.*\s+--$/i.test(line) ||
       /^Sent from my (?:iPhone|iPad|Android|Galaxy\b.*)\s*$/i.test(line) ||
       /^Get Outlook for (?:iOS|Android)\b/i.test(line) ||
-      isAttnSignatureLine(line) ||
+      line === ATTN_SIGNATURE_LINE ||
       /^[-_]{2,}\s*(?:Original|Forwarded) Message\s*[-_]{2,}$/i.test(line) ||
       /^Begin forwarded message:\s*$/i.test(line)
     ) {
