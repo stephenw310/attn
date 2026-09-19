@@ -38,7 +38,7 @@ const AUTOCOMPLETE_DISCLOSURE =
   'sent mail, and ' +
   'content already sent to a provider cannot be recalled.'
 
-export function AiSettingsSection({ onOpenSplits }: { onOpenSplits: () => void }): React.JSX.Element {
+export function AiSettingsSection(): React.JSX.Element {
   const onToast = useShowToast()
   const [settings, setSettings] = useState<AiSettings | null>(null)
   const [confirming, setConfirming] = useState<'enable' | 'autocomplete' | null>(null)
@@ -402,21 +402,6 @@ export function AiSettingsSection({ onOpenSplits }: { onOpenSplits: () => void }
           </div>
         </div>
       )}
-
-      <div className={ROW}>
-        <span className="flex min-w-0 flex-col">
-          <span className="text-sm text-ink">Smart splits</span>
-          <span className={NOTE}>Set up in Split rules: write an AI rule and AI sorts mail into it.</span>
-        </span>
-        <button
-          type="button"
-          data-testid="settings-ai-open-split-rules"
-          onClick={onOpenSplits}
-          className={ACTION_BUTTON}
-        >
-          Open Split rules
-        </button>
-      </div>
     </div>
   )
 }

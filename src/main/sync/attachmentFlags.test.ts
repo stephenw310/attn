@@ -36,11 +36,11 @@ function cursor(db: Db): string | null {
   ).attachment_cursor
 }
 
-function callbacks(): AttachmentFlagCallbacks & {
-  onProgress: ReturnType<typeof vi.fn>
-  onError: ReturnType<typeof vi.fn>
-} {
-  return { onProgress: vi.fn(), onError: vi.fn() }
+function callbacks() {
+  return {
+    onProgress: vi.fn<NonNullable<AttachmentFlagCallbacks['onProgress']>>(),
+    onError: vi.fn<NonNullable<AttachmentFlagCallbacks['onError']>>()
+  }
 }
 
 const NO_PAUSE = { pagePauseMs: 0, foregroundYieldMs: 0 }

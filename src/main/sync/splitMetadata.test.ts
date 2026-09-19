@@ -7,11 +7,11 @@ import { runSplitMetadataRebuild, type SplitMetadataCallbacks } from './splitMet
 const ACCOUNT = 'upgrade@example.com'
 const NO_PAUSE = { requestIntervalMs: 0, pagePauseMs: 0, foregroundYieldMs: 0 }
 
-function callbacks(): SplitMetadataCallbacks & {
-  onProgress: ReturnType<typeof vi.fn>
-  onError: ReturnType<typeof vi.fn>
-} {
-  return { onProgress: vi.fn(), onError: vi.fn() }
+function callbacks() {
+  return {
+    onProgress: vi.fn<NonNullable<SplitMetadataCallbacks['onProgress']>>(),
+    onError: vi.fn<NonNullable<SplitMetadataCallbacks['onError']>>()
+  }
 }
 
 function upgradedStore(cursor = 'split-metadata'): Db {

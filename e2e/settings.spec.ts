@@ -104,9 +104,15 @@ test.describe('settings surface', () => {
     await testInfo.attach('settings scopes', { path: scopesPath, contentType: 'image/png' })
 
     await settings.getByTestId('settings-nav-ai').click()
-    const aiPath = join(artifactDirectory, 'settings-ai.png')
-    await page.screenshot({ path: aiPath })
-    await testInfo.attach('settings-ai', { path: aiPath, contentType: 'image/png' })
+    for (const colorScheme of ['dark', 'light'] as const) {
+      await page.emulateMedia({ colorScheme })
+      await expect(page.locator('html')).toHaveAttribute('data-theme', `dispatch-${colorScheme}`)
+      await page.getByTestId('settings-ai-autocomplete').scrollIntoViewIfNeeded()
+      const aiPath = join(artifactDirectory, `settings-ai-${colorScheme}.png`)
+      await page.screenshot({ path: aiPath })
+      await testInfo.attach(`settings-ai-${colorScheme}`, { path: aiPath, contentType: 'image/png' })
+    }
+    await page.emulateMedia({ colorScheme: 'dark' })
 
     await page.keyboard.press('Escape')
     await expect(settings).toHaveCount(0)

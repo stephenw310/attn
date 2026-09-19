@@ -84,11 +84,11 @@ function provider(overrides: Partial<MailProvider> = {}): MailProvider {
   })
 }
 
-function callbacks(): LifetimeSweepCallbacks & {
-  onProgress: ReturnType<typeof vi.fn>
-  onError: ReturnType<typeof vi.fn>
-} {
-  return { onProgress: vi.fn(), onError: vi.fn() }
+function callbacks() {
+  return {
+    onProgress: vi.fn<NonNullable<LifetimeSweepCallbacks['onProgress']>>(),
+    onError: vi.fn<NonNullable<LifetimeSweepCallbacks['onError']>>()
+  }
 }
 
 async function flush(): Promise<void> {
@@ -533,7 +533,8 @@ describe('lifetime header indexing', () => {
         })
       )
       const waiting = events.onProgress.mock.calls.find(([event]) => event.reason === 'quota-wait')?.[0]
-      expect(waiting.threadsTotal).not.toBe(201)
+      expect(waiting).toBeDefined()
+      expect(waiting?.threadsTotal).not.toBe(201)
     } finally {
       db.close()
     }

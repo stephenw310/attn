@@ -67,7 +67,7 @@ test.use({ seed: 'fixtures/seed-inbox.json' })
 
 Do not set `ELECTRON_RUN_AS_NODE` for the application under test.
 
-Windows stay hidden by default. `--visible` exposes them for diagnosis. Tests that explicitly request `--hidden` stay hidden. Linux runs use Xvfb when no display exists. The fixture adds `--no-sandbox` on Linux for root or CI.
+Windows stay hidden by default. `--visible` exposes them for diagnosis. Tests that explicitly request `--hidden` stay hidden. Linux runs use Xvfb when no display exists. CI runs functional and performance tests with visible windows inside Xvfb so animation frames and editor selection events remain active. The fixture adds `--no-sandbox` on Linux for root or CI.
 
 The fixture emulates a dark operating-system theme. Theme tests override that preference when they test System mode.
 

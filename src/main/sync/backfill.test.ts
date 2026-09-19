@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import type { Db } from '../db'
 import { GmailApiError } from '../gmail/client'
 import { fakeMailProvider, fakeSchedulerTime } from '../testing/fakes'
-import { planBackfillStart, runInboxBackfill } from './backfill'
+import { type BackfillCallbacks, planBackfillStart, runInboxBackfill } from './backfill'
 import type { ThreadIdPage } from './provider'
 import { ALL_MAIL_WINDOW, INBOX_BODIES_WINDOW, INBOX_METADATA_WINDOW } from './tuning'
 
@@ -38,7 +38,10 @@ function fakeDb(state: FakeSyncState | undefined, existingThreadIds = new Set<st
 
 const emptyResult = { threadCount: 0, inboxThreadIds: [], spamThreadIds: [], trashThreadIds: [] }
 
-let callbacks: { onProgress: ReturnType<typeof vi.fn>; onError: ReturnType<typeof vi.fn> }
+let callbacks: {
+  onProgress: Mock<BackfillCallbacks['onProgress']>
+  onError: Mock<BackfillCallbacks['onError']>
+}
 
 beforeEach(() => {
   callbacks = { onProgress: vi.fn(), onError: vi.fn() }

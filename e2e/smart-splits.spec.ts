@@ -303,16 +303,15 @@ test('turns smart splits on from its card and describes a split in the editor', 
     'Anything from my landlord, such as a rent receipt or a repair notice'
   )
 
-  // AI writing settings only point here; the controls themselves are gone.
+  // Smart splits are configured only in Split rules, not AI writing settings.
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('split-rules')).toHaveCount(0)
   await page.keyboard.press('ControlOrMeta+,')
   await page.getByTestId('settings-nav-ai').click()
   await expect(page.getByTestId('settings-ai')).toBeVisible()
   await expect(page.getByTestId('settings-ai-triage-enabled')).toHaveCount(0)
-  await page.getByTestId('settings-ai-open-split-rules').click()
-  await expect(page.getByTestId('settings-view')).toHaveCount(0)
-  await expect(page.getByTestId('smart-splits-card')).toBeVisible()
+  await expect(page.getByTestId('settings-ai-open-split-rules')).toHaveCount(0)
+  await expect(page.getByTestId('settings-ai')).not.toContainText('Smart splits')
 })
 
 // ---------------------------------------------------------------------------
@@ -393,6 +392,15 @@ async function armNotifyingSplit(app: ElectronApplication, page: Page): Promise<
     })
   }, INVITES)
   await runTriagePass(app)
+  // Notifications are suppressed while any app window is focused.
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const window of BrowserWindow.getAllWindows()) window.blur()
+  })
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((win) => win.isFocused()))
+    )
+    .toBe(false)
 }
 
 interface NotifyDecision {

@@ -38,7 +38,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 function bodyDb(
   row: { body_text: string | null; body_html: string | null },
-  write: ReturnType<typeof vi.fn>
+  write: (...args: unknown[]) => void
 ): Db {
   return {
     prepare: (sql: string) => ({

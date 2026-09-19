@@ -1,26 +1,31 @@
 # Attn
 
-Attn is a desktop Gmail client for macOS and Windows. It uses Electron, React, TypeScript, and SQLite.
+A desktop Gmail client built around keyboard shortcuts and offline mail. For macOS and Windows.
+
+[Get started](#get-started) · [Keyboard shortcuts](#use-the-keyboard) · [Data and privacy](#data-and-privacy) · [Contribute](#contribute)
 
 <img src="docs/images/inbox-light.png" alt="The Attn inbox with the mailbox sidebar, a conversation list, and the keyboard shortcut bar">
 
-Read cached mail, write drafts, and organize your inbox without a network connection. Attn saves changes locally and syncs them with Gmail when the connection returns. Keyboard commands cover the main mail actions.
+Read cached mail, write drafts, and organize your inbox without a network connection. Changes save locally and sync with Gmail when you reconnect. Use the command palette to find actions without leaving the keyboard.
 
-Attn is a developer preview. No installer is published. Build Attn from source and connect Gmail with your own Google OAuth client. See [Get started](#get-started).
+> **Developer preview.** Build from source with your own Google OAuth client. No installer is published. Google projects in Testing status require sign-in again after seven days. See [Get started](#get-started).
 
 ## What you can do
 
-- Add multiple Gmail accounts and switch between separate inboxes.
-- Archive, snooze, label, move, and undo actions on one or more conversations.
-- Write rich-text messages with attachments, saved snippets, and Gmail signatures.
-- Save drafts locally, sync drafts with Gmail, and cancel sends during the undo-send delay.
-- Search cached mail or submit a search to Gmail for older mail.
-- Create inbox splits with rules and set follow-up reminders. You can also describe a split in plain words
-  and let TypeSafe sort mail into it with your own key. Turn smart splits on in Split rules.
-- Use desktop notifications, unread badges, and light or dark themes.
-- Enable AI reply drafts or inline autocomplete with your own provider. Both are optional.
+- Work from the keyboard. Navigate conversations, archive, snooze, label, and undo actions, including bulk changes.
+- Keep accounts separate. Switch between Gmail inboxes while your other accounts continue to sync.
+- Write and send. Use rich text, attachments, saved snippets, Gmail signatures, and an undo-send delay. Drafts save locally and sync with Gmail.
+- Find and organize mail. Search cached messages, search Gmail for older mail, create inbox splits with rules, and set follow-up reminders.
+- Make it your own. Choose light or dark themes, desktop notifications, and unread badges.
+- Add optional AI. Use your own provider for reply drafts and inline autocomplete. Smart splits use a separate TypeSafe key to sort mail from a description you write.
 
-Calendar, Outlook, IMAP, a unified inbox, and scheduled send are not supported. Linux can run the test suite, but it is not a supported product target.
+Attn has no hosted mail backend or telemetry. AI features are off by default. See [Data and privacy](#data-and-privacy) for storage and external connections.
+
+## Current limits
+
+Attn supports Gmail on macOS and Windows. Calendar, Outlook, IMAP, a unified inbox, and scheduled send are not supported. Linux can run the test suite, but it is not a supported product target.
+
+Read the [known issues](docs/KNOWN-ISSUES.md) for recorded defects and workarounds.
 
 ## Get started
 
@@ -143,9 +148,13 @@ Snooze and follow-up timers run locally. If Attn is closed when a reminder becom
 
 ## Contribute
 
+Attn uses Electron, React, TypeScript, and SQLite.
+
 Read [AGENTS.md](AGENTS.md) for the code structure and development rules. Read the [product specification](docs/SPEC.md) for expected behavior.
 
 Follow the [verification requirements](AGENTS.md#verify-the-change) before submitting a change. Use the [test guide](docs/TESTING.md#choose-a-command) to select commands and diagnose failures.
+
+You can contribute bug reports, documentation fixes, or code changes. [Open an issue](https://github.com/stephenw310/attn/issues) to report a bug or propose a feature.
 
 For a bug report, include the operating system, Attn version, steps to reproduce, expected result, and actual result. Remove mail content, addresses, tokens, and API keys from logs and screenshots.
 

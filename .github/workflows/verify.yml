@@ -97,7 +97,8 @@ jobs:
       # Each runner keeps one Electron worker (see playwright.config.ts), while
       # Playwright distributes the complete functional suite across four jobs.
       - name: Run Electron smoke tests
-        run: npm run e2e -- --shard=${{ matrix.shard }}/4
+        # Visible windows inside Xvfb keep animation frames and editor selection events active.
+        run: npm run e2e -- --visible --shard=${{ matrix.shard }}/4
 
       # `retries: 1` in CI turns a flake into a green run. The JSON reporter
       # records it; this prints it so the job log says so out loud.

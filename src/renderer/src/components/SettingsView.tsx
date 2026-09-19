@@ -588,7 +588,7 @@ export function SettingsView({
 
               <section hidden={page !== 'ai'} data-testid="settings-ai" aria-label="AI writing">
                 <SectionTitle>AI writing</SectionTitle>
-                <AiSettingsSection onOpenSplits={onOpenSplits} />
+                <AiSettingsSection />
               </section>
 
               <section hidden={page !== 'snippets'} data-testid="settings-snippets" aria-label="Snippets">
