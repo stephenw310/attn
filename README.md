@@ -2,10 +2,7 @@
 
 Attn is a desktop Gmail client for macOS and Windows. It uses Electron, React, TypeScript, and SQLite.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/inbox-dark.png">
-  <img src="docs/images/inbox-light.png" alt="The Attn inbox with the mailbox sidebar, a conversation list, and the keyboard shortcut bar">
-</picture>
+<img src="docs/images/inbox-light.png" alt="The Attn inbox with the mailbox sidebar, a conversation list, and the keyboard shortcut bar">
 
 Read cached mail, write drafts, and organize your inbox without a network connection. Attn saves changes locally and syncs them with Gmail when the connection returns. Keyboard commands cover the main mail actions.
 
