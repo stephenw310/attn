@@ -3,7 +3,8 @@ import {
   type AccountSyncStatus,
   type AuthSignInResult,
   type AuthStatus,
-  isSignInCanceled
+  isSignInCanceled,
+  signInErrorMessage
 } from '../../../shared/auth'
 import { clearAccountView } from '../accountViewMemory'
 import { actionReconnectMessage } from '../actionReconnect'
@@ -100,7 +101,7 @@ export function useAccountSession(options: Options): AccountSession {
     } catch (reason) {
       // A canceled or superseded sign-in is not a failure worth a toast.
       if (!isSignInCanceled(reason)) {
-        void showToast(reason instanceof Error ? reason.message : 'Could not reconnect Google')
+        void showToast(signInErrorMessage(reason, 'Could not reconnect Google'))
       }
       return null
     }
