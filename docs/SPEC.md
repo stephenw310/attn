@@ -671,8 +671,8 @@ Settings and the palette expose:
 - Snippet manager and theme. The split-rule manager opens from its columns icon beside the Inbox splits.
 - Background behavior: launch at login and the macOS menu-bar icon while the window is open (F16).
 - AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
-- Smart splits: the AI writing page links to Split rules, which holds their consent, their TypeSafe key,
-  and their judgment model (F11, F17).
+- Smart splits: Split rules holds their consent, their TypeSafe key, and their judgment model (F11, F17).
+  The AI writing page contains no smart-splits controls or link.
 - Keyboard cheat sheet (`Mod+/`).
 
 Label account-specific controls with the owning email; other preferences apply app-wide. Settings reuse
@@ -786,7 +786,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   latest message. It also states that judgments run in the background without a command, unlike reply
   drafting. Removing the TypeSafe key withdraws the consent and stops the classifier; it touches neither the
   writing key nor the OAuth credentials. The consent, the key, and the model live in the Split rules
-  manager, beside the descriptions they judge; the AI writing settings page only links there. A described
+  manager, beside the descriptions they judge. They do not appear on the AI writing settings page. A described
   split's row reads `AI rule · paused` while smart splits are off.
 - **Never auto-sends.** Accepted autocomplete text and generated replies use the normal editable draft
   and send flow, undo send included. Unaccepted suggestions are never sent.
