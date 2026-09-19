@@ -419,6 +419,7 @@ describe('split save validation and triage status', () => {
       await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
         enabled: false,
         keyPresent: false,
+        keyRefused: false,
         describedSplits: 0,
         judgedThreads: 0,
         pendingThreads: 0,
@@ -436,6 +437,7 @@ describe('split save validation and triage status', () => {
       await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
         enabled: true,
         keyPresent: false,
+        keyRefused: false,
         describedSplits: 1,
         judgedThreads: 0,
         pendingThreads: 1,
@@ -455,6 +457,7 @@ describe('split save validation and triage status', () => {
     const splitTriage = {
       failedThreadIds: () => new Set(['waiting']),
       failedCauses: () => ['rejected'],
+      keyRefused: () => true,
       retryFailed
     }
     const handlers = createServiceHandlers({
@@ -473,6 +476,8 @@ describe('split save validation and triage status', () => {
       await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
         enabled: true,
         keyPresent: false,
+        // The session was told this key is bad, so the card reads as paused.
+        keyRefused: true,
         describedSplits: 1,
         judgedThreads: 0,
         pendingThreads: 0,

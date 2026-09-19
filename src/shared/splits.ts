@@ -84,6 +84,8 @@ export type SplitTriageFailureCause = 'rate-limited' | 'rejected'
 export interface SplitTriageStatus {
   enabled: boolean
   keyPresent: boolean
+  /** True while the stored key is the one the service refused. Nothing judges. */
+  keyRefused: boolean
   describedSplits: number
   judgedThreads: number
   /** Conversations still queued. It excludes the ones the pass gave up on. */

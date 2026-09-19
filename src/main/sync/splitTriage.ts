@@ -309,6 +309,15 @@ export class SplitTriage {
     return this.gate() !== null
   }
 
+  /**
+   * Whether the key in force is the one the service refused. Nothing is being
+   * judged while this holds, so the surface reports a pause rather than
+   * progress that is not happening.
+   */
+  keyRefused(): boolean {
+    return this.authFailedKey !== null && this.authFailedKey === this.options.triageKey()
+  }
+
   /** Resolves when no pass is running. The e2e seam awaits this. */
   async settled(): Promise<void> {
     while (this.pass) await this.pass
@@ -773,14 +782,27 @@ export class SplitTriage {
           time: this.time,
           signal: this.abort.signal
         })
+        // A rule added while the request was in flight is absent from the
+        // answers, so no target is skipped and nothing else would report the
+        // pack as incomplete. Only the rules decide whether the questions it
+        // answered are still the questions in force: an answer written under
+        // an earlier key or model is still an answer, and a thread whose rules
+        // did not change is not pending, so a retry there would end unjudged.
+        const gateHeld = this.gate()?.rulesKey === gate.rulesKey
+        const reports: LateJudgment[] = []
         loaded.forEach((entry, threadIndex) => {
           const { skipped } = this.writeJudgments(entry.row, threadIndex, targets, probabilities)
           // A skipped target is a question the pack answered and the user has
           // since changed. The conversation is still pending under the rules in
           // force, so its wait outlives this answer and the next pass re-asks.
-          const outcome = skipped === 0 ? 'judged' : 'retry'
-          this.settleThread(entry.row.threadId, outcome, entry.row.latestMessageId)
+          const outcome = skipped === 0 && gateHeld ? 'judged' : 'retry'
+          const late = this.settleThread(entry.row.threadId, outcome, entry.row.latestMessageId)
+          if (late) reports.push(late)
         })
+        // One response, one report. Reporting each thread as it settled sent
+        // a pack's late arrivals to the notifier as singletons, which never
+        // reach the summary threshold a single poll cycle would.
+        if (reports.length > 0) this.options.onLateJudgment(reports)
         this.maybeBroadcast()
         return 'ok'
       } catch (error) {
@@ -972,12 +994,18 @@ export class SplitTriage {
    *
    * `'gone'` is an answer nobody is bringing: the conversation left the Inbox,
    * it is already judged, or the service refused it. Every wait is released.
+   *
+   * It returns the late report this settle earned, or null. The caller sends
+   * one batch per response: every waiting caller it released already knows,
+   * and the notifier needs the arrivals of one answer together to summarize
+   * them the way a poll cycle's arrivals are summarized.
    */
-  private settleThread(threadId: string, outcome: SettleOutcome, evidenceKey?: string): void {
-    if (outcome === 'retry') return
+  private settleThread(threadId: string, outcome: SettleOutcome, evidenceKey?: string): LateJudgment | null {
+    if (outcome === 'retry') return null
     // An answer spends the budget back: the next failure starts the ladder again.
     if (outcome === 'judged') this.failures.delete(threadId)
     let stillWaiting = false
+    let late: LateJudgment | null = null
     for (const request of [...this.priority]) {
       if (!request.pending.has(threadId)) continue
       const waited = request.evidence.get(threadId)
@@ -986,11 +1014,11 @@ export class SplitTriage {
         continue
       }
       request.pending.delete(threadId)
-      // A judgment that lands after the deadline reports at once. The rest of
-      // its group may still be on a retry, or expire first, and neither should
-      // hold back an answer that already qualifies for a notification.
+      // A judgment that lands after the deadline is reported for this pack.
+      // The rest of its group may still be on a retry, or expire first, and
+      // neither holds back an answer that already qualifies for a notification.
       if (outcome === 'judged' && request.resolved && waited !== undefined) {
-        this.options.onLateJudgment([{ threadId, messageId: waited }])
+        late ??= { threadId, messageId: waited }
       }
       if (request.pending.size > 0) continue
       const index = this.priority.indexOf(request)
@@ -1001,6 +1029,7 @@ export class SplitTriage {
       }
     }
     if (!stillWaiting) this.priorityThreads.delete(threadId)
+    return late
   }
 
   /**

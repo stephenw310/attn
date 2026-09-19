@@ -1018,6 +1018,9 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       ...counts,
       failedCauses: counts.failedThreads > 0 ? (triage?.failedCauses() ?? []) : [],
       enabled: readAiStoredSettings(context.db).triageEnabled,
+      // The refusal is the session's, so it reads from the pass rather than
+      // from main: main holds the key, but only the pass was told it is bad.
+      keyRefused: triage?.keyRefused() ?? false,
       keyPresent: false
     }
   })

@@ -19,9 +19,13 @@ export const TRIAGE_DISCLOSURE =
 
 const OFF_NOTE = 'Off · Write an AI rule in your own words and AI sorts mail into it.'
 
+const PAUSED_NOTE = 'On · paused: the TypeSafe key was refused. Save a different key.'
+
 /** The one line that reports the classifier's progress. */
 export function describeTriageStatus(status: SplitTriageStatus | null): string {
   if (!status?.enabled) return OFF_NOTE
+  // A refused key stops every request, so the queue is paused, not moving.
+  if (status.keyRefused) return PAUSED_NOTE
   if (status.describedSplits === 0) return 'On · no AI rules yet'
   const splits = `${status.describedSplits} AI rule${status.describedSplits === 1 ? '' : 's'}`
   const failed = status.failedThreads

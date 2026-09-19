@@ -378,7 +378,8 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
     return window.attn?.mail.onChanged(reloadTriage)
   }, [reloadTriage])
 
-  const judging = (triageStatus?.pendingThreads ?? 0) > 0
+  // A refused key is a pause, not progress: nothing judges, so nothing polls.
+  const judging = (triageStatus?.pendingThreads ?? 0) > 0 && !(triageStatus?.keyRefused ?? false)
   useEffect(() => {
     if (!judging) return
     const timer = setInterval(reloadTriage, SPLIT_TRIAGE_STATUS_POLL_MS)

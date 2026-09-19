@@ -593,7 +593,8 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   sync, and an app update.
 - Attn sends no smart-splits request while the consent is off, the key is absent, or no split holds a
   description. Withdrawing consent stops the classifier at the next batch.
-- A refused key stops the classifier until the user saves a different key. A rate limit makes it wait and
+- A refused key stops the classifier until the user saves a different key. The card reports that refusal as
+  a pause and names the remedy, instead of reporting judgments in progress. A rate limit makes it wait and
   try again; a rate limit that outlasts the ladder charges the conversation's own retry budget. A lost
   network makes it retry later. None of these lose a stored judgment.
 - A rejected request never strands a conversation. The classifier asks again for each conversation of the

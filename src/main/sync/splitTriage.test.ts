@@ -1005,6 +1005,76 @@ describe('split triage pass', () => {
     expect(late).toHaveLength(1)
   })
 
+  it('reports one response of late judgments as one batch', async () => {
+    const waited = ['t-1', 't-2', 't-3', 't-4']
+    waited.forEach((threadId, index) => {
+      insertThread('account', threadId, `Invoice ${index}`, [{ id: `m-${index}`, at: 400 - index }])
+    })
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const held: Array<() => void> = []
+    const triage = makeTriage(
+      'account',
+      heldTransport(held, () => 0.9)
+    )
+
+    const waiting = triage.judgeNow(waited, 2_000)
+    await flush()
+    // One request carries the whole group, so one answer settles all four.
+    expect(held).toHaveLength(1)
+
+    timers.fire(2_000)
+    await waiting
+    expect(late).toEqual([])
+
+    held[0]()
+    await triage.settled()
+    // Four arrivals of one answer reach the notifier together. Reported one at
+    // a time they stay singletons, and no batch ever meets the summary
+    // threshold a single poll cycle of the same four arrivals would.
+    expect(late).toHaveLength(1)
+    expect([...(late[0] ?? [])].sort((a, b) => a.threadId.localeCompare(b.threadId))).toEqual([
+      { threadId: 't-1', messageId: 'm-0' },
+      { threadId: 't-2', messageId: 'm-1' },
+      { threadId: 't-3', messageId: 'm-2' },
+      { threadId: 't-4', messageId: 'm-3' }
+    ])
+  })
+
+  it('keeps a wait open when an AI rule is added while its request is in flight', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const held: Array<() => void> = []
+    const triage = makeTriage(
+      'account',
+      heldTransport(held, () => 0.9)
+    )
+
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+    expect(held).toHaveLength(1)
+
+    // The new rule asks a question this request never carried, so its answer
+    // leaves the conversation pending however complete it looks.
+    describedSplit('account', 'Landlord', 'Anything from my landlord')
+    held[0]()
+    await flush()
+    expect(judgments('account').map((row) => row.split_id)).toHaveLength(1)
+    expect(resolved).toBe(false)
+
+    // The next batch re-reads the gate and asks both questions, with the wait
+    // still on the conversation.
+    expect(held).toHaveLength(2)
+    held[1]()
+    await waiting
+    await triage.settled()
+    expect(resolved).toBe(true)
+    expect(judgments('account')).toHaveLength(2)
+    expect(late).toEqual([])
+  })
+
   it('drops a wait older than the late-notification window at the end of a pass', async () => {
     insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
     describedSplit('account', 'Invoices', 'Bills I have to pay')
