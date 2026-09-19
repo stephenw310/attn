@@ -26,7 +26,7 @@ import { deleteSetting, readSetting, settingEnabled, writeSetting } from '../set
 import { getSplitState, hasSplitSetup } from '../splits'
 import { historyEvents, type NewMail } from '../sync/poller'
 import type { ServerSearchProvider } from '../sync/serverSearch'
-import { SplitTriage } from '../sync/splitTriage'
+import { type LateJudgment, SplitTriage } from '../sync/splitTriage'
 import {
   DEFAULT_GMAIL_QUOTA_UNITS_PER_MINUTE,
   SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS,
@@ -493,7 +493,13 @@ export class ServiceRuntime {
   }
 
   private emitNotificationCandidates(accountId: string, newMail: readonly NewMail[]): void {
-    const candidates = candidatesFor(this.db, accountId, newMail)
+    // A message a late judgment already announced must not be announced again
+    // by the poll that follows it. The event still goes out, so a decision is
+    // always recorded — it just carries nothing for that message.
+    const fresh = newMail.filter(
+      (mail) => !this.notifiedMessageIds.has(notifiedKey(accountId, mail.messageId))
+    )
+    const candidates = candidatesFor(this.db, accountId, fresh)
     this.rememberNotified(accountId, candidates)
     this.emit({
       kind: 'notification-candidates',
@@ -508,7 +514,7 @@ export class ServiceRuntime {
    * went ahead. The Inbox has already moved the thread; this asks whether the
    * arrival should also have notified, and emits only what was never emitted.
    */
-  private emitLateNotificationCandidates(accountId: string, threadIds: readonly string[]): void {
+  private emitLateNotificationCandidates(accountId: string, threads: readonly LateJudgment[]): void {
     if (!this.sessions.has(accountId)) return
     const latestUnread = this.db.prepare(
       `SELECT m.id AS message_id, m.internal_date AS internal_date
@@ -520,16 +526,19 @@ export class ServiceRuntime {
     )
     const now = this.time.now()
     const newMail: NewMail[] = []
-    for (const threadId of threadIds) {
+    for (const { threadId, messageId } of threads) {
       const row = latestUnread.get(accountId, threadId) as
         | { message_id: string; internal_date: number | null }
         | undefined
       if (!row?.internal_date) continue
+      // The judgment answered for one message. A newer arrival owns the
+      // conversation now, and it has a wait and a decision of its own.
+      if (row.message_id !== messageId) continue
       // Past this age the arrival is history: the judgment still moves the
       // thread, but a notification for it would arrive out of nowhere.
       if (now - row.internal_date > SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS) continue
-      if (this.notifiedMessageIds.has(notifiedKey(accountId, row.message_id))) continue
-      newMail.push({ threadId, messageId: row.message_id })
+      if (this.notifiedMessageIds.has(notifiedKey(accountId, messageId))) continue
+      newMail.push({ threadId, messageId })
     }
     if (newMail.length === 0) return
     const candidates = candidatesFor(this.db, accountId, newMail)
@@ -645,7 +654,7 @@ export class ServiceRuntime {
       // A judgment only moves a conversation between Inbox splits, so the
       // renderer updates the split counts in place instead of reloading.
       onAssignmentsChanged: () => this.broadcastMailChanged(id, undefined, 'split-judgments'),
-      onLateJudgment: (threadIds) => this.emitLateNotificationCandidates(id, threadIds),
+      onLateJudgment: (threads) => this.emitLateNotificationCandidates(id, threads),
       log: (level, message) => this.log(level, message)
     })
     const session: AccountSession = {

@@ -632,7 +632,7 @@ describe('ServiceRuntime with several accounts', () => {
   }
 
   /** A reply landing on the seeded thread: new evidence, so a fresh judgment. */
-  function appendReply(dbPath: string): void {
+  function appendReply(dbPath: string, messageId = 'm-alpha-2'): void {
     const db = openDatabase(dbPath)
     // The seed stamps the original message at 09:00 today, so a reply stamped
     // with the clock alone is older than its thread before that hour and is
@@ -645,16 +645,25 @@ describe('ServiceRuntime with several accounts', () => {
     db.prepare(
       `INSERT INTO messages (account_id, id, thread_id, from_name, from_email, snippet, internal_date,
                              body_text, recipients_json, attachments_json, labels_json)
-       VALUES ('primary@attn.test', 'm-alpha-2', 't-alpha', 'Ada', 'ada@example.com', 'Reply snippet', ?,
+       VALUES ('primary@attn.test', ?, 't-alpha', 'Ada', 'ada@example.com', 'Reply snippet', ?,
                'More on the roadmap', '{"to":[],"cc":[],"bcc":[],"replyTo":[]}', '[]', '["INBOX","UNREAD"]')`
-    ).run(Math.max(Date.now(), (latest.at ?? 0) + 1_000))
+    ).run(messageId, Math.max(Date.now(), (latest.at ?? 0) + 1_000))
     db.close()
   }
 
-  function notificationEvents(events: ServiceEvent[]): { subjects: string[] }[] {
+  /**
+   * Every notification decision, in order. Both replies share one subject, so
+   * the message id is what says which arrival a decision was about.
+   */
+  function notificationEvents(events: ServiceEvent[]): { subjects: string[]; messageIds: string[] }[] {
     return events.flatMap((event) =>
       event.kind === 'notification-candidates'
-        ? [{ subjects: event.candidates.map((candidate) => candidate.subject) }]
+        ? [
+            {
+              subjects: event.candidates.map((candidate) => candidate.subject),
+              messageIds: event.candidates.map((candidate) => candidate.messageId)
+            }
+          ]
         : []
     )
   }
@@ -673,7 +682,7 @@ describe('ServiceRuntime with several accounts', () => {
 
     // Nothing else notifies for this thread: the candidate exists only because
     // the judgment landed first and moved it into the described split.
-    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'] }])
+    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'], messageIds: ['m-alpha-2'] }])
   })
 
   it('notifies once a judgment lands after the wait has already expired', async () => {
@@ -688,11 +697,52 @@ describe('ServiceRuntime with several accounts', () => {
     // ahead on the assignment the thread has now, which notifies nobody.
     manual.fire(SPLIT_TRIAGE_NOTIFY_WAIT_MS)
     await flushPromises()
-    expect(notificationEvents(events)).toEqual([{ subjects: [] }])
+    expect(notificationEvents(events)).toEqual([{ subjects: [], messageIds: [] }])
 
     await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
     await flushMicrotasks()
-    expect(notificationEvents(events)).toEqual([{ subjects: [] }, { subjects: ['Alpha roadmap'] }])
+    expect(notificationEvents(events)).toEqual([
+      { subjects: [], messageIds: [] },
+      { subjects: ['Alpha roadmap'], messageIds: ['m-alpha-2'] }
+    ])
+
+    // A later poll that reports the same arrival again says nothing: the late
+    // judgment already announced that message.
+    historyEvents.emit('newMail', 'primary@attn.test', ARRIVAL)
+    await flushMicrotasks()
+    expect(notificationEvents(events)).toEqual([
+      { subjects: [], messageIds: [] },
+      { subjects: ['Alpha roadmap'], messageIds: ['m-alpha-2'] },
+      { subjects: [], messageIds: [] }
+    ])
+  })
+
+  it('stays quiet about an arrival a newer message has already replaced', async () => {
+    const manual = new ManualRuntimeTimers()
+    const input = makeInput()
+    const { runtime, events } = await createRuntime(input, manual.time)
+    await armTriage(runtime, { probability: 0.95 })
+    appendReply(input.dbPath)
+
+    historyEvents.emit('newMail', 'primary@attn.test', ARRIVAL)
+    manual.fire(SPLIT_TRIAGE_NOTIFY_WAIT_MS)
+    await flushPromises()
+    expect(notificationEvents(events)).toEqual([{ subjects: [], messageIds: [] }])
+
+    // A second reply lands while the first one's judgment is still in flight.
+    appendReply(input.dbPath, 'm-alpha-3')
+    historyEvents.emit('newMail', 'primary@attn.test', [{ threadId: 't-alpha', messageId: 'm-alpha-3' }])
+
+    await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
+    await flushMicrotasks()
+
+    // The late judgment of m-alpha-2 announces nothing — that arrival is no
+    // longer the one a notification would be about. m-alpha-3 has its own wait,
+    // and its own judgment is what announces the conversation.
+    expect(notificationEvents(events)).toEqual([
+      { subjects: [], messageIds: [] },
+      { subjects: ['Alpha roadmap'], messageIds: ['m-alpha-3'] }
+    ])
   })
 
   it('stays quiet when a late judgment lands on a message that already notified', async () => {
@@ -707,12 +757,12 @@ describe('ServiceRuntime with several accounts', () => {
     historyEvents.emit('newMail', 'primary@attn.test', ARRIVAL)
     manual.fire(SPLIT_TRIAGE_NOTIFY_WAIT_MS)
     await flushPromises()
-    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'] }])
+    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'], messageIds: ['m-alpha-2'] }])
 
     await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
     await flushMicrotasks()
     // The judgment moved the thread; it does not announce it a second time.
-    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'] }])
+    expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'], messageIds: ['m-alpha-2'] }])
   })
 
   it('surfaces notification candidates for inactive accounts, roster members only', async () => {

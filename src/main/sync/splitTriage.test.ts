@@ -5,12 +5,14 @@ import { type Db, openDatabase } from '../db'
 import { deleteSplit, judgmentHash, saveSplit, splitRevision, splitTriageCounts } from '../splits'
 import type { SchedulerTime, TimerHandle } from '../time'
 import { deleteThread } from './persist'
-import { SplitTriage, type SplitTriageOptions } from './splitTriage'
+import { type LateJudgment, SplitTriage, type SplitTriageOptions } from './splitTriage'
 import {
   SPLIT_TRIAGE_BATCH_SIZE,
   SPLIT_TRIAGE_BROADCAST_INTERVAL_MS,
   SPLIT_TRIAGE_FAILURE_BACKOFF_MS,
+  SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS,
   SPLIT_TRIAGE_MAX_ATTEMPTS,
+  SPLIT_TRIAGE_OFFLINE_RETRY_MS,
   SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS
 } from './tuning'
 
@@ -109,7 +111,7 @@ describe('split triage pass', () => {
   let key: string | null
   let recorded: RecordedRequest[]
   let broadcasts: number
-  let late: string[][]
+  let late: LateJudgment[][]
 
   const insertThread = (
     accountId: string,
@@ -189,8 +191,8 @@ describe('split triage pass', () => {
       onAssignmentsChanged: () => {
         broadcasts++
       },
-      onLateJudgment: (threadIds) => {
-        late.push(threadIds)
+      onLateJudgment: (threads) => {
+        late.push(threads)
       },
       ...overrides
     })
@@ -730,7 +732,9 @@ describe('split triage pass', () => {
     for (const release of held) release()
     await triage.settled()
     expect(judgments('account')).toHaveLength(1)
-    expect(late).toEqual([['t-1']])
+    // The report names the message the judgment answered for, so the caller
+    // can check it is still the arrival a notification would be about.
+    expect(late).toEqual([[{ threadId: 't-1', messageId: 'm-1' }]])
   })
 
   it('holds a priority wait open until the message it asked about is judged', async () => {
@@ -805,8 +809,115 @@ describe('split triage pass', () => {
 
     held[1]()
     await triage.settled()
-    expect(late).toEqual([['t-1']])
+    expect(late).toEqual([[{ threadId: 't-1', messageId: 'm-2' }]])
     expect(judgments('account')[0]?.evidence_key).toBe('m-2')
+  })
+
+  it('keeps a waiting conversation queued across a network failure and reports it after the retry', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let offline = true
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) =>
+      offline ? Promise.reject(new Error('connection refused')) : answer(url, init)
+    )
+
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+    expect(judgments('account')).toHaveLength(0)
+    expect(resolved).toBe(false)
+
+    // The caller cannot wait for the network to come back, so its deadline
+    // releases it — but the wait itself stays with the conversation.
+    timers.fire(2_000)
+    await waiting
+    expect(resolved).toBe(true)
+    expect(late).toEqual([])
+
+    offline = false
+    timers.nowMs += SPLIT_TRIAGE_OFFLINE_RETRY_MS
+    timers.fire(SPLIT_TRIAGE_OFFLINE_RETRY_MS)
+    await triage.settled()
+
+    // The offline retry judged the conversation the caller asked about, so the
+    // move into the described split is still reported rather than lost.
+    expect(judgments('account')[0]?.evidence_key).toBe('m-1')
+    expect(late).toEqual([[{ threadId: 't-1', messageId: 'm-1' }]])
+  })
+
+  it('drops a wait older than the late-notification window at the end of a pass', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let offline = true
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) =>
+      offline ? Promise.reject(new Error('connection refused')) : answer(url, init)
+    )
+
+    const waiting = triage.judgeNow(['t-1'], 2_000)
+    await flush()
+    timers.fire(2_000)
+    await waiting
+
+    // The network stays down past the window a late notification could fire
+    // in, so the second failed pass ends the wait.
+    timers.nowMs += SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS + 1
+    timers.fire(SPLIT_TRIAGE_OFFLINE_RETRY_MS)
+    await triage.settled()
+
+    offline = false
+    timers.nowMs += SPLIT_TRIAGE_OFFLINE_RETRY_MS
+    timers.fire(SPLIT_TRIAGE_OFFLINE_RETRY_MS)
+    await triage.settled()
+
+    // The conversation is still judged; nobody is told about it.
+    expect(judgments('account')).toHaveLength(1)
+    expect(late).toEqual([])
+  })
+
+  it('holds a wait open when the answer no longer fits the rules in force', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    const description = 'Bills I have to pay'
+    const invoices = describedSplit('account', 'Invoices', description)
+    const held: Array<() => void> = []
+    const triage = makeTriage(
+      'account',
+      heldTransport(held, () => 0.9)
+    )
+
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+    expect(held).toHaveLength(1)
+
+    // The user renames the split while the question it asked is in flight.
+    saveSplit(db, 'account', {
+      id: invoices,
+      name: 'Bills',
+      mode: 'description',
+      description,
+      notify: true
+    })
+    held[0]()
+    await flush()
+
+    // The answer was to a question nobody asks now, so nothing is stored and
+    // the caller is still waiting for one that counts.
+    expect(judgments('account')).toHaveLength(0)
+    expect(resolved).toBe(false)
+    expect(held).toHaveLength(2)
+
+    held[1]()
+    await waiting
+    await triage.settled()
+    expect(resolved).toBe(true)
+    expect(judgments('account')[0]?.description_hash).toBe(judgmentHash('Bills', description))
+    expect(late).toEqual([])
   })
 
   it('re-judges a conversation when the split is renamed', async () => {

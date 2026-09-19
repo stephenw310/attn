@@ -47,6 +47,7 @@ import {
   SPLIT_TRIAGE_BROADCAST_INTERVAL_MS,
   SPLIT_TRIAGE_CONCURRENCY,
   SPLIT_TRIAGE_FAILURE_BACKOFF_MS,
+  SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS,
   SPLIT_TRIAGE_MAX_ATTEMPTS,
   SPLIT_TRIAGE_OFFLINE_RETRY_MS,
   SPLIT_TRIAGE_PACK_SIZE,
@@ -54,6 +55,20 @@ import {
   SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS,
   SPLIT_TRIAGE_RATE_LIMIT_MAX_WAIT_MS
 } from './tuning'
+
+/**
+ * A judgment that landed after the wait it was asked for, and the message it
+ * answered for. The notification path needs the message id: by the time the
+ * answer arrives a newer arrival can own the conversation, and that arrival
+ * has its own wait and its own decision.
+ */
+export interface LateJudgment {
+  threadId: string
+  messageId: string
+}
+
+/** What became of one conversation this pass claimed. See `settleThread`. */
+type SettleOutcome = 'judged' | 'retry' | 'gone'
 
 export interface SplitTriageOptions {
   db: Db
@@ -71,7 +86,7 @@ export interface SplitTriageOptions {
   /** Called after the split revision is bumped, at most once a second. */
   onAssignmentsChanged: () => void
   /** Threads judged after their `judgeNow` deadline passed. */
-  onLateJudgment: (threadIds: string[]) => void
+  onLateJudgment: (threads: LateJudgment[]) => void
   log?: (level: 'log' | 'warn' | 'error', message: string) => void
 }
 
@@ -115,9 +130,11 @@ interface PriorityRequest {
    * caller asked about that arrival, so only a judgment of it answers the wait.
    */
   evidence: Map<string, string>
-  judgedLate: string[]
+  judgedLate: LateJudgment[]
   resolved: boolean
   resolve: () => void
+  /** When the wait was made, so a pass can drop one too old to notify for. */
+  createdAt: number
 }
 
 interface MessageRow {
@@ -357,7 +374,8 @@ export class SplitTriage {
       evidence,
       judgedLate: [],
       resolved: false,
-      resolve: () => {}
+      resolve: () => {},
+      createdAt: this.time.now()
     }
     const settled = new Promise<void>((resolve) => {
       request.resolve = resolve
@@ -437,9 +455,11 @@ export class SplitTriage {
     }
     this.flushAssignments()
     this.scheduleFailureRetry()
-    // A `judgeNow` that arrived while this pass was draining queued a rerun;
-    // its callers wait for that pass rather than being released by this one.
-    if (!this.rerun) this.releasePriority()
+    // A pass can end on a failure somebody retries — a dropped connection, an
+    // exhausted rate-limit ladder. Releasing every wait here would hand the
+    // retry a judgment nobody is waiting for, so only the waits too old to
+    // notify for are dropped.
+    this.expirePriority()
   }
 
   /**
@@ -563,7 +583,7 @@ export class SplitTriage {
       }
       // A waiting thread the query does not return needs no judgment — it is
       // already answered, or it left the Inbox. Release its caller now.
-      for (const threadId of waiting) if (!seen.has(threadId)) this.settleThread(threadId, false)
+      for (const threadId of waiting) if (!seen.has(threadId)) this.settleThread(threadId, 'gone')
     }
     if (rows.length >= SPLIT_TRIAGE_BATCH_SIZE) return rows
     for (const row of this.selectWork(gate, null, SPLIT_TRIAGE_BATCH_SIZE - rows.length)) {
@@ -640,18 +660,24 @@ export class SplitTriage {
    * pack is filled rather than only between batches: an arrival that waits two
    * seconds cannot afford to sit behind a forty-thread backlog.
    */
-  private nextPriorityRow(gate: TriageGate): WorkRow | null {
+  private nextPriorityRow(gate: TriageGate, handled: ReadonlySet<string>): WorkRow | null {
     // Whether a thread is blocked depends on the evidence the query returns, so
     // a blocked one is passed over here rather than filtered out in advance.
     const skipped = new Set<string>()
     for (;;) {
-      const threadId = [...this.priorityThreads].find((id) => !this.inFlight.has(id) && !skipped.has(id))
+      const threadId = [...this.priorityThreads].find(
+        // One request per conversation per batch. A thread the batch already
+        // asked about and could not settle waits for the next batch, which
+        // re-reads the gate: without this a thread settled `'retry'` would be
+        // claimed again in the same loop, against the same stale gate.
+        (id) => !this.inFlight.has(id) && !handled.has(id) && !skipped.has(id)
+      )
       if (!threadId) return null
       const [row] = this.selectWork(gate, [threadId], 1)
       if (!row) {
         // Already answered, or gone from the Inbox: release its caller and look
         // at the next one. `settleThread` drops it, so this terminates.
-        this.settleThread(threadId, false)
+        this.settleThread(threadId, 'gone')
         continue
       }
       if (!this.isBlocked(gate, row)) return row
@@ -676,7 +702,7 @@ export class SplitTriage {
     const nextPack = (): WorkRow[] => {
       const pack: WorkRow[] = []
       while (pack.length < SPLIT_TRIAGE_PACK_SIZE) {
-        const row = this.nextPriorityRow(gate) ?? nextQueued()
+        const row = this.nextPriorityRow(gate, handled) ?? nextQueued()
         if (!row) break
         handled.add(row.threadId)
         this.inFlight.add(row.threadId)
@@ -713,14 +739,14 @@ export class SplitTriage {
     for (const row of pack) {
       const thread = this.loadThread(row.threadId)
       if (!thread) {
-        this.settleThread(row.threadId, false)
+        this.settleThread(row.threadId, 'gone')
         continue
       }
       loaded.push({ row, state: buildTriageState(thread) })
     }
     if (loaded.length === 0) return 'ok'
-    const settleAll = (): void => {
-      for (const entry of loaded) this.settleThread(entry.row.threadId, false)
+    const settleAll = (outcome: SettleOutcome): void => {
+      for (const entry of loaded) this.settleThread(entry.row.threadId, outcome)
     }
     const chargeAll = (cause: SplitTriageFailureCause): void => {
       for (const entry of loaded) this.recordFailure(gate, entry.row, cause)
@@ -741,8 +767,12 @@ export class SplitTriage {
           signal: this.abort.signal
         })
         loaded.forEach((entry, threadIndex) => {
-          this.writeJudgments(entry.row, threadIndex, targets, probabilities)
-          this.settleThread(entry.row.threadId, true, entry.row.latestMessageId)
+          const { skipped } = this.writeJudgments(entry.row, threadIndex, targets, probabilities)
+          // A skipped target is a question the pack answered and the user has
+          // since changed. The conversation is still pending under the rules in
+          // force, so its wait outlives this answer and the next pass re-asks.
+          const outcome = skipped === 0 ? 'judged' : 'retry'
+          this.settleThread(entry.row.threadId, outcome, entry.row.latestMessageId)
         })
         this.maybeBroadcast()
         return 'ok'
@@ -750,7 +780,9 @@ export class SplitTriage {
         if (error instanceof TypeSafeAuthError) {
           this.authFailedKey = gate.key
           this.log('warn', `[triage] ${describeError(error)}; smart splits paused until the key changes`)
-          settleAll()
+          // Nothing retries this pack: the gate stays closed until the key
+          // changes, so holding the waits open would hold them for good.
+          settleAll('gone')
           return 'stop'
         }
         if (error instanceof TypeSafeRateLimitError) {
@@ -758,7 +790,9 @@ export class SplitTriage {
             const count = `${loaded.length} conversation${loaded.length === 1 ? '' : 's'}`
             this.log('warn', `[triage] ${describeError(error)}; ${count} wait for a later pass`)
             chargeAll('rate-limited')
-            settleAll()
+            // The backoff timer brings this pack back, so the waits stay with
+            // their conversations and the retry can still report them late.
+            settleAll('retry')
             return 'ok'
           }
           await this.wait(rateLimitWaitMs(error.retryAfterMs, attempt))
@@ -766,13 +800,15 @@ export class SplitTriage {
           // while we sleep. The captured gate is no authority to ask again, so
           // the pack goes back unjudged and uncharged.
           if (!this.gateUnchanged(gate)) {
-            settleAll()
+            settleAll('retry')
             return 'stop'
           }
           continue
         }
         if (error instanceof TypeSafeNetworkError) {
-          settleAll()
+          // The offline scheduler below asks again, so the waits keep their
+          // claim: a move into a split that notifies is still worth reporting.
+          settleAll('retry')
           if (!this.stopped) {
             this.log('warn', `[triage] ${describeError(error)}; retrying later`)
             this.offlineRetry.schedule(
@@ -793,9 +829,10 @@ export class SplitTriage {
             // whether the consent that filled this pack still holds.
             const halted = !this.gateUnchanged(gate)
             if (halted || (await this.judgePack(gate, [entry.row])) === 'stop') {
-              // The singleton settled its own row; release the ones never tried.
+              // The singleton settled its own row. The ones never tried had no
+              // answer refused, so they keep their place and their waits.
               for (const rest of loaded.slice(halted ? index : index + 1)) {
-                this.settleThread(rest.row.threadId, false)
+                this.settleThread(rest.row.threadId, 'retry')
               }
               return 'stop'
             }
@@ -804,7 +841,9 @@ export class SplitTriage {
         }
         this.log('warn', `[triage] ${describeError(error)}; skipping ${count}`)
         chargeAll('rejected')
-        settleAll()
+        // The service refused this conversation on its own, so no retry in
+        // this pass or the next few answers the question. Release the waits.
+        settleAll('gone')
         return 'ok'
       }
     }
@@ -826,13 +865,17 @@ export class SplitTriage {
    * have been deleted, while it was in flight. Each row is written only while
    * its split still asks that exact question and the thread still exists;
    * anything else is dropped rather than stored as an orphan.
+   *
+   * The counts say what the pack actually answered. A skipped target leaves
+   * the conversation pending under the rules in force, so the caller settles
+   * it for a retry rather than calling it judged.
    */
   private writeJudgments(
     row: WorkRow,
     threadIndex: number,
     targets: Record<string, TriageQuestionTarget>,
     probabilities: Record<string, number>
-  ): void {
+  ): { written: number; skipped: number } {
     const upsert = this.db.prepare(
       `INSERT INTO split_judgments
          (account_id, thread_id, split_id, description_hash, evidence_key, probability, judged_at)
@@ -845,14 +888,26 @@ export class SplitTriage {
     )
     const threadRow = this.db.prepare('SELECT 1 AS present FROM threads WHERE account_id = ? AND id = ?')
     const judgedAt = this.time.now()
+    const mine = Object.entries(targets).filter(([, target]) => target.threadIndex === threadIndex)
+    let written = 0
+    let skipped = 0
     const changed = this.db.transaction(() => {
+      written = 0
+      skipped = 0
+      // A conversation Gmail removed leaves nothing pending either: counting
+      // its targets as skipped would queue a retry for a thread that is gone.
       if (!threadRow.get(this.accountId, row.threadId)) return false
       const before = splitIdForThread(this.db, this.accountId, row.threadId)
-      for (const [questionId, target] of Object.entries(targets)) {
-        if (target.threadIndex !== threadIndex) continue
+      for (const [questionId, target] of mine) {
+        const stored = storedJudgmentHash(this.db, this.accountId, target.splitId)
+        // A deleted split withdrew its question rather than changing it, so it
+        // asks nothing the next pass has to answer.
+        if (stored === null) continue
         const probability = probabilities[questionId]
-        if (probability === undefined) continue
-        if (storedJudgmentHash(this.db, this.accountId, target.splitId) !== target.descriptionHash) continue
+        if (probability === undefined || stored !== target.descriptionHash) {
+          skipped++
+          continue
+        }
         upsert.run(
           this.accountId,
           row.threadId,
@@ -862,10 +917,12 @@ export class SplitTriage {
           probability,
           judgedAt
         )
+        written++
       }
       return before !== splitIdForThread(this.db, this.accountId, row.threadId)
     })()
     if (changed) this.assignmentsChanged = true
+    return { written, skipped }
   }
 
   // -------------------------------------------------------------------------
@@ -897,26 +954,38 @@ export class SplitTriage {
   }
 
   /**
-   * One conversation leaves the queue. `evidenceKey` names the latest message
-   * the judgment read: a wait registered for a newer message stays pending, so
-   * the answer to the message before it cannot release the caller. That thread
-   * also stays in `priorityThreads` — it is still pending in the anti-join, so
-   * the next pack picks it up and answers the question actually asked.
+   * What became of one conversation this pass claimed.
    *
-   * An unjudged settle releases every wait as before: nothing is coming.
+   * `'judged'` carries in `evidenceKey` the latest message the judgment read.
+   * A wait registered for a newer message stays pending, so the answer to the
+   * message before it cannot release the caller. That thread also stays in
+   * `priorityThreads` — it is still pending in the anti-join, so the next pack
+   * picks it up and answers the question actually asked.
+   *
+   * `'retry'` is a failure somebody asks again about: a dropped connection, an
+   * exhausted rate-limit ladder, a gate withdrawn mid-pack, an answer the user
+   * has since changed the question for. The conversation keeps its place in the
+   * queue and in every wait, so the retry that judges it still reports it late.
+   *
+   * `'gone'` is an answer nobody is bringing: the conversation left the Inbox,
+   * it is already judged, or the service refused it. Every wait is released.
    */
-  private settleThread(threadId: string, judged: boolean, evidenceKey?: string): void {
+  private settleThread(threadId: string, outcome: SettleOutcome, evidenceKey?: string): void {
+    if (outcome === 'retry') return
     // An answer spends the budget back: the next failure starts the ladder again.
-    if (judged) this.failures.delete(threadId)
+    if (outcome === 'judged') this.failures.delete(threadId)
     let stillWaiting = false
     for (const request of [...this.priority]) {
       if (!request.pending.has(threadId)) continue
-      if (judged && request.evidence.get(threadId) !== evidenceKey) {
+      const waited = request.evidence.get(threadId)
+      if (outcome === 'judged' && waited !== evidenceKey) {
         stillWaiting = true
         continue
       }
       request.pending.delete(threadId)
-      if (judged && request.resolved) request.judgedLate.push(threadId)
+      if (outcome === 'judged' && request.resolved && waited !== undefined) {
+        request.judgedLate.push({ threadId, messageId: waited })
+      }
       if (request.pending.size > 0) continue
       const index = this.priority.indexOf(request)
       if (index >= 0) this.priority.splice(index, 1)
@@ -928,6 +997,28 @@ export class SplitTriage {
       if (request.judgedLate.length > 0) this.options.onLateJudgment([...request.judgedLate])
     }
     if (!stillWaiting) this.priorityThreads.delete(threadId)
+  }
+
+  /**
+   * Waits a judgment can no longer answer usefully. Past this window a late
+   * notification would not fire, so the request ends rather than holding its
+   * conversations ahead of the queue for the rest of the session.
+   */
+  private expirePriority(): void {
+    const cutoff = this.time.now() - SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS
+    for (const request of [...this.priority]) {
+      if (request.createdAt > cutoff) continue
+      const index = this.priority.indexOf(request)
+      if (index >= 0) this.priority.splice(index, 1)
+      if (request.resolved) continue
+      request.resolved = true
+      request.resolve()
+    }
+    const waiting = new Set<string>()
+    for (const request of this.priority) for (const threadId of request.pending) waiting.add(threadId)
+    for (const threadId of [...this.priorityThreads]) {
+      if (!waiting.has(threadId)) this.priorityThreads.delete(threadId)
+    }
   }
 
   /** Nothing more will be judged for these callers now: let them proceed. */
