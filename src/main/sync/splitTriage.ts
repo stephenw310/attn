@@ -753,7 +753,7 @@ export class SplitTriage {
     }
     if (loaded.length === 0) return 'ok'
     const settleAll = (outcome: SettleOutcome): void => {
-      for (const entry of loaded) this.settleThread(entry.row.threadId, outcome)
+      for (const entry of loaded) this.settleThread(entry.row.threadId, outcome, entry.row.latestMessageId)
     }
     const chargeAll = (cause: SplitTriageFailureCause): void => {
       for (const entry of loaded) this.recordFailure(gate, entry.row, cause)
@@ -764,7 +764,11 @@ export class SplitTriage {
     const settleCharged = (): void => {
       for (const entry of loaded) {
         const attempts = this.failures.get(entry.row.threadId)?.attempts ?? 0
-        this.settleThread(entry.row.threadId, attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS ? 'gone' : 'retry')
+        this.settleThread(
+          entry.row.threadId,
+          attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS ? 'gone' : 'retry',
+          entry.row.latestMessageId
+        )
       }
     }
     const { state, questions, targets } = buildPackedTriageRequest(
@@ -1009,7 +1013,10 @@ export class SplitTriage {
     for (const request of [...this.priority]) {
       if (!request.pending.has(threadId)) continue
       const waited = request.evidence.get(threadId)
-      if (outcome === 'judged' && waited !== evidenceKey) {
+      // A settle that names its evidence answers only the waits made for that
+      // evidence. A wait for a newer message stays, whether this attempt was
+      // judged or spent its last try: the rerun still owes that answer.
+      if (evidenceKey !== undefined && waited !== evidenceKey) {
         stillWaiting = true
         continue
       }
