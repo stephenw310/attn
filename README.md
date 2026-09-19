@@ -2,9 +2,14 @@
 
 Attn is a desktop Gmail client for macOS and Windows. It uses Electron, React, TypeScript, and SQLite.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/inbox-dark.png">
+  <img src="docs/images/inbox-light.png" alt="The Attn inbox with the mailbox sidebar, a conversation list, and the keyboard shortcut bar">
+</picture>
+
 Read cached mail, write drafts, and organize your inbox without a network connection. Attn saves changes locally and syncs them with Gmail when the connection returns. Keyboard commands cover the main mail actions.
 
-Attn is in early development. You need your own Google OAuth client to connect Gmail.
+Attn is a developer preview. No installer is published. Build Attn from source and connect Gmail with your own Google OAuth client. See [Get started](#get-started).
 
 ## What you can do
 
@@ -146,6 +151,8 @@ Read [AGENTS.md](AGENTS.md) for the code structure and development rules. Read t
 Follow the [verification requirements](AGENTS.md#verify-the-change) before submitting a change. Use the [test guide](docs/TESTING.md#choose-a-command) to select commands and diagnose failures.
 
 For a bug report, include the operating system, Attn version, steps to reproduce, expected result, and actual result. Remove mail content, addresses, tokens, and API keys from logs and screenshots.
+
+Report a security vulnerability in private. See the [security policy](SECURITY.md).
 
 ## License
 
