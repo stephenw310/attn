@@ -6,11 +6,7 @@ This file contains the shared development rules. `.claude/CLAUDE.md` imports thi
 
 ## Start here
 
-1. Read [README.md](README.md) for installation and product use.
-2. Read the relevant feature in [docs/SPEC.md](docs/SPEC.md) before you change behavior.
-3. Check [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) for open defects.
-4. Inspect the affected code and its tests.
-5. Run `npm install` if dependencies are absent.
+Use [README.md](README.md) for setup and product usage. Before changing behavior, read the relevant section of [docs/SPEC.md](docs/SPEC.md). Consult [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) when investigating a defect. Use [docs/TESTING.md](docs/TESTING.md) for fixtures and test diagnosis, and [docs/RELEASE.md](docs/RELEASE.md) for packaging or releases. Inspect the code and tests affected by the request. Run `npm install` when dependencies are absent.
 
 You need Node.js 22.12 or later. You do not need Google credentials to build or test. Do not read a developer's `oauth.config.json` or token files for a test.
 
@@ -77,7 +73,7 @@ Store OAuth tokens and AI provider keys through `safeStorage`. Never commit cred
 
 Draft checkpoint, retry, and delete work derives from outbox revisions. `DraftMirrorExecutor` runs that work independently, so draft retry delays cannot block mail actions.
 
-A Gmail draft create is not idempotent. Keep mirror mutations single-attempt. During normal shutdown, await `DraftMirrorExecutor.stop()` before SQLite closes. It allows the active row five seconds to save its returned remote ID, aborts after the deadline, and awaits cancellation. It must not start another row during shutdown.
+A Gmail draft create is not idempotent. Keep mirror mutations single-attempt. During normal shutdown, await `DraftMirrorExecutor.stop()` before SQLite closes. The active row has until the `MIRROR_STOP_TIMEOUT_MS` deadline to save its returned remote ID. After that deadline, the executor aborts and awaits cancellation. It must not start another row during shutdown.
 
 Preserve send recovery and the `needs-review` state. Do not retry an uncertain remote send as a new send without proof that the first send failed.
 
@@ -106,7 +102,6 @@ Every schema change requires an automatic migration. `schema.ts` defines fresh p
 3. Append exactly one contiguous step to `SCHEMA_MIGRATIONS` in `src/main/db/migrations.ts`.
 4. Add representative old data and upgrade assertions to `src/main/db/schemaUpgrade.test.ts`.
 5. Verify both a fresh profile and an upgraded profile.
-6. Run `npm run verify`.
 
 Preserve existing rows and local-only data. If a table must be replaced, copy retained data within the migration transaction.
 
@@ -116,7 +111,7 @@ Do not rewrite a released migration, update `user_version` outside the migration
 
 ## Add or change a feature
 
-Update the behavior and acceptance criteria in `docs/SPEC.md` when needed. Add end-to-end coverage in the same change. Every user-facing feature needs a command-palette command.
+Update the behavior and acceptance criteria in `docs/SPEC.md` when needed. Add end-to-end coverage for behavior that requires full-app verification. Expose new user-invoked actions in the command palette where a command makes sense. Cosmetic changes and passive indicators do not require new commands.
 
 Keep real Gmail calls out of end-to-end tests. Test sync behavior against a mock `MailProvider`. Use the real temporary SQLite store where persistence matters.
 
@@ -128,7 +123,9 @@ Write documentation with STE-style instructions. Use active voice, one instructi
 
 ## Verify the change
 
-A change is not complete until `npm run verify` passes. Run it before you claim completion, commit, or push.
+For code, dependency, build, or runtime changes, `npm run verify` must pass before you claim completion, commit, or push. Use focused checks during iteration, and rerun affected checks after fixes. For documentation-only or instruction-only changes, check the edited content and links. Run application checks only when executable examples or behavior are affected. Report failures and verification limits without claiming success.
+
+Local tests use disposable profiles and require no Google credentials. Run them and fix failures caused by the requested change without asking at each step. Do not use a developer's credentials or personal mail profile.
 
 ```sh
 npm run verify
