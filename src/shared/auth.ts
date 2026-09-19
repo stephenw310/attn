@@ -70,3 +70,20 @@ export interface AuthSignInResult {
 export function isSignInCanceled(reason: unknown): boolean {
   return (reason instanceof Error ? reason.message : String(reason)).includes('sign-in canceled')
 }
+
+/**
+ * Electron's `ipcRenderer.invoke` rejects with
+ * `Error invoking remote method 'channel': Error: <message>`. Strip that
+ * wrapper and the nested `Error:` prefixes it leaves behind, then rewrite the
+ * OAuth outcomes a user can act on. Every surface that reports a failed
+ * sign-in renders this, so the bridge text never reaches the UI.
+ */
+export function signInErrorMessage(reason: unknown, fallback: string): string {
+  const raw = reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : ''
+  let message = raw.replace(/^Error invoking remote method '[^']*':\s*/, '').trim()
+  while (/^[A-Za-z]*Error:/.test(message)) message = message.replace(/^[A-Za-z]*Error:\s*/, '').trim()
+  if (message.includes('access_denied')) {
+    return 'Google did not grant access. Try again and allow the requested permissions.'
+  }
+  return message === '' ? fallback : message
+}

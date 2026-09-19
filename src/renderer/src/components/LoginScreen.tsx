@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { type AuthStatus, isSignInCanceled } from '../../../shared/auth'
+import { type AuthStatus, isSignInCanceled, signInErrorMessage } from '../../../shared/auth'
 import tidalInlet from '../assets/login-tidal-inlet.png'
 
 interface LoginScreenProps {
@@ -25,7 +25,7 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
       .then(({ status: nextStatus }) => onStatus(nextStatus))
       .catch((reason: unknown) => {
         if (isSignInCanceled(reason)) return
-        setError(reason instanceof Error ? reason.message : 'Could not sign in')
+        setError(signInErrorMessage(reason, 'Could not sign in.'))
       })
       .finally(() => setBusy(false))
   }, [configured, onStatus])
