@@ -634,6 +634,9 @@ and command-palette commands. The account menu offers only System, Light, and Da
 Appearance settings also provide these appearance choices. Existing saved appearance preferences remain valid.
 Saved Midnight resolves to Dark; saved Sand resolves to Light. Invalid or absent color palette values resolve to Matcha.
 
+Native app icons use the saved color palette on macOS Dock and Windows window surfaces, including startup and
+reopen. A successful palette change updates existing native surfaces. The menu-bar icon remains monochrome.
+
 All app text tokens meet normal-text AA contrast on the page, elevated panel, and selection backgrounds.
 Primary actions use the palette accent with a contrasting foreground. Secondary text remains readable in dark mode.
 Message rows show labels as tinted chips, a separate star slot, and a checkmark for Done in All Mail.

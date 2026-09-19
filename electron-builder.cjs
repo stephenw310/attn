@@ -39,6 +39,10 @@ const config = {
     'package.json',
     'LICENSE',
     'resources/icon.png',
+    'resources/icon-matcha.png',
+    'resources/icon-mist.png',
+    'resources/icon-linen.png',
+    'resources/icon-dusk.png',
     'resources/menuBarTemplate.png',
     'resources/tray.png',
     '!node_modules/better-sqlite3/{build,deps,src}/**/*'

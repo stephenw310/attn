@@ -1,7 +1,6 @@
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, powerMonitor, safeStorage, shell } from 'electron'
-import appIcon from '../../resources/icon.png?asset'
 import { type AiSettings, validateAiSettingUpdate } from '../shared/ai'
 import {
   type AppInfo,
@@ -17,6 +16,7 @@ import type { PaletteId, ThemePreference } from '../shared/theme'
 import { AccountRoster } from './accountRoster'
 import { AiKeyStore, type SecretCipher, TYPESAFE_KEY_FILE } from './ai/keyStore'
 import { AiManager } from './ai/manager'
+import { appIconPath, applyAppIcon } from './appIcon'
 import { oauthConfigSearchDirs } from './auth/configPaths'
 import { cancelActiveSignIn, loadOAuthConfig, type OAuthConfig, signInWithGoogle } from './auth/googleAuth'
 import {
@@ -199,7 +199,7 @@ function createWindow(options: { show?: boolean } = {}): BrowserWindow {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    icon: appIcon,
+    icon: appIconPath(palettePreference),
     show: false,
     autoHideMenuBar: true,
     ...windowChromeOptions(process.platform, themePreference, nativeTheme.shouldUseDarkColors),
@@ -408,6 +408,7 @@ async function initialize(): Promise<void> {
   console.log('[utility] service ready; SQLite ownership transferred')
   themePreference = await ownedService.invoke(IPC_CHANNELS.settingsGetTheme)
   palettePreference = (await ownedService.invoke(IPC_CHANNELS.settingsGetAll)).palette
+  applyAppIcon(palettePreference)
   nativeTheme.on('updated', handleNativeThemeUpdated)
   const backgroundEffects: BackgroundEffects = {
     markLoginItemRegistered: () =>
@@ -420,7 +421,10 @@ async function initialize(): Promise<void> {
       })
   }
   const applySettingEffects = (update: AppSettingUpdate): void => {
-    if (update.key === 'palette') palettePreference = update.value
+    if (update.key === 'palette') {
+      palettePreference = update.value
+      applyAppIcon(palettePreference)
+    }
     // Storage already happened in the utility; these are the OS-side effects
     // main owns (F15). The login item updates on every change, deliberately
     // bypassing the one-time boot registration guard.
@@ -661,7 +665,6 @@ else {
   })
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(async () => {
-    if (process.platform === 'darwin') app.dock?.setIcon(appIcon)
     try {
       await initialize()
     } catch (error) {
