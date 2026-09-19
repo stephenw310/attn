@@ -14,23 +14,12 @@ You need Node.js 22.12 or later. You do not need Google credentials to build or 
 
 | Path | Purpose |
 | --- | --- |
-| `src/main/index.ts` | Application startup, windows, and shutdown |
-| `src/main/auth/` | Google OAuth and encrypted token storage |
-| `src/main/service/` | Utility process, supervisor, and request handlers |
-| `src/main/db/` | SQLite schema, migrations, and queries |
-| `src/main/sync/` | Gmail polling, historical sync, and derived data |
-| `src/main/gmail/` | Gmail client, parsing, and quota control |
-| `src/main/actions/` | Mail actions, undo, and queued action execution |
-| `src/main/outbox/` | Drafts, attachments, Gmail draft sync, and send recovery |
-| `src/main/ipc.ts` | Main-process IPC registration and forwarding |
-| `src/main/testIpc.ts` | Test-only application controls |
-| `src/preload/index.ts` | Typed bridge exposed to the renderer |
 | `src/renderer/src/` | React views, hooks, command registry, and composer |
-| `src/shared/` | Types and pure logic shared across processes |
-| `e2e/` | Playwright tests for the built Electron application |
-| `scripts/` | Install repair, tests, packaging, and release checks |
-| `docs/TESTING.md` | Test fixtures, controls, screenshots, and diagnosis |
-| `docs/RELEASE.md` | Signed builds, update feeds, and release procedure |
+| `src/preload/index.ts` | Typed bridge exposed to the renderer |
+| `src/main/index.ts` | Application startup, windows, and shutdown |
+| `src/main/ipc.ts` | Main-process IPC registration and forwarding |
+| `src/main/service/` | Utility process, supervisor, and request handlers |
+| `src/shared/ipc.ts` | Typed IPC channel contract shared across processes |
 
 ## Process boundaries
 
