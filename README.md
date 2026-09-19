@@ -143,14 +143,7 @@ Snooze and follow-up timers run locally. If Attn is closed when a reminder becom
 
 Read [AGENTS.md](AGENTS.md) for the code structure and development rules. Read the [product specification](docs/SPEC.md) for expected behavior.
 
-For ordinary code changes, run the fast check and the affected E2E specs before you submit a change:
-
-```sh
-npm run verify:fast
-npm run e2e -- e2e/composer.spec.ts
-```
-
-Replace `e2e/composer.spec.ts` with the spec covering your change. Use `npm run verify` for changes to IPC, startup, shared fixtures, dependencies, build configuration, database schema or migrations, account isolation, mail or credential security, send recovery, and other broadly used infrastructure. It runs type checks, Biome, unit tests, a production build, and the complete Electron end-to-end suite. Tests use temporary local profiles and need no Google credentials. See the [test guide](docs/TESTING.md) for focused commands and failure diagnosis.
+Follow the [verification requirements](AGENTS.md#verify-the-change) before submitting a change. Use the [test guide](docs/TESTING.md#choose-a-command) to select commands and diagnose failures.
 
 For a bug report, include the operating system, Attn version, steps to reproduce, expected result, and actual result. Remove mail content, addresses, tokens, and API keys from logs and screenshots.
 

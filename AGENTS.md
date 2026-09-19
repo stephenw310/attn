@@ -2,13 +2,13 @@
 
 Attn is a desktop Gmail client for macOS and Windows. It uses Electron, React, TypeScript, and SQLite.
 
-This file contains the shared development rules. `.claude/CLAUDE.md` imports this file. Put project rules here, not in separate instructions for each agent tool.
+This file contains the shared development rules. `.claude/CLAUDE.md` imports this file. Put project rules here, not in separate instructions for each agent tool. Keep verification requirements here and test procedures in [docs/TESTING.md](docs/TESTING.md). Link to those sections instead of copying them into other guides.
 
 ## Start here
 
 Use [README.md](README.md) for setup and product usage. Before changing behavior, read the relevant section of [docs/SPEC.md](docs/SPEC.md). Consult [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) when investigating a defect. Use [docs/TESTING.md](docs/TESTING.md) for fixtures and test diagnosis, and [docs/RELEASE.md](docs/RELEASE.md) for packaging or releases. Inspect the code and tests affected by the request. Run `npm install` when dependencies are absent.
 
-You need Node.js 22.12 or later. You do not need Google credentials to build or test. Do not read a developer's `oauth.config.json` or token files for a test.
+You need Node.js 22.12 or later. You do not need Google credentials to build or test. Do not read a developer's `oauth.config.json` or token files for a test. Do not use a developer's personal mail profile.
 
 ## Code structure
 
@@ -106,37 +106,25 @@ Keep real Gmail calls out of end-to-end tests. Test sync behavior against a mock
 
 Match the surrounding code. Biome enforces single quotes, no semicolons, and a 110-column line width. The pre-commit hook also checks formatting.
 
-Use `data-testid` for end-to-end selectors. Do not select Tailwind classes. Put shared application drivers in `e2e/nav.ts`, composer operations in `e2e/composer.ts`, and test controls in `e2e/seams.ts`.
+Use `data-testid` for end-to-end selectors. Do not select Tailwind classes. Use the [shared test drivers](docs/TESTING.md#shared-drivers) for reusable E2E operations.
 
 Write documentation with STE-style instructions. Use active voice, one instruction per sentence, and consistent terms. Keep procedures near 20 words per sentence. Remove filler and promotional language.
 
 ## Verify the change
 
-For ordinary code changes, `npm run verify:fast` and the affected E2E specs must pass before completion, commit, or push. The fast command runs type checks, lint, and unit tests. Run focused E2E coverage with `npm run e2e -- <spec-or-options>` so the source is rebuilt first. Use `e2e:only` only when `out/` already matches the source.
+This section defines the required checks. Use [the test guide](docs/TESTING.md#choose-a-command) for commands, fixtures, and failure diagnosis.
 
-Run the complete `npm run verify` suite for IPC, startup, shared fixtures, dependencies, build configuration, database schema or migrations, account isolation, mail or credential security, send recovery, and other broadly used infrastructure changes. These checks must pass before completion, commit, or push.
+- For ordinary code changes, `npm run verify:fast` and the affected E2E specs must pass before completion, commit, or push.
+- For IPC, startup, shared fixtures, dependencies, build configuration, database schema or migrations, account isolation, mail or credential security, send recovery, and other broadly used infrastructure changes, the complete `npm run verify` suite must pass before completion, commit, or push.
+- For documentation-only or instruction-only changes, check the edited content and links. Run application checks if executable examples or behavior change.
 
-Rerun affected checks after fixes. For documentation-only or instruction-only changes, check the edited content and links. Report failures and verification limits without claiming success.
+Rerun affected checks after fixes. Fix failures caused by the requested change without asking at each step. Report failures and verification limits without claiming success.
 
-Local tests use disposable profiles and require no Google credentials. Run them and fix failures caused by the requested change without asking at each step. Do not use a developer's credentials or personal mail profile.
-
-```sh
-npm run verify
-```
-
-The command runs all three TypeScript project checks, Biome, unit tests, a production build, and the complete Electron end-to-end suite. The fast command intentionally omits the build and E2E suite; pair it with affected E2E specs for ordinary feature work.
-
-After a UI change, inspect every affected screenshot in `e2e/.artifacts/`. Confirm the layout and colors. Do not leave text-selection highlights in screenshots. Find screenshot writers with `rg -n '\.artifacts' e2e --glob '*.spec.ts'`.
-
-For failures, inspect `e2e/.results/`. The tests attach main-process logs to failed cases. See [the test guide](docs/TESTING.md) for focused commands and fixture rules.
+After a UI change, inspect every affected screenshot in each affected theme. Confirm the layout and colors. See [screenshot inspection](docs/TESTING.md#inspect-failures-and-screenshots) for the procedure.
 
 ## Environment notes
 
-`npm install` runs `scripts/ensure-electron-toolchain.mjs`. It checks the SQLite module inside Electron and repairs missing binaries or native modules. Run `npm run toolchain` to repeat this check.
-
-Do not set `ELECTRON_RUN_AS_NODE` for the application under test.
-
-The test runner uses Xvfb automatically on Linux without a display. It adds `--no-sandbox` for root or CI. Tests keep windows hidden unless you pass `--visible`.
+Use [the setup guide](README.md#get-started) to install dependencies and [the test guide](docs/TESTING.md#electron-fixtures) for Electron test environment details.
 
 On macOS, authenticated `gh` commands need host access to the Keychain. If authentication fails in a sandbox, retry with host access before you ask the user to authenticate.
 

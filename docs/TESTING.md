@@ -4,16 +4,18 @@ Run tests from the repository root. Install dependencies with `npm install` firs
 
 ## Choose a command
 
+Use the [verification requirements](../AGENTS.md#verify-the-change) to decide which checks must pass. The commands below describe how to run those checks.
+
 | Command | Purpose |
 | --- | --- |
 | `npm run verify:fast` | Run type checks, lint, and unit tests without a build or Electron launch |
-| `npm run verify` | Run the complete check for broad changes and release or integration work |
+| `npm run verify` | Run type checks, lint, unit tests, a production build, and functional E2E tests |
 | `npm run typecheck` | Check all three TypeScript projects |
 | `npm run lint` | Check code style and formatting |
 | `npm run test:unit` | Run main, preload, renderer, shared, and script unit tests |
 | `npm run e2e` | Build and run the Electron end-to-end suite |
 | `npm run e2e:only` | Run end-to-end tests without a build |
-| `npm run e2e:only -- --grep <pattern>` | Run matching end-to-end tests |
+| `npm run e2e -- --grep <pattern>` | Build and run matching end-to-end tests |
 | `npm run e2e -- --visible` | Run with visible Electron windows |
 | `npm run e2e:perf` | Build and run interaction and memory checks |
 | `npm run e2e:perf:scale` | Build and run the 40,000-thread read checks |
@@ -23,11 +25,23 @@ Run tests from the repository root. Install dependencies with `npm install` firs
 
 Use an `:only` command only when `out/` matches the current source.
 
-For ordinary code changes, `npm run verify:fast` and the affected E2E specs must pass before completion, commit, or push. Use `npm run e2e -- <spec-or-options>` so the source is rebuilt first.
+To run a focused spec against the current source, pass its path to the build-and-test command:
 
-Run the complete `npm run verify` suite for IPC, startup, shared fixtures, dependencies, build configuration, database schema or migrations, account isolation, mail or credential security, send recovery, and other broadly used infrastructure changes.
+```sh
+npm run e2e -- e2e/composer.spec.ts
+```
 
-CI keeps the full functional E2E suite for every pull request and runs its four shards on separate runners.
+Replace `e2e/composer.spec.ts` with the spec covering your change. Check the runner's test list or output to confirm the selection includes the intended tests.
+
+`verify` excludes the performance suites. Run those with the separate performance commands listed above.
+
+## CI and Git hooks
+
+[The Verify workflow](../.github/workflows/verify.yml) runs static checks, unit tests, a build, the full functional E2E suite, and regular performance checks. It runs on pull requests, pushes to `main`, and manual dispatches. Functional E2E tests run in four shards on separate runners, each with one Electron worker. The `Electron smoke` check requires static verification and all four shards to pass.
+
+The scale performance suite runs through `npm run e2e:perf:scale`; the Verify workflow does not run it. See [the release guide](RELEASE.md#publish-a-version) for release validation.
+
+[Git hooks](../lefthook.yml) check staged code formatting before commit, then type checks and repository formatting before push. They do not run unit or E2E tests and do not replace the verification requirements.
 
 ## Unit tests
 
@@ -35,7 +49,7 @@ Use pure modules for decision logic. Use a mock `MailProvider` for network behav
 
 Database tests can call `openDatabase(':memory:')` under Vitest. The SQLite dependency provides Node-API prebuilds, so these tests do not need Electron. See the tests in `src/main/outbox/` for examples.
 
-Inject `SchedulerTime` or use Vitest fake timers for time-driven behavior. Do not wait for product retry or undo-send timers on the wall clock.
+For time-driven code, follow the [scheduler rules](../AGENTS.md#sync-and-timers). See [Control time and races](#control-time-and-races) for renderer clock controls.
 
 ## Electron fixtures
 
@@ -51,7 +65,9 @@ test.use({ seed: 'fixtures/seed-inbox.json' })
 
 `ATTN_TEST_SEED` works only with `ATTN_TEST_USER_DATA`. Signed-out tests exercise onboarding without a seed.
 
-Windows stay hidden by default. `--visible` exposes them for diagnosis. Tests that explicitly request `--hidden` stay hidden. Linux runs use Xvfb when no display exists.
+Do not set `ELECTRON_RUN_AS_NODE` for the application under test.
+
+Windows stay hidden by default. `--visible` exposes them for diagnosis. Tests that explicitly request `--hidden` stay hidden. Linux runs use Xvfb when no display exists. The fixture adds `--no-sandbox` on Linux for root or CI.
 
 The fixture emulates a dark operating-system theme. Theme tests override that preference when they test System mode.
 
@@ -137,7 +153,7 @@ npx playwright show-trace <trace-path>
 rg -n '\.artifacts' e2e --glob '*.spec.ts'
 ```
 
-After a UI change, inspect every affected screenshot in each affected theme. Remove text-selection highlights from screenshot setup. Add screenshots to the relevant specs so the command above finds their writers.
+Use the commands above to find screenshot writers and open failure traces. Follow the [UI verification requirements](../AGENTS.md#verify-the-change). Remove text-selection highlights from screenshot setup. Add screenshots to the relevant specs so the command above finds their writers.
 
 ## Performance checks
 

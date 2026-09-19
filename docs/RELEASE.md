@@ -95,7 +95,7 @@ The rolling `update-feed` release contains `latest.yml` for Windows and `latest-
 
 The updater checks the local schema before download and again before installation. It rejects missing metadata or an incompatible schema. On first launch, `openDatabase()` applies all required migrations in one transaction and runs `PRAGMA quick_check` before commit.
 
-Do not delete a profile or provide manual SQL as the upgrade path. Every schema change needs one immutable migration.
+Follow the [schema migration rules](../AGENTS.md#change-the-database-schema) when changing the stored schema.
 
 ## Release assets
 
