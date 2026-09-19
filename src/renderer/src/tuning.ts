@@ -11,5 +11,8 @@ export const INBOX_ZERO_CLOCK_INTERVAL_MS = 30_000
 
 export const TOOLTIP_DELAY_MS = 120
 
+/** How often the smart-splits card re-reads its progress while judgments are outstanding. */
+export const SPLIT_TRIAGE_STATUS_POLL_MS = 3_000
+
 /** Reshow AI draft discovery after the user pauses editing. */
 export const AI_DRAFT_HINT_IDLE_MS = 1_200

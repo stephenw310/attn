@@ -15,6 +15,8 @@ import { TEST_CHANNELS } from '../../shared/ipc'
 import { type MessageMailbox, type SyncState, THREAD_PAGE_SIZE } from '../../shared/mail'
 import { ALLOWED_UNDO_SEND_SECONDS } from '../../shared/outboxTuning'
 import type { ActionRecoveryProvider } from '../actions/executor'
+import { type FakeTriageScript, FakeTriageTransport } from '../ai/fakeTriageTransport'
+import type { TypeSafeTransport } from '../ai/typesafeClient'
 import type { Db } from '../db'
 import { accountKeyedTables } from '../db/purgeAccount'
 import { countSystemMailboxes, listMailboxThreads } from '../db/queries'
@@ -33,7 +35,7 @@ import { runFtsBackfill } from '../sync/ftsBackfill'
 import { effectiveLifetimeThreadCap } from '../sync/lifetimeCap'
 import { runLifetimeSweep } from '../sync/lifetimeSweep'
 import { deleteThread, type LabelRow } from '../sync/persist'
-import { runHistoryCycle } from '../sync/poller'
+import { historyEvents, runHistoryCycle } from '../sync/poller'
 import type { HistoryRecord, MailProvider } from '../sync/provider'
 import type { ServiceSession } from './session'
 
@@ -77,6 +79,8 @@ export class TestOperations implements TestHooks {
   private readonly actionProviders = new Map<string, ActionRecoveryProvider>()
   /** Test-only send-capable providers (T35 seam): seeded sends can complete. */
   private readonly outboxProviders = new Map<string, MailProvider>()
+  /** The scripted TypeSafe service every session's classifier talks to here. */
+  private readonly triageFake = new FakeTriageTransport()
 
   constructor(private readonly host: TestOperationsHost) {}
 
@@ -120,6 +124,15 @@ export class TestOperations implements TestHooks {
 
   outboxProvider(accountId: string): MailProvider | null {
     return this.outboxProviders.get(accountId) ?? null
+  }
+
+  /**
+   * The scripted TypeSafe service. It exists from construction, so under the
+   * harness every smart-splits request lands here even before a spec installs
+   * a script — the suite can never reach the real endpoint.
+   */
+  triageTransport(): TypeSafeTransport {
+    return this.triageFake.fetch
   }
 
   /** A torn-down session drops its seeded providers with the rest of its state. */
@@ -285,6 +298,24 @@ export class TestOperations implements TestHooks {
     if (channel === TEST_CHANNELS.accountDataStats) return this.accountDataStats(args[0])
     if (channel === TEST_CHANNELS.installSendProvider) {
       this.installTestSendProvider()
+      return undefined
+    }
+    if (channel === TEST_CHANNELS.installFakeTriageProvider) {
+      this.triageFake.install((args[0] ?? {}) as FakeTriageScript)
+      return undefined
+    }
+    if (channel === TEST_CHANNELS.triageRequests) return this.triageFake.recorded()
+    if (channel === TEST_CHANNELS.runTriagePass) {
+      // Production's own pass, driven to quiescence so a spec asserts on a
+      // finished queue instead of polling the strip.
+      const session = this.host.activeSession()
+      if (!session) throw new Error('no active account')
+      // Fail loudly rather than let a spec pass on an empty queue because it
+      // forgot the consent, the key, or a described split.
+      if (!session.splitTriage.canJudge()) throw new Error('smart splits gate is closed')
+      session.splitTriage.kick()
+      await session.splitTriage.settled()
+      this.host.invalidateMailSummaries(accountId)
       return undefined
     }
     if (channel === TEST_CHANNELS.runHistoryCycle) return this.runTestHistoryCycle(args[0])
@@ -464,7 +495,7 @@ export class TestOperations implements TestHooks {
     const accountId = this.host.activeAccountId()
     const session = this.host.activeSession()
     if (!accountId || !session) throw new Error('no active account for history cycle')
-    const request = (value ?? {}) as { records?: unknown; threads?: unknown }
+    const request = (value ?? {}) as { records?: unknown; threads?: unknown; announce?: unknown }
     const records = Array.isArray(request.records) ? (request.records as HistoryRecord[]) : []
     const supplied = new Map(
       (Array.isArray(request.threads) ? (request.threads as GmailThread[]) : []).map(
@@ -486,7 +517,7 @@ export class TestOperations implements TestHooks {
         return thread
       }
     } as unknown as MailProvider
-    await runHistoryCycle(db, accountId, provider, {
+    const plan = await runHistoryCycle(db, accountId, provider, {
       wakeThread: (threadId) => session.snoozeScheduler.wakeThread(threadId),
       settleFollowUps: (candidates) => {
         if (
@@ -503,6 +534,13 @@ export class TestOperations implements TestHooks {
     })
     session.snoozeScheduler.refresh()
     this.host.broadcastMailChanged(accountId)
+    // The poller announces its arrivals after the cycle, which is what drives
+    // the notification decision; the bare cycle this seam runs does not. It is
+    // opt-in because the decision initializes Inbox splits for the account, and
+    // a fixture that deliberately has no splits must stay that way.
+    if (request.announce === true && plan.newMail.length > 0) {
+      historyEvents.emit('newMail', accountId, plan.newMail)
+    }
   }
 
   private installActionFailure(threadId: unknown, kind: 'permanent' | 'auth-refresh'): void {

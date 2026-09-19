@@ -148,3 +148,99 @@ export const SEARCH_RESULT_LIMIT = 100
  * this window mark the response partial.
  */
 export const SEARCH_RECENT_MESSAGE_LIMIT = 2_000
+
+// ---------------------------------------------------------------------------
+// Split triage
+// ---------------------------------------------------------------------------
+
+/**
+ * The yes-probability a stored judgment needs before a described split claims
+ * the thread. Measured with `scripts/triage-eval.mjs` on 2026-09-18 over 100
+ * Inbox threads and four described splits: true positives scored 0.72 or
+ * above and true negatives 0.53 or below, so 0.6 and 0.7 claim the same
+ * threads. Three splits reached precision and recall 1.00; the fourth's two
+ * misses scored above 0.78, which a threshold cannot fix — a tighter
+ * description can. Re-run the eval before changing this.
+ */
+export const SPLIT_TRIAGE_THRESHOLD = 0.7
+
+/**
+ * How much of one message the judgment state carries. The model reads state
+ * literally and unrelated detail costs accuracy, so this is a deliberate cut
+ * rather than the largest excerpt the request limit would allow.
+ */
+export const SPLIT_TRIAGE_EXCERPT_CHARS = 1_500
+
+/** One pack's judgment request, aborted at this deadline. */
+export const SPLIT_TRIAGE_REQUEST_TIMEOUT_MS = 10_000
+
+/**
+ * Conversations carried by one request. Measured on 2026-09-18 against 95
+ * labeled Inbox conversations, four AI rules and `jev-latest`, comparing packed
+ * answers with single-conversation answers at threshold 0.7.
+ *
+ * At ten per request the mean absolute change was 0.03 to 0.06. Three rules
+ * flipped nothing; the fourth dropped one false positive, so its precision rose
+ * from 0.82 to 0.90. The change by slot ran from 0.016 at slot 0 to 0.071 at
+ * slots 1 to 9. All 95 conversations were judged in ten requests in 0.9 s.
+ *
+ * At twenty-five per request the mean absolute change was 0.16 to 0.24, 26
+ * answers flipped, precision fell to 0.70 to 0.87, and slots 12 to 23 drifted
+ * 0.19 to 0.36. Pack ten, never more.
+ *
+ * The cap counts conversations, not questions: the measurement ran four rules,
+ * so ten conversations were forty questions in one request.
+ */
+export const SPLIT_TRIAGE_PACK_SIZE = 10
+
+/** Threads selected per batch (four packs), and requests in flight inside one batch. */
+export const SPLIT_TRIAGE_BATCH_SIZE = 40
+export const SPLIT_TRIAGE_CONCURRENCY = 4
+
+/**
+ * Floor between split-revision bumps while a pass runs. Each broadcast makes
+ * the renderer refetch the list and every split count, so on an 11k-thread
+ * Inbox a one-second cadence starved multi-page reads: they abort when the
+ * split revision changes mid-read. Fifteen seconds keeps the app usable while a
+ * pass runs, and the pass still broadcasts once when it ends.
+ */
+export const SPLIT_TRIAGE_BROADCAST_INTERVAL_MS = 15_000
+
+/**
+ * A pack's retry ladder for 429 and 529, and the Retry-After cap. Six attempts
+ * walk 1, 2, 4, 8, 16 and 32 seconds, so a busy minute is waited out inside the
+ * request rather than charged to the conversations it carried.
+ */
+export const SPLIT_TRIAGE_RATE_LIMIT_BASE_MS = 1_000
+export const SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS = 6
+export const SPLIT_TRIAGE_RATE_LIMIT_MAX_WAIT_MS = 60_000
+
+/**
+ * A conversation's own retry ladder after a rejected or exhausted request, and
+ * how many attempts it gets. The record survives the pass, so a dropped pack
+ * comes back by itself instead of waiting for the next mail change. Past the
+ * last attempt the conversation is reported as unjudged rather than counted as
+ * pending forever.
+ */
+export const SPLIT_TRIAGE_FAILURE_BACKOFF_MS = [60_000, 300_000, 1_800_000]
+export const SPLIT_TRIAGE_MAX_ATTEMPTS = 3
+
+/** A pass paused by a network failure resumes after this delay. */
+export const SPLIT_TRIAGE_OFFLINE_RETRY_MS = 60_000
+
+/**
+ * How long an arriving message waits for its judgment before the notification
+ * decision goes ahead without it. Short on purpose: a notification that lands
+ * a minute late is worse than one routed by the previous assignment.
+ */
+export const SPLIT_TRIAGE_NOTIFY_WAIT_MS = 2_000
+
+/**
+ * A judgment that lands after that wait may still notify, while the message is
+ * recent enough for a notification to make sense. Past this age the arrival is
+ * history, so a late judgment changes the Inbox and stays silent.
+ */
+export const SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS = 10 * 60_000
+
+/** Message ids the runtime remembers to keep a late judgment from notifying twice. */
+export const SPLIT_TRIAGE_NOTIFIED_MESSAGE_MEMORY = 500

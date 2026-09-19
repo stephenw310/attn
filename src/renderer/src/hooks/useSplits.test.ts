@@ -92,3 +92,51 @@ test('applies split state by revision and never regresses to an older one', asyn
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = undefined
   }
 })
+
+test('reloads the split state when a judgment lands', async () => {
+  // The strip counts are the additive half of a judgment: they update in
+  // place while the Inbox list stays as it is (F11).
+  const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  let revision = 2
+  const getState = vi.fn(() => Promise.resolve(state(revision, [IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID])))
+  const listeners: Array<(requestId: string | null, reason: string | null) => void> = []
+  Object.defineProperty(window, 'attn', {
+    configurable: true,
+    value: {
+      splits: { getState },
+      mail: {
+        onChanged: (listener: (requestId: string | null, reason: string | null) => void) => {
+          listeners.push(listener)
+          return () => listeners.splice(listeners.indexOf(listener), 1)
+        }
+      }
+    } as unknown as Window['attn']
+  })
+
+  const root = createRoot(document.createElement('div'))
+  const states: ReturnType<typeof useSplits>[] = []
+  function Harness(): null {
+    states.push(useSplits('a@attn.test'))
+    return null
+  }
+
+  try {
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+    })
+    expect(states.at(-1)?.state?.revision).toBe(2)
+
+    revision = 3
+    await act(async () => {
+      for (const listener of listeners) listener(null, 'split-judgments')
+      await Promise.resolve()
+    })
+    expect(getState).toHaveBeenCalledTimes(2)
+    expect(states.at(-1)?.state?.revision).toBe(3)
+  } finally {
+    await act(async () => root.unmount())
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = undefined
+  }
+})

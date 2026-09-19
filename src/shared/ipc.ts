@@ -35,9 +35,9 @@ import type { Snippet, SnippetSaveInput } from './snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
-  SplitPresetId,
   SplitState,
-  SplitThreadLocation
+  SplitThreadLocation,
+  SplitTriageStatus
 } from './splits'
 import type { ThemePreference } from './theme'
 
@@ -63,6 +63,8 @@ export const IPC_CHANNELS = {
   aiSetSetting: 'ai:setSetting',
   aiSetKey: 'ai:setKey',
   aiDeleteKey: 'ai:deleteKey',
+  aiSetTriageKey: 'ai:setTriageKey',
+  aiDeleteTriageKey: 'ai:deleteTriageKey',
   aiGenerate: 'ai:generate',
   aiCancel: 'ai:cancel',
   aiStyleExamples: 'ai:styleExamples',
@@ -115,7 +117,8 @@ export const IPC_CHANNELS = {
   splitsSetNotify: 'splits:setNotify',
   splitsDelete: 'splits:delete',
   splitsReorder: 'splits:reorder',
-  splitsRestorePreset: 'splits:restorePreset',
+  splitsGetTriageStatus: 'splits:getTriageStatus',
+  splitsRetryTriage: 'splits:retryTriage',
   mailPeekActionsReverted: 'mail:peekActionsReverted',
   mailAcknowledgeActionsReverted: 'mail:acknowledgeActionsReverted',
   mailGetConversation: 'mail:getConversation',
@@ -142,7 +145,14 @@ export const IPC_CHANNELS = {
   syncState: 'sync:state'
 } as const
 
-export type MailChangeReason = 'split-metadata'
+/**
+ * Why mail changed, where the renderer reacts to the reason rather than to the
+ * bare event. `split-judgments` moves conversations between Inbox splits and
+ * changes nothing else, so it never reloads counts or an open conversation.
+ */
+export const MAIL_CHANGE_REASONS = ['split-metadata', 'split-judgments'] as const
+
+export type MailChangeReason = (typeof MAIL_CHANGE_REASONS)[number]
 
 /**
  * E2E-only channels, registered by the main process solely under
@@ -172,6 +182,9 @@ export const TEST_CHANNELS = {
   runHistoryCycle: 'attn:test:runHistoryCycle',
   installFakeAiProvider: 'attn:test:installFakeAiProvider',
   aiProviderRequests: 'attn:test:aiProviderRequests',
+  installFakeTriageProvider: 'attn:test:installFakeTriageProvider',
+  triageRequests: 'attn:test:triageRequests',
+  runTriagePass: 'attn:test:runTriagePass',
   runLifetimeSweep: 'attn:test:runLifetimeSweep',
   runExistenceSweep: 'attn:test:runExistenceSweep',
   runFtsBackfill: 'attn:test:runFtsBackfill',
@@ -228,6 +241,10 @@ export interface InvokeChannels {
   }
   [IPC_CHANNELS.aiSetKey]: { args: [key: string]; result: AiSettings }
   [IPC_CHANNELS.aiDeleteKey]: { args: []; result: AiSettings }
+  // Smart splits keep their own TypeSafe key in a second encrypted file, so
+  // removing one key never disturbs the other feature.
+  [IPC_CHANNELS.aiSetTriageKey]: { args: [key: string]; result: AiSettings }
+  [IPC_CHANNELS.aiDeleteTriageKey]: { args: []; result: AiSettings }
   [IPC_CHANNELS.aiGenerate]: { args: [request: AiGenerateRequest]; result: { requestId: string } }
   [IPC_CHANNELS.aiCancel]: { args: [requestId: string]; result: undefined }
   // T37 voice matching: the active account's recent sent replies, selected
@@ -320,7 +337,9 @@ export interface InvokeChannels {
   }
   [IPC_CHANNELS.splitsDelete]: { args: [id: string]; result: SplitState }
   [IPC_CHANNELS.splitsReorder]: { args: [input: ReorderSplitsInput]; result: SplitState }
-  [IPC_CHANNELS.splitsRestorePreset]: { args: [id: SplitPresetId]; result: SplitState }
+  [IPC_CHANNELS.splitsGetTriageStatus]: { args: []; result: SplitTriageStatus }
+  /** True when a live classifier took the retry; false when no account is active. */
+  [IPC_CHANNELS.splitsRetryTriage]: { args: []; result: boolean }
   [IPC_CHANNELS.mailPeekActionsReverted]: {
     args: [accountId: string]
     result: ActionRevertNotice | null

@@ -683,9 +683,10 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
       const started = performance.now()
       const state = await window.attn.splits.save({
         name: 'Generated mail',
+        notify: false,
+        mode: 'rules',
         operator: 'any',
-        conditions: [{ type: 'senderDomain', value: 'example.test' }],
-        notify: false
+        conditions: [{ type: 'senderDomain', value: 'example.test' }]
       })
       const split = state.splits.find((candidate) => candidate.name === 'Generated mail')
       if (!split) throw new Error('Generated split was not created')
@@ -695,7 +696,7 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     expect(mutation.durationMs, 'rule mutation and 10,000-thread re-bucket').toBeLessThan(
       SPLIT_REBUCKET_CEILING_MS
     )
-    await expect(page.getByTestId('split-tab')).toHaveCount(6)
+    await expect(page.getByTestId('split-tab')).toHaveCount(3)
 
     // New custom splits follow Important. Exercise the supported Tab navigation;
     // numbered G chords are no longer assigned to split commands.

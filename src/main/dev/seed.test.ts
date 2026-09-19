@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { IMPORTANT_SPLIT_ID, OTHER_SPLIT_ID } from '../../shared/splits'
 import { openDatabase } from '../db'
+import { getSplitState } from '../splits'
 import { loadSeed, readSeedRemoteThreadIds, resolveInternalDate } from './seed'
 
 const base = { id: 'm1', from: 'a@b.test', to: 'c@d.test', subject: 's' }
@@ -72,6 +74,54 @@ describe('loadSeed', () => {
         { account_id: 'ready@attn.test', backfill_cursor: 'done', split_metadata_cursor: 'done' },
         { account_id: 'syncing@attn.test', backfill_cursor: 'bodies', split_metadata_cursor: 'done' }
       ])
+    } finally {
+      db.close()
+      rmSync(fixtureDir, { recursive: true, force: true })
+    }
+  })
+
+  it('seeds fixture split rules in order, ahead of Important, with Other last', () => {
+    const db = openDatabase(':memory:')
+    const fixtureDir = mkdtempSync(join(tmpdir(), 'attn-seed-'))
+    const fixturePath = join(fixtureDir, 'split-rules.json')
+    writeFileSync(
+      fixturePath,
+      JSON.stringify({
+        account: 'rules@attn.test',
+        splitRules: [
+          {
+            id: 'preset:calendar',
+            name: 'Calendar',
+            operator: 'any',
+            conditions: [{ type: 'attachmentFilenameSuffix', value: '.ics' }],
+            notify: false
+          },
+          {
+            id: 'preset:github',
+            name: 'GitHub',
+            operator: 'any',
+            conditions: [{ type: 'senderDomain', value: 'github.com' }],
+            notify: true
+          }
+        ],
+        threads: []
+      })
+    )
+    try {
+      loadSeed(db, fixturePath)
+      const expected = [
+        ['preset:calendar', 'custom', false],
+        ['preset:github', 'custom', true],
+        [IMPORTANT_SPLIT_ID, 'base', true],
+        [OTHER_SPLIT_ID, 'fallback', false]
+      ]
+      const listed = (): unknown[] =>
+        getSplitState(db, 'rules@attn.test').splits.map((split) => [split.id, split.kind, split.notify])
+      expect(listed()).toEqual(expected)
+
+      // `reloadSeed` replays the fixture into the same profile.
+      loadSeed(db, fixturePath)
+      expect(listed()).toEqual(expected)
     } finally {
       db.close()
       rmSync(fixtureDir, { recursive: true, force: true })

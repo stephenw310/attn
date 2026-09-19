@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { Db } from '../db'
 import type { GmailPart, GmailThread } from '../gmail/parse'
-import { ensureSplitSetup } from '../splits'
+import { ensureSplitSetup, insertSeedSplitRules, type SeedSplitRule } from '../splits'
 import { ensureAccount, type LabelRow, persistThread, upsertLabels } from '../sync/persist'
 
 interface SeedMessage {
@@ -61,6 +61,12 @@ interface SeedAccountFixture {
   remoteSearches?: Record<string, string[]>
   /** Opt into production split initialization. Existing broad fixtures stay unsplit. */
   splitSetup?: boolean
+  /**
+   * Rule-based splits seeded ahead of Important, in this order, with the ids the
+   * fixture names. They are ordinary editable rules. Either key turns on split
+   * initialization. A replayed seed keeps a rule the account already holds.
+   */
+  splitRules?: SeedSplitRule[]
 }
 
 /**
@@ -242,7 +248,10 @@ export function loadSeed(db: Db, path: string, options: SeedLoadOptions = {}): S
       // Same write path as real sync (persist.ts) — the seam must never grow
       // parallel SQL that can drift from what production writes.
       ensureAccount(db, fixture.account, fixture.account)
-      if (fixture.splitSetup) ensureSplitSetup(db, fixture.account)
+      if (fixture.splitSetup || fixture.splitRules?.length) {
+        ensureSplitSetup(db, fixture.account)
+        insertSeedSplitRules(db, fixture.account, fixture.splitRules ?? [])
+      }
       const catalog = (index === 0 ? options.labels : undefined) ?? fixture.labels ?? []
       const changed = upsertLabels(db, fixture.account, catalog)
       labelsChanged = labelsChanged || changed

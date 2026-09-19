@@ -11,6 +11,8 @@ interface Options {
   /** Null until the first read lands; the toggles fall back to their defaults. */
   settings: AppSettings | null
   openSettings: (control?: SettingsControl | null) => void
+  /** The Split rules manager, which holds the smart-splits consent (F11). */
+  openSplitRules: () => void
   openCheatSheet: () => void
   updateAppSetting: <K extends AppSettingKey>(key: K, value: AppSettings[K]) => void
   updateAccountSetting: <K extends AccountSettingKey>(key: K, value: AccountSettings[K]) => void
@@ -26,7 +28,7 @@ interface Options {
  * value when it runs, so the batch registers once rather than on every write.
  */
 export function useSettingsCommands(options: Options): void {
-  const { openSettings, openCheatSheet, requestAiDraft, showToast } = options
+  const { openSettings, openSplitRules, openCheatSheet, requestAiDraft, showToast } = options
   const { updateAppSetting, updateAccountSetting } = options
   const settingsRef = useRef(options.settings)
   settingsRef.current = options.settings
@@ -48,6 +50,7 @@ export function useSettingsCommands(options: Options): void {
         createCommand('privacy.remoteImages.overrides', () => openSettings('remoteImages')),
         createCommand('snippets.manage', () => openSettings('snippets')),
         createCommand('ai.settings', () => openSettings('aiWriting')),
+        createCommand('ai.triageSettings', openSplitRules),
         createCommand('autocomplete.enable', () => openSettings('aiWriting')),
         createCommand('autocomplete.disable', () => {
           void window.attn?.ai
@@ -95,6 +98,14 @@ export function useSettingsCommands(options: Options): void {
             .catch(() => {})
         })
       ]),
-    [openCheatSheet, openSettings, requestAiDraft, showToast, updateAccountSetting, updateAppSetting]
+    [
+      openCheatSheet,
+      openSettings,
+      openSplitRules,
+      requestAiDraft,
+      showToast,
+      updateAccountSetting,
+      updateAppSetting
+    ]
   )
 }

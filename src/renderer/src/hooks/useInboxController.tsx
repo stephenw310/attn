@@ -162,6 +162,11 @@ export function useInboxController({
   activeSplitIdRef.current = splits.activeSplitId
   const inboxSplitIdsKey = splits.state?.splits.map((split) => split.id).join('\u0000') ?? ''
   const inboxSplitRevision = splits.state?.revision
+  // True while the Inbox list itself is the surface on screen. A stored
+  // judgment moves conversations between splits, so both the list re-read and
+  // the speculative warming of the other splits wait for this (F11).
+  const inboxListOnScreen =
+    view === 'inbox' && !readerOpen && !settingsOpen && !splitRulesOpen && composerDraft === null
   const {
     sync,
     inboxBackfillReady,
@@ -205,7 +210,8 @@ export function useInboxController({
     selectedThreadIdRef,
     selectedDraftIdRef,
     setMailboxSelectedIndex,
-    splits.state !== null
+    splits.state !== null,
+    inboxListOnScreen
   )
   const records = useViewRecords({
     account: activeAccount,
@@ -239,7 +245,13 @@ export function useInboxController({
   const activeInboxRowsResolved =
     activeInboxRowsReady && !(loadedInboxSplitStale && (realThreads?.length ?? 0) === 0)
   useEffect(() => {
-    if (!activeAccount || !activeInboxRowsReady || !inboxSplitIdsKey || inboxSplitRevision === undefined) {
+    if (
+      !activeAccount ||
+      !activeInboxRowsReady ||
+      !inboxListOnScreen ||
+      !inboxSplitIdsKey ||
+      inboxSplitRevision === undefined
+    ) {
       return
     }
     // Let the visible rows paint and their conversation reads reach the utility
@@ -252,7 +264,14 @@ export function useInboxController({
       window.cancelAnimationFrame(frame)
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [activeAccount, activeInboxRowsReady, inboxSplitIdsKey, inboxSplitRevision, preloadInboxSplits])
+  }, [
+    activeAccount,
+    activeInboxRowsReady,
+    inboxListOnScreen,
+    inboxSplitIdsKey,
+    inboxSplitRevision,
+    preloadInboxSplits
+  ])
   const activeInboxSelectionReady = activeInboxRowsReady && !loadedInboxSplitStale
   const showInboxZero = Boolean(
     !searchOpen &&
@@ -436,6 +455,11 @@ export function useInboxController({
     setSettingsOpen(false)
     setSettingsFocus(null)
   }, [])
+  /** Split rules own the smart-splits consent, so Settings links here (F11, F15). */
+  const openSplitRules = useCallback(() => {
+    closeSettings()
+    setSplitRulesOpen(true)
+  }, [closeSettings])
 
   // Settings Esc rides the bubble phase: overlays that own Escape (palette,
   // cheat sheet, remove-account dialog) consume it during capture, and the
@@ -817,6 +841,7 @@ export function useInboxController({
   useSettingsCommands({
     settings: appSettings,
     openSettings,
+    openSplitRules,
     openCheatSheet,
     updateAppSetting,
     updateAccountSetting,
@@ -958,6 +983,7 @@ export function useInboxController({
     toggleFooter,
     toggleSidebar,
     openSettings,
+    openSplitRules,
     closeSettings,
     openCheatSheet,
     closeCheatSheet,

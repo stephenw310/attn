@@ -22,6 +22,7 @@ async function mount(settings: AppSettings | null) {
     value: { ai: { setSetting: vi.fn(async () => {}) } } as unknown as Window['attn']
   })
   const opened: Array<string | null> = []
+  const splitRulesOpens: string[] = []
   const appWrites: Array<[string, unknown]> = []
   const accountWrites: Array<[string, unknown]> = []
   const aiDraft = vi.fn()
@@ -31,6 +32,7 @@ async function mount(settings: AppSettings | null) {
     useSettingsCommands({
       settings: current,
       openSettings: (control = null) => opened.push(control),
+      openSplitRules: () => splitRulesOpens.push('split-rules'),
       openCheatSheet: () => {},
       updateAppSetting: (key, value) => appWrites.push([key, value]),
       updateAccountSetting: (key, value) => accountWrites.push([key, value]),
@@ -42,6 +44,7 @@ async function mount(settings: AppSettings | null) {
   await act(async () => root.render(createElement(Harness)))
   return {
     opened,
+    splitRulesOpens,
     appWrites,
     accountWrites,
     aiDraft,
@@ -76,6 +79,12 @@ test('deep links open the surface on their control and direct commands act at on
     expect(harness.accountWrites.at(-1)).toEqual(['attnSignatureEnabled', false])
     await harness.run('composer.aiDraft')
     expect(harness.aiDraft).toHaveBeenCalledTimes(1)
+
+    // Smart splits live in Split rules, so their command opens that manager
+    // rather than a Settings page (F11, F15).
+    await harness.run('ai.triageSettings')
+    expect(harness.splitRulesOpens).toHaveLength(1)
+    expect(harness.opened).toEqual(['syncLimit', 'snippets', 'remoteImages'])
   } finally {
     await harness.unmount()
   }

@@ -3,6 +3,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { MailChangeReason } from '../../../shared/ipc'
 import {
   type SystemMailboxCounts,
   THREAD_PAGE_SIZE,
@@ -210,6 +211,239 @@ describe('useMailData mailbox refreshes', () => {
     })
     mountedRoots.splice(mountedRoots.indexOf(root), 1)
     expect(listThreadPage).toHaveBeenCalledTimes(requestsBeforeUnmount)
+  })
+
+  it('defers a judgment behind the reader and re-reads the Inbox list once on the way back', async () => {
+    // A judging pass bumps the split revision and announces itself every few
+    // seconds. Behind an open conversation the list keeps the rows it has.
+    let splitRevision = 7
+    let rows = [thread('a'), thread('b')]
+    const listThreadPage = vi.fn(
+      (view: string, _cursor: ThreadPageCursor | undefined, splitId?: string): Promise<ThreadPage> =>
+        Promise.resolve(
+          view === 'inbox'
+            ? { rows, nextCursor: null, ...(splitId ? { splitRevision } : {}) }
+            : { rows: [], nextCursor: null }
+        )
+    )
+    const getMailboxCounts = vi.fn(() =>
+      Promise.resolve({ inbox: 2, allMail: 2, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 })
+    )
+    const inboxReads = (): number => listThreadPage.mock.calls.filter((call) => call[0] === 'inbox').length
+    const stop = (): void => {}
+    const listeners: Array<(requestId: string | null, reason: MailChangeReason | null) => void> = []
+    const emitMailChanged = (reason: MailChangeReason | null): void => {
+      for (const listener of listeners) listener(null, reason)
+    }
+    const bridge = {
+      sync: {
+        getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
+        retry: () => Promise.resolve(),
+        onState: () => stop
+      },
+      mail: {
+        listThreadPage,
+        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listLabels: () => Promise.resolve([]),
+        getMailboxCounts,
+        getUnreadCount: () => Promise.resolve(0),
+        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+        onChanged: (listener: (requestId: string | null, reason: MailChangeReason | null) => void) => {
+          listeners.push(listener)
+          return () => listeners.splice(listeners.indexOf(listener), 1)
+        }
+      },
+      draft: { list: () => Promise.resolve([]) },
+      outbox: {
+        listPending: () => Promise.resolve([]),
+        onChanged: () => stop,
+        onProgress: () => stop
+      }
+    } as unknown as typeof window.attn
+    Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
+
+    const activeViewRef: React.RefObject<MailView> = { current: 'inbox' }
+    const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
+    const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
+    const selection = selectedIndexState()
+    let inboxListOnScreen = true
+    let latest: ReturnType<typeof useMailData> | null = null
+
+    const currentState = (): ReturnType<typeof useMailData> => {
+      if (!latest) throw new Error('hook state was not captured')
+      return latest
+    }
+
+    function Harness(): null {
+      latest = useMailData(
+        'seed@attn.test',
+        'preset:github',
+        splitRevision,
+        activeViewRef,
+        selectedThreadIdRef,
+        selectedDraftIdRef,
+        selection.setState,
+        true,
+        inboxListOnScreen
+      )
+      return null
+    }
+
+    const root = createRoot(document.createElement('div'))
+    mountedRoots.push(root)
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    const readsAtMount = inboxReads()
+    const countsAtMount = getMailboxCounts.mock.calls.length
+    expect(currentState().realThreads).toEqual(rows)
+
+    // The conversation opens, then the pass stores a judgment: the revision
+    // moves, and the split strip updates, but the list behind stays put.
+    inboxListOnScreen = false
+    await act(async () => {
+      root.render(createElement(Harness))
+    })
+    rows = [thread('b')]
+    await act(async () => {
+      emitMailChanged('split-judgments')
+      splitRevision = 8
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(inboxReads()).toBe(readsAtMount)
+    expect(getMailboxCounts.mock.calls.length).toBe(countsAtMount)
+    expect(currentState().realThreads).toEqual([thread('a'), thread('b')])
+
+    // Closing the reader reads the moved rows once. Judgments change no
+    // mailbox total, so the counts stay as they are.
+    inboxListOnScreen = true
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(inboxReads()).toBe(readsAtMount + 1)
+    expect(currentState().realThreads).toEqual([thread('b')])
+    expect(getMailboxCounts.mock.calls.length).toBe(countsAtMount)
+
+    // Every other reason still refreshes the whole snapshot at once.
+    inboxListOnScreen = false
+    await act(async () => {
+      root.render(createElement(Harness))
+    })
+    await act(async () => {
+      emitMailChanged(null)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(inboxReads()).toBe(readsAtMount + 2)
+    expect(getMailboxCounts.mock.calls.length).toBe(countsAtMount + 1)
+  })
+
+  it('reads the visible Inbox list once for a judgment and keeps the selected row', async () => {
+    let splitRevision = 7
+    let rows = [thread('a'), thread('b'), thread('c')]
+    const listThreadPage = vi.fn(
+      (view: string, _cursor: ThreadPageCursor | undefined, splitId?: string): Promise<ThreadPage> =>
+        Promise.resolve(
+          view === 'inbox'
+            ? { rows, nextCursor: null, ...(splitId ? { splitRevision } : {}) }
+            : { rows: [], nextCursor: null }
+        )
+    )
+    const getMailboxCounts = vi.fn(() =>
+      Promise.resolve({ inbox: 3, allMail: 3, sent: 0, starred: 0, snoozed: 0, spam: 0, trash: 0 })
+    )
+    const inboxReads = (): number => listThreadPage.mock.calls.filter((call) => call[0] === 'inbox').length
+    const stop = (): void => {}
+    const listeners: Array<(requestId: string | null, reason: MailChangeReason | null) => void> = []
+    const bridge = {
+      sync: {
+        getState: () => Promise.resolve({ phase: 'idle' as const }),
+        getInboxReady: () => Promise.resolve(true),
+        retry: () => Promise.resolve(),
+        onState: () => stop
+      },
+      mail: {
+        listThreadPage,
+        listLabelThreadPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listSnoozedPage: () => Promise.resolve({ rows: [], nextCursor: null }),
+        listLabels: () => Promise.resolve([]),
+        getMailboxCounts,
+        getUnreadCount: () => Promise.resolve(0),
+        getActionQueueStatus: () => Promise.resolve({ pending: 0, paused: 0 }),
+        onChanged: (listener: (requestId: string | null, reason: MailChangeReason | null) => void) => {
+          listeners.push(listener)
+          return () => listeners.splice(listeners.indexOf(listener), 1)
+        }
+      },
+      draft: { list: () => Promise.resolve([]) },
+      outbox: {
+        listPending: () => Promise.resolve([]),
+        onChanged: () => stop,
+        onProgress: () => stop
+      }
+    } as unknown as typeof window.attn
+    Object.defineProperty(window, 'attn', { configurable: true, value: bridge })
+
+    const activeViewRef: React.RefObject<MailView> = { current: 'inbox' }
+    const selectedThreadIdRef: React.RefObject<string | null> = { current: null }
+    const selectedDraftIdRef: React.RefObject<string | null> = { current: null }
+    const selection = selectedIndexState()
+    let latest: ReturnType<typeof useMailData> | null = null
+
+    const currentState = (): ReturnType<typeof useMailData> => {
+      if (!latest) throw new Error('hook state was not captured')
+      return latest
+    }
+
+    function Harness(): null {
+      latest = useMailData(
+        'seed@attn.test',
+        'preset:github',
+        splitRevision,
+        activeViewRef,
+        selectedThreadIdRef,
+        selectedDraftIdRef,
+        selection.setState,
+        true,
+        true
+      )
+      return null
+    }
+
+    const root = createRoot(document.createElement('div'))
+    mountedRoots.push(root)
+    await act(async () => {
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    const readsAtMount = inboxReads()
+    const countsAtMount = getMailboxCounts.mock.calls.length
+    selectedThreadIdRef.current = 'b'
+    selection.setState(1)
+
+    // The first row moves to another split while the list is on screen. The
+    // rows update in place, and the cursor stays on the conversation it held.
+    rows = [thread('b'), thread('c')]
+    await act(async () => {
+      for (const listener of listeners) listener(null, 'split-judgments')
+      splitRevision = 8
+      root.render(createElement(Harness))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(inboxReads()).toBe(readsAtMount + 1)
+    expect(currentState().realThreads).toEqual(rows)
+    expect(selection.valueRef.current).toBe(0)
+    expect(getMailboxCounts.mock.calls.length).toBe(countsAtMount)
   })
 
   it('does not let an older Inbox snapshot erase rows loaded after switching mailboxes', async () => {

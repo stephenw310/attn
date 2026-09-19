@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateAiSettingUpdate } from './ai'
+import { AI_SETTINGS_DEFAULTS, validateAiSettingUpdate } from './ai'
 
 describe('validateAiSettingUpdate', () => {
   it('allows plain HTTP only for a loopback endpoint', () => {
@@ -26,5 +26,22 @@ describe('validateAiSettingUpdate', () => {
     expect(() => validateAiSettingUpdate('baseUrl', 'file:///etc/passwd')).toThrow(/invalid AI base URL/)
     expect(() => validateAiSettingUpdate('baseUrl', 'not a url')).toThrow(/invalid AI base URL/)
     expect(validateAiSettingUpdate('baseUrl', null)).toEqual({ key: 'baseUrl', value: null })
+  })
+
+  it('narrows the smart-splits consent and model, which default off and unset', () => {
+    expect(AI_SETTINGS_DEFAULTS.triageEnabled).toBe(false)
+    expect(AI_SETTINGS_DEFAULTS.triageModel).toBeNull()
+    expect(validateAiSettingUpdate('triageEnabled', true)).toEqual({ key: 'triageEnabled', value: true })
+    expect(() => validateAiSettingUpdate('triageEnabled', 'yes')).toThrow(/invalid triageEnabled value/)
+    expect(validateAiSettingUpdate('triageModel', null)).toEqual({ key: 'triageModel', value: null })
+    expect(validateAiSettingUpdate('triageModel', 'jev-pinned')).toEqual({
+      key: 'triageModel',
+      value: 'jev-pinned'
+    })
+    expect(() => validateAiSettingUpdate('triageModel', '')).toThrow(/invalid smart splits model/)
+    expect(() => validateAiSettingUpdate('triageModel', 'x'.repeat(201))).toThrow(
+      /invalid smart splits model/
+    )
+    expect(() => validateAiSettingUpdate('triageModel', 7)).toThrow(/invalid smart splits model/)
   })
 })

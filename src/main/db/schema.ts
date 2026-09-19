@@ -1,7 +1,7 @@
 // Current schema snapshot for new profiles. Every change bumps this version and
 // adds the matching ordered step in migrations.ts; the registry test makes a
 // version-only bump fail.
-export const CURRENT_SCHEMA_VERSION = 27
+export const CURRENT_SCHEMA_VERSION = 29
 
 // The oldest profile this build can upgrade in place. Keep the complete path
 // from this version to CURRENT_SCHEMA_VERSION in migrations.ts.
@@ -60,17 +60,37 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_thread ON messages (account_id, thread_id, internal_date);
 
+-- A split is described or rule-based, never both. The description column holds
+-- the prose of a described split and stays NULL for a rule-based one, whose
+-- conditions live in match_json.
 CREATE TABLE split_rules (
-  account_id TEXT NOT NULL,
-  id         TEXT NOT NULL,
-  position   INTEGER NOT NULL,
-  name       TEXT NOT NULL,
-  kind       TEXT NOT NULL,
-  match_json TEXT NOT NULL DEFAULT '{"version":1,"operator":"any","conditions":[]}',
-  notify     INTEGER NOT NULL DEFAULT 0,
+  account_id  TEXT NOT NULL,
+  id          TEXT NOT NULL,
+  position    INTEGER NOT NULL,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  match_json  TEXT NOT NULL DEFAULT '{"version":1,"operator":"any","conditions":[]}',
+  notify      INTEGER NOT NULL DEFAULT 0,
+  description TEXT,
   PRIMARY KEY (account_id, id)
 );
 CREATE INDEX idx_split_rules_order ON split_rules (account_id, position);
+
+-- One classifier judgment per split per thread. description_hash names the
+-- question the judgment answered -- the split's name and its description text
+-- -- so renaming a split or editing its prose retires its old answers instead
+-- of inheriting them. evidence_key is the latest message id the judgment saw,
+-- so a new message on the thread re-judges it.
+CREATE TABLE split_judgments (
+  account_id       TEXT NOT NULL,
+  thread_id        TEXT NOT NULL,
+  split_id         TEXT NOT NULL,
+  description_hash TEXT NOT NULL,
+  evidence_key     TEXT NOT NULL,
+  probability      REAL NOT NULL,
+  judged_at        INTEGER NOT NULL,
+  PRIMARY KEY (account_id, thread_id, split_id)
+);
 
 CREATE TABLE split_config (
   account_id  TEXT PRIMARY KEY,

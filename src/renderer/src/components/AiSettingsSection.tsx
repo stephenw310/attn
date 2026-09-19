@@ -12,10 +12,13 @@ import {
 import { useShowToast } from '../toastContext'
 import { ACTION_BUTTON, INPUT, NOTE, ROW, SELECT } from './settingsStyles'
 
-// The AI-writing settings pane (T36, SPEC F17). Everything here is app-global
-// (F18 rule 9). Both enables are deliberate consent flows: turning one on
-// shows its disclosure first, and only the confirm button writes. The key is
-// write-only — it is never echoed back into the UI after saving.
+// The AI settings pane (T36, SPEC F17). Everything here is app-global (F18
+// rule 9). Every enable is a deliberate consent flow: turning one on shows its
+// disclosure first, and only the confirm button writes. Keys are write-only —
+// they are never echoed back into the UI after saving. Smart splits carry
+// their own consent and their own TypeSafe key, so a user may run either
+// feature alone; their controls live in the Split rules manager, beside the
+// descriptions they judge.
 
 const CONFIRM_PANEL = 'mx-3 mt-1 rounded-md border border-accent/40 bg-accent/10 px-3 py-2'
 const CONFIRM_APPLY =
@@ -35,7 +38,7 @@ const AUTOCOMPLETE_DISCLOSURE =
   'sent mail, and ' +
   'content already sent to a provider cannot be recalled.'
 
-export function AiSettingsSection(): React.JSX.Element {
+export function AiSettingsSection({ onOpenSplits }: { onOpenSplits: () => void }): React.JSX.Element {
   const onToast = useShowToast()
   const [settings, setSettings] = useState<AiSettings | null>(null)
   const [confirming, setConfirming] = useState<'enable' | 'autocomplete' | null>(null)
@@ -399,6 +402,21 @@ export function AiSettingsSection(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      <div className={ROW}>
+        <span className="flex min-w-0 flex-col">
+          <span className="text-sm text-ink">Smart splits</span>
+          <span className={NOTE}>Set up in Split rules: write an AI rule and AI sorts mail into it.</span>
+        </span>
+        <button
+          type="button"
+          data-testid="settings-ai-open-split-rules"
+          onClick={onOpenSplits}
+          className={ACTION_BUTTON}
+        >
+          Open Split rules
+        </button>
+      </div>
     </div>
   )
 }

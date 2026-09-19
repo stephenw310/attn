@@ -1,8 +1,9 @@
 // Utility-process storage for the app-global AI configuration (T36, F17/F18
 // rule 9). Rows live in the plaintext `settings` table under the app
-// sentinel — they hold toggles, provider choice, and the voice profile, and
-// may NEVER hold the provider key (that is safeStorage-encrypted in a file
-// owned by main). Writes go through the shared allowlist validator.
+// sentinel — they hold toggles, provider choice, the voice profile, and the
+// smart-splits consent, and may NEVER hold either key (the writing provider
+// key and the TypeSafe key are safeStorage-encrypted in separate files owned
+// by main). Writes go through the shared allowlist validator.
 
 import {
   AI_SETTINGS_DEFAULTS,
@@ -38,7 +39,9 @@ const SETTINGS: { [K in keyof AiStoredSettings]: TypedSetting<AiStoredSettings[K
     isAiVoiceTone(raw) ? raw : undefined
   ),
   voiceRules: typedSetting('aiVoiceRules', AI_SETTINGS_DEFAULTS.voiceRules, asText),
-  voiceMatchingEnabled: typedSetting('aiVoiceMatching', AI_SETTINGS_DEFAULTS.voiceMatchingEnabled, asBoolean)
+  voiceMatchingEnabled: typedSetting('aiVoiceMatching', AI_SETTINGS_DEFAULTS.voiceMatchingEnabled, asBoolean),
+  triageEnabled: typedSetting('aiTriageEnabled', AI_SETTINGS_DEFAULTS.triageEnabled, asBoolean),
+  triageModel: typedSetting('aiTriageModel', AI_SETTINGS_DEFAULTS.triageModel, asText)
 }
 
 export function readAiStoredSettings(db: Db): AiStoredSettings {
@@ -50,7 +53,9 @@ export function readAiStoredSettings(db: Db): AiStoredSettings {
     model: SETTINGS.model.read(db),
     voiceTone: SETTINGS.voiceTone.read(db),
     voiceRules: SETTINGS.voiceRules.read(db),
-    voiceMatchingEnabled: SETTINGS.voiceMatchingEnabled.read(db)
+    voiceMatchingEnabled: SETTINGS.voiceMatchingEnabled.read(db),
+    triageEnabled: SETTINGS.triageEnabled.read(db),
+    triageModel: SETTINGS.triageModel.read(db)
   }
 }
 

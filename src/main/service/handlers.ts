@@ -30,8 +30,7 @@ import {
   type ThreadRow
 } from '../../shared/mail'
 import { validateAccountSettingUpdate } from '../../shared/settings'
-import type { ReorderSplitsInput, SaveSplitInput, SplitCondition, SplitPresetId } from '../../shared/splits'
-import { SPLIT_PRESET_IDS } from '../../shared/splits'
+import type { ReorderSplitsInput, SaveSplitInput, SplitCondition } from '../../shared/splits'
 import { isThemePreference, normalizeThemePreference } from '../../shared/theme'
 import {
   actionQueueStatus,
@@ -101,11 +100,11 @@ import {
   deleteSplit,
   hasSplitSetup,
   reorderSplits,
-  restoreSplitPreset,
   saveSplit,
   setSplitNotify,
   splitLocationForThread,
-  splitRevision
+  splitRevision,
+  splitTriageCounts
 } from '../splits'
 import { hydrateMissingThreadBodies } from '../sync/bodies'
 import { idleMissingBodyState, relabelMissingBodyState } from '../sync/bodyHydration'
@@ -144,6 +143,8 @@ export interface ServiceHandlerContext {
   /** The active account's live workers, or null while no account is active. */
   activeSession: () => ServiceSession | null
   broadcastMailChanged: (serverSearchRequestId?: string) => void
+  /** Smart-splits consent or model changed: every session re-reads its gate. */
+  triageChanged: () => void
   /** Push the stored remote-image policy to main's request filter (T33). */
   publishRemoteImagePolicy: () => void
   mailboxCounts: (accountId: string) => SystemMailboxCounts
@@ -268,16 +269,26 @@ function isSplitCondition(value: unknown): value is SplitCondition {
   )
 }
 
+/** A split is described or rule-based: `mode` decides which fields have to be there. */
 function isSaveSplitInput(value: unknown): value is SaveSplitInput {
   if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<SaveSplitInput>
+  const candidate = value as {
+    id?: unknown
+    name?: unknown
+    notify?: unknown
+    mode?: unknown
+    operator?: unknown
+    conditions?: unknown
+    description?: unknown
+  }
+  if (candidate.id !== undefined && !nonEmptyString(candidate.id)) return false
+  if (typeof candidate.name !== 'string' || typeof candidate.notify !== 'boolean') return false
+  if (candidate.mode === 'description') return typeof candidate.description === 'string'
+  if (candidate.mode !== 'rules') return false
   return (
-    (candidate.id === undefined || nonEmptyString(candidate.id)) &&
-    typeof candidate.name === 'string' &&
     (candidate.operator === 'any' || candidate.operator === 'all') &&
     Array.isArray(candidate.conditions) &&
-    candidate.conditions.every(isSplitCondition) &&
-    typeof candidate.notify === 'boolean'
+    candidate.conditions.every(isSplitCondition)
   )
 }
 
@@ -476,12 +487,21 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     writeAccountSetting(context.db, account, 'commandPaletteUsage', JSON.stringify(sanitized))
     return sanitized
   })
-  // T36 AI settings storage. keyPresent is main-only custody: the utility
-  // reports false and main overwrites it from the encrypted key file.
-  handle(IPC_CHANNELS.aiGetSettings, () => ({ ...readAiStoredSettings(context.db), keyPresent: false }))
+  // T36 AI settings storage. Both key-presence flags are main-only custody:
+  // the utility reports false and main overwrites them from the encrypted key
+  // files.
+  handle(IPC_CHANNELS.aiGetSettings, () => ({
+    ...readAiStoredSettings(context.db),
+    keyPresent: false,
+    triageKeyPresent: false
+  }))
   handle(IPC_CHANNELS.aiSetSetting, (_event, key, value) => {
     const update = validateAiSettingUpdate(key, value)
-    return { ...writeAiStoredSetting(context.db, update), keyPresent: false }
+    const stored = writeAiStoredSetting(context.db, update)
+    // Turning triage on starts the classifier now rather than at the next
+    // mail change; turning it off is picked up at the next batch boundary.
+    if (update.key === 'triageEnabled' || update.key === 'triageModel') context.triageChanged()
+    return { ...stored, keyPresent: false, triageKeyPresent: false }
   })
   handle(IPC_CHANNELS.aiStyleExamples, (_event, excludeThreadId) => {
     if (!nonEmptyString(excludeThreadId)) throw new Error('invalid thread id')
@@ -943,7 +963,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.splitsGetState, () => {
     const account = context.currentAccountId()
     if (!account || (context.testUserData && !hasSplitSetup(context.db, account))) {
-      return { revision: 0, splits: [], restorablePresetIds: [] }
+      return { revision: 0, splits: [] }
     }
     return context.splitState(account)
   })
@@ -982,13 +1002,33 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     context.broadcastMailChanged()
     return state
   })
-  handle(IPC_CHANNELS.splitsRestorePreset, (_event, id) => {
-    if (typeof id !== 'string' || !(SPLIT_PRESET_IDS as readonly string[]).includes(id)) {
-      throw new Error('invalid split preset')
+  // `keyPresent` is main-only custody, exactly as the AI settings are: the
+  // utility reports false and main overwrites it from the encrypted key file.
+  handle(IPC_CHANNELS.splitsGetTriageStatus, () => {
+    const account = context.currentAccountId()
+    const triage = context.activeSession()?.splitTriage
+    // The failures live in the pass, not in SQLite: they are this session's
+    // account of what it could not do, and a restart is a fresh start.
+    const failed = triage?.failedThreadIds()
+    const counts =
+      !account || (context.testUserData && !hasSplitSetup(context.db, account))
+        ? { describedSplits: 0, judgedThreads: 0, pendingThreads: 0, failedThreads: 0 }
+        : splitTriageCounts(context.db, account, failed)
+    return {
+      ...counts,
+      failedCauses: counts.failedThreads > 0 ? (triage?.failedCauses() ?? []) : [],
+      enabled: readAiStoredSettings(context.db).triageEnabled,
+      // The refusal is the session's, so it reads from the pass rather than
+      // from main: main holds the key, but only the pass was told it is bad.
+      keyRefused: triage?.keyRefused() ?? false,
+      keyPresent: false
     }
-    const state = restoreSplitPreset(context.db, requireAccount(context), id as SplitPresetId)
-    context.broadcastMailChanged()
-    return state
+  })
+  handle(IPC_CHANNELS.splitsRetryTriage, () => {
+    const triage = context.activeSession()?.splitTriage
+    if (!triage) return false
+    triage.retryFailed()
+    return true
   })
   handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration, mailbox) => {
     if (typeof threadId !== 'string') return null

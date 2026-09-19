@@ -22,6 +22,8 @@ describe('AI stored settings', () => {
     writeAiStoredSetting(db, { key: 'voiceTone', value: 'formal' })
     writeAiStoredSetting(db, { key: 'voiceRules', value: 'no exclamation marks' })
     writeAiStoredSetting(db, { key: 'voiceMatchingEnabled', value: true })
+    writeAiStoredSetting(db, { key: 'triageEnabled', value: true })
+    writeAiStoredSetting(db, { key: 'triageModel', value: 'jev-pinned' })
     expect(readAiStoredSettings(db)).toEqual({
       enabled: true,
       autocompleteEnabled: true,
@@ -30,7 +32,9 @@ describe('AI stored settings', () => {
       model: 'my-model',
       voiceTone: 'formal',
       voiceRules: 'no exclamation marks',
-      voiceMatchingEnabled: true
+      voiceMatchingEnabled: true,
+      triageEnabled: true,
+      triageModel: 'jev-pinned'
     })
     writeAiStoredSetting(db, { key: 'enabled', value: false })
     writeAiStoredSetting(db, { key: 'model', value: null })
@@ -38,6 +42,18 @@ describe('AI stored settings', () => {
     expect(reset.enabled).toBe(false)
     expect(reset.model).toBeNull()
     expect(db.prepare("SELECT 1 FROM settings WHERE key IN ('aiEnabled', 'aiModel')").all()).toEqual([])
+  })
+
+  it('smart-splits rows are independent of the AI-writing rows', () => {
+    const db = store()
+    writeAiStoredSetting(db, { key: 'triageEnabled', value: true })
+    // Turning AI writing off must leave the separate smart-splits consent alone.
+    writeAiStoredSetting(db, { key: 'enabled', value: false })
+    expect(readAiStoredSettings(db).triageEnabled).toBe(true)
+    writeAiStoredSetting(db, { key: 'triageModel', value: 'jev-pinned' })
+    writeAiStoredSetting(db, { key: 'triageModel', value: null })
+    expect(readAiStoredSettings(db).triageModel).toBeNull()
+    expect(db.prepare("SELECT 1 FROM settings WHERE key = 'aiTriageModel'").all()).toEqual([])
   })
 
   it('a corrupted provider row falls back to the default provider', () => {

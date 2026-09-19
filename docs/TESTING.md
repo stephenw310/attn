@@ -62,6 +62,8 @@ Use `boot.relaunch()` to test persistence through a clean shutdown. Use `boot.re
 
 Server-search fixtures map exact translated Gmail queries in `remoteSearches` to snapshots in `remoteThreads`. Unmapped queries return no results.
 
+Set `splitSetup` to create the Important and Other splits. Add rule-based splits with `splitRules`. Each entry takes an `id`, a `name`, an `operator`, a `conditions` array, and `notify`. The entries keep their order and sort ahead of Important. Either key turns on split initialization. A replayed seed keeps a rule the account already holds. Use `splitRules` instead of the bridge when a test needs stable split ids.
+
 ## Shared drivers
 
 `e2e/nav.ts` owns navigation, command-palette actions, thread selection, and AI enablement. `e2e/seams.ts` owns `callSeam`, `emitSeam`, `fireSeam`, and named test controls. Add reusable helpers there.
@@ -92,6 +94,9 @@ All `attn:test:*` controls live in `src/main/testIpc.ts`. `TestSeams` disables t
 | `runFtsBackfill` | Reset or pause real index backfill to test recovery |
 | `searchIndexStats`, `queryPerfStats` | Measure production index and query work inside the utility process |
 | `installFakeAiProvider`, `aiProviderRequests` | Control AI responses and inspect requests |
+| `installFakeTriageProvider` | Arm the scripted TypeSafe service that answers split descriptions |
+| `triageRequests` | Inspect the smart-splits request bodies that left the utility process |
+| `runTriagePass` | Run the classifier to quiescence before a split assertion |
 | `installSendProvider`, `setUndoSendDelay` | Control sends without Gmail or a wall-clock delay |
 | `setSyncState`, `focusThread` | Set sync conditions or route notification focus |
 | `crashUtility`, `utilityState` | Test utility-process restart and recovery |

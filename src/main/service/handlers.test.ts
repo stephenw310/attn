@@ -38,6 +38,7 @@ function handlerContext(
     db,
     currentAccountId: () => ACCOUNT,
     accountStatuses: () => [],
+    triageChanged: () => {},
     publishRemoteImagePolicy: () => {},
     mailboxCounts: (accountId) => countSystemMailboxes(db, accountId),
     splitState: (accountId) => getSplitState(db, accountId),
@@ -358,6 +359,134 @@ describe('inbox thread pages', () => {
       const seen = [...first.rows, ...second.rows].map((row) => row.id)
       expect(new Set(seen).size).toBe(seen.length)
       expect(seen).toHaveLength(104)
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})
+
+describe('split save validation and triage status', () => {
+  it('accepts one mode at a time and rejects an input that names neither', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+    try {
+      const described = await handlers.invoke(IPC_CHANNELS.splitsSave, [
+        { name: 'Landlord', mode: 'description', description: 'Anything from my landlord', notify: false }
+      ])
+      const custom = described.splits.find((split) => split.name === 'Landlord')
+      expect(custom?.description).toBe('Anything from my landlord')
+      expect(custom?.match.conditions).toEqual([])
+
+      const ruled = await handlers.invoke(IPC_CHANNELS.splitsSave, [
+        {
+          name: 'Vendor',
+          mode: 'rules',
+          operator: 'any',
+          conditions: [{ type: 'senderDomain', value: 'vendor.test' }],
+          notify: false
+        }
+      ])
+      expect(ruled.splits.find((split) => split.name === 'Vendor')?.description).toBeNull()
+
+      // The union is the boundary: a missing mode, a mode's own fields on the
+      // other branch, and the retired condition type are all refused.
+      for (const invalid of [
+        { name: 'No mode', operator: 'any', conditions: [], notify: false },
+        { name: 'Wrong fields', mode: 'description', operator: 'any', conditions: [], notify: false },
+        {
+          name: 'Prose as a condition',
+          mode: 'rules',
+          operator: 'any',
+          notify: false,
+          conditions: [{ type: 'description', value: 'Anything from my landlord' }]
+        }
+      ]) {
+        await expect(handlers.invoke(IPC_CHANNELS.splitsSave, [invalid])).rejects.toThrow('invalid split')
+      }
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+
+  it('reports the triage counts with key presence left for main to fill in', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+    try {
+      await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
+        enabled: false,
+        keyPresent: false,
+        keyRefused: false,
+        describedSplits: 0,
+        judgedThreads: 0,
+        pendingThreads: 0,
+        failedThreads: 0,
+        failedCauses: []
+      })
+
+      persistThread(db, ACCOUNT, thread('waiting'))
+      await handlers.invoke(IPC_CHANNELS.splitsSave, [
+        { name: 'Landlord', mode: 'description', description: 'Anything from my landlord', notify: false }
+      ])
+      await handlers.invoke(IPC_CHANNELS.aiSetSetting, ['triageEnabled', true])
+
+      // `keyPresent` stays false here by design: the utility never sees the key.
+      await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
+        enabled: true,
+        keyPresent: false,
+        keyRefused: false,
+        describedSplits: 1,
+        judgedThreads: 0,
+        pendingThreads: 1,
+        failedThreads: 0,
+        failedCauses: []
+      })
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+
+  it('reports the conversations the classifier gave up on and takes a retry', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const retryFailed = vi.fn()
+    const splitTriage = {
+      failedThreadIds: () => new Set(['waiting']),
+      failedCauses: () => ['rejected'],
+      keyRefused: () => true,
+      retryFailed
+    }
+    const handlers = createServiceHandlers({
+      ...handlerContext(db, emptyProvider),
+      activeSession: () => ({ splitTriage }) as unknown as ServiceSession
+    })
+    try {
+      persistThread(db, ACCOUNT, thread('waiting'))
+      await handlers.invoke(IPC_CHANNELS.splitsSave, [
+        { name: 'Landlord', mode: 'description', description: 'Anything from my landlord', notify: false }
+      ])
+      await handlers.invoke(IPC_CHANNELS.aiSetSetting, ['triageEnabled', true])
+
+      // The one unanswered conversation is reported as failed, not as pending:
+      // nothing is judging it, and the card must not say it is.
+      await expect(handlers.invoke(IPC_CHANNELS.splitsGetTriageStatus, [])).resolves.toEqual({
+        enabled: true,
+        keyPresent: false,
+        // The session was told this key is bad, so the card reads as paused.
+        keyRefused: true,
+        describedSplits: 1,
+        judgedThreads: 0,
+        pendingThreads: 0,
+        failedThreads: 1,
+        failedCauses: ['rejected']
+      })
+
+      await expect(handlers.invoke(IPC_CHANNELS.splitsRetryTriage, [])).resolves.toBe(true)
+      expect(retryFailed).toHaveBeenCalledTimes(1)
     } finally {
       handlers.stop()
       db.close()

@@ -92,7 +92,8 @@ interface SettingsViewProps {
   onAddAccount: () => void
   onReconnect: () => void
   onSignOut: () => void
-  onOpenSplits?: () => void
+  /** Opens the Split rules manager, which owns the smart-splits consent (F11). */
+  onOpenSplits: () => void
   onClose: () => void
   onNavigate: () => void
   focusControl: SettingsControl | null
@@ -587,7 +588,7 @@ export function SettingsView({
 
               <section hidden={page !== 'ai'} data-testid="settings-ai" aria-label="AI writing">
                 <SectionTitle>AI writing</SectionTitle>
-                <AiSettingsSection />
+                <AiSettingsSection onOpenSplits={onOpenSplits} />
               </section>
 
               <section hidden={page !== 'snippets'} data-testid="settings-snippets" aria-label="Snippets">
@@ -668,11 +669,9 @@ export function SettingsView({
                 <p className="mb-3 text-xs leading-[1.65] text-ink-dim">
                   Each account chooses which Inbox splits send notifications.
                 </p>
-                {onOpenSplits && (
-                  <button type="button" onClick={onOpenSplits} className="py-2 text-xs text-accent">
-                    Split rules for {activeEmail} ↗
-                  </button>
-                )}
+                <button type="button" onClick={onOpenSplits} className="py-2 text-xs text-accent">
+                  Split rules for {activeEmail} ↗
+                </button>
               </section>
 
               <section hidden={page !== 'security'} data-testid="settings-security" aria-label="Security">

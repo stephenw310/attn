@@ -56,6 +56,38 @@ export function aiRequests(app: ElectronApplication): Promise<RecordedAiRequest[
   return callSeam<RecordedAiRequest[]>(app, TEST_CHANNELS.aiProviderRequests)
 }
 
+/**
+ * One smart-splits request as it left the utility — the privacy proof for F17.
+ * A request carries a pack of conversations, so `state.threads` is the whole
+ * envelope and each entry is one conversation's disclosed state.
+ */
+export interface RecordedTriageRequest {
+  state: { threads: Record<string, unknown>[] }
+  questions: Record<string, { instructions?: string; criteria?: unknown }>
+}
+
+/**
+ * Arm the scripted TypeSafe service. The utility owns one from startup, so the
+ * suite cannot reach the real endpoint whether or not a spec calls this.
+ */
+export function installFakeTriage(app: ElectronApplication, script?: unknown): Promise<void> {
+  return emitSeam(app, TEST_CHANNELS.installFakeTriageProvider, script)
+}
+
+/**
+ * Everything the scripted service has been asked so far, bodies included. The
+ * explicit `undefined` holds the request slot these forwarded seams read, so
+ * the completion callback lands where `testIpc.ts` looks for it.
+ */
+export function triageRequests(app: ElectronApplication): Promise<RecordedTriageRequest[]> {
+  return callSeam<RecordedTriageRequest[]>(app, TEST_CHANNELS.triageRequests, undefined)
+}
+
+/** Run the classifier to quiescence, so a spec asserts on a finished queue. */
+export function runTriagePass(app: ElectronApplication): Promise<void> {
+  return emitSeam(app, TEST_CHANNELS.runTriagePass, undefined)
+}
+
 /** Send immediately through the fake send provider: no undo window, no Gmail. */
 export async function armSending(app: ElectronApplication): Promise<void> {
   await fireSeam(app, TEST_CHANNELS.setUndoSendDelay, 0)

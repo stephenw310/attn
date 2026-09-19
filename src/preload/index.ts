@@ -14,7 +14,13 @@ import type {
   DraftKind,
   DraftSaveInput
 } from '../shared/drafts'
-import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS, type MailChangeReason } from '../shared/ipc'
+import {
+  type InvokeChannel,
+  type InvokeChannels,
+  IPC_CHANNELS,
+  MAIL_CHANGE_REASONS,
+  type MailChangeReason
+} from '../shared/ipc'
 import type {
   Conversation,
   ConversationMailbox,
@@ -46,9 +52,9 @@ import type { Snippet, SnippetSaveInput } from '../shared/snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
-  SplitPresetId,
   SplitState,
-  SplitThreadLocation
+  SplitThreadLocation,
+  SplitTriageStatus
 } from '../shared/splits'
 import { isThemePreference, normalizePalette, type ThemePreference } from '../shared/theme'
 import { subscribeToActionReverts } from './actionRevertDelivery'
@@ -140,6 +146,8 @@ const api = {
       invoke(IPC_CHANNELS.aiSetSetting, key, value),
     setKey: (key: string): Promise<AiSettings> => invoke(IPC_CHANNELS.aiSetKey, key),
     deleteKey: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiDeleteKey),
+    setTriageKey: (key: string): Promise<AiSettings> => invoke(IPC_CHANNELS.aiSetTriageKey, key),
+    deleteTriageKey: (): Promise<AiSettings> => invoke(IPC_CHANNELS.aiDeleteTriageKey),
     generate: (request: AiGenerateRequest): Promise<{ requestId: string }> =>
       invoke(IPC_CHANNELS.aiGenerate, request),
     cancel: (requestId: string): Promise<void> => invoke(IPC_CHANNELS.aiCancel, requestId),
@@ -221,7 +229,7 @@ const api = {
       ): void =>
         cb(
           typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null,
-          payload?.reason === 'split-metadata' ? payload.reason : null
+          MAIL_CHANGE_REASONS.find((reason) => reason === payload?.reason) ?? null
         )
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
@@ -299,7 +307,9 @@ const api = {
       invoke(IPC_CHANNELS.splitsSetNotify, id, notify),
     delete: (id: string): Promise<SplitState> => invoke(IPC_CHANNELS.splitsDelete, id),
     reorder: (input: ReorderSplitsInput): Promise<SplitState> => invoke(IPC_CHANNELS.splitsReorder, input),
-    restorePreset: (id: SplitPresetId): Promise<SplitState> => invoke(IPC_CHANNELS.splitsRestorePreset, id)
+    getTriageStatus: (): Promise<SplitTriageStatus> => invoke(IPC_CHANNELS.splitsGetTriageStatus),
+    /** Ask again for the conversations the classifier gave up on. */
+    retryTriage: (): Promise<boolean> => invoke(IPC_CHANNELS.splitsRetryTriage)
   },
   contacts: {
     search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)

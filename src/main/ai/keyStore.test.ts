@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AiKeyStore, type SecretCipher } from './keyStore'
+import { AiKeyStore, type SecretCipher, TYPESAFE_KEY_FILE } from './keyStore'
 
 // A reversible fake safeStorage: enough to prove round-trip behavior and that
 // the file on disk never holds the plaintext key.
@@ -80,6 +80,24 @@ describe('AiKeyStore', () => {
     const store = new AiKeyStore(dir, fakeCipher())
     expect(store.load()).toBeNull()
     expect(store.present()).toBe(false)
+  })
+
+  it('two stores in one directory are independent files', () => {
+    const dir = tempDir()
+    const writing = new AiKeyStore(dir, fakeCipher())
+    const triage = new AiKeyStore(dir, fakeCipher(), TYPESAFE_KEY_FILE)
+    writing.save('sk-writing-key-value')
+    triage.save('ts-triage-key-value')
+    expect(writing.load()).toBe('sk-writing-key-value')
+    expect(triage.load()).toBe('ts-triage-key-value')
+    expect(readFileSync(join(dir, TYPESAFE_KEY_FILE), 'utf8')).not.toContain('ts-triage-key-value')
+
+    // Deleting one key never touches the other file.
+    triage.delete()
+    expect(triage.present()).toBe(false)
+    expect(writing.load()).toBe('sk-writing-key-value')
+    writing.delete()
+    expect(writing.present()).toBe(false)
   })
 
   it('rejects saving an empty key', () => {

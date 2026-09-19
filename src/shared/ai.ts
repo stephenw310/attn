@@ -19,6 +19,15 @@ export function isAiProviderKind(value: unknown): value is AiProviderKind {
   return AI_PROVIDER_KINDS.includes(value as AiProviderKind)
 }
 
+/**
+ * Smart splits judge conversations with TypeSafe's Jev model, which is a
+ * separate service from the writing provider above: it has its own endpoint,
+ * its own key file, and its own consent. `null` in `triageModel` means this
+ * default.
+ */
+export const TYPESAFE_DEFAULT_MODEL = 'jev-latest'
+export const TYPESAFE_BASE_URL = 'https://api.typesafe.ai'
+
 export const AI_VOICE_TONES = ['concise', 'friendly', 'formal'] as const
 
 export type AiVoiceTone = (typeof AI_VOICE_TONES)[number]
@@ -87,6 +96,15 @@ export interface AiStoredSettings {
   voiceRules: string
   /** Send a few of the user's own recent sent replies as style examples (T37). */
   voiceMatchingEnabled: boolean
+  /**
+   * Default-off consent for smart splits: background TypeSafe judgments of
+   * Inbox conversations against split descriptions. This consent is separate
+   * from AI writing — a user may enable either one alone, and neither switch
+   * ever turns the other on.
+   */
+  triageEnabled: boolean
+  /** TypeSafe model override; null = `TYPESAFE_DEFAULT_MODEL`. */
+  triageModel: string | null
 }
 
 /** The renderer-facing snapshot: stored settings plus main-only key presence. */
@@ -94,6 +112,10 @@ export interface AiSettings extends AiStoredSettings {
   keyPresent: boolean
   /** Masked in main before crossing IPC. Never contains the complete key. */
   keyPreview?: string | null
+  /** The TypeSafe key lives in its own file; presence is reported separately. */
+  triageKeyPresent: boolean
+  /** Masked in main before crossing IPC. Never contains the complete key. */
+  triageKeyPreview?: string | null
 }
 
 export const AI_SETTINGS_DEFAULTS: AiStoredSettings = {
@@ -104,7 +126,9 @@ export const AI_SETTINGS_DEFAULTS: AiStoredSettings = {
   model: null,
   voiceTone: 'concise',
   voiceRules: '',
-  voiceMatchingEnabled: false
+  voiceMatchingEnabled: false,
+  triageEnabled: false,
+  triageModel: null
 }
 
 export type AiSettingKey = keyof AiStoredSettings
@@ -129,7 +153,8 @@ export function validateAiSettingUpdate(key: unknown, value: unknown): AiSetting
   switch (key) {
     case 'enabled':
     case 'autocompleteEnabled':
-    case 'voiceMatchingEnabled': {
+    case 'voiceMatchingEnabled':
+    case 'triageEnabled': {
       if (typeof value !== 'boolean') throw new Error(`invalid ${key} value`)
       return { key, value }
     }
@@ -163,6 +188,13 @@ export function validateAiSettingUpdate(key: unknown, value: unknown): AiSetting
       if (value === null) return { key, value }
       if (typeof value !== 'string' || value.length === 0 || value.length > MAX_MODEL_LENGTH) {
         throw new Error('invalid AI model')
+      }
+      return { key, value }
+    }
+    case 'triageModel': {
+      if (value === null) return { key, value }
+      if (typeof value !== 'string' || value.length === 0 || value.length > MAX_MODEL_LENGTH) {
+        throw new Error('invalid smart splits model')
       }
       return { key, value }
     }

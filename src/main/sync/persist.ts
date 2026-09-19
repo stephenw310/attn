@@ -356,6 +356,9 @@ export function deleteThread(db: Db, accountId: string, threadId: string): void 
     removeThreadMailboxes(db, accountId, threadId)
     db.prepare('DELETE FROM messages WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM reminders WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
+    // Classifier answers are about this conversation only. Kept past it they
+    // are orphans, and a Gmail thread id that comes back would inherit them.
+    db.prepare('DELETE FROM split_judgments WHERE account_id = ? AND thread_id = ?').run(accountId, threadId)
     db.prepare('DELETE FROM threads WHERE account_id = ? AND id = ?').run(accountId, threadId)
     rebuildContacts(
       db,
