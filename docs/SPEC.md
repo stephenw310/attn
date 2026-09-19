@@ -546,8 +546,9 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   sync, or an app update. The rule manager can restore a preset only after an explicit user action.
 - The split-rule manager keeps the sortable list beside the selected rule editor. It explains first-match ordering. Important and Other show their built-in behavior and notification preference. Custom rules expose their existing conditions, notification preference, save, and delete actions. The manager selects the first rule on opening. Escape closes it in one step, except during a drag.
 - A smart-splits card spans the top of the manager, above the rule list. It holds the consent switch, the
-  TypeSafe key, the judgment model, and one status line: off, on with no AI rule, or on with the
-  count of AI rules and judged conversations. The card reports outstanding judgments while they run.
+  TypeSafe key, the judgment model, and one status line: off, on with no AI rule, or on with the count of
+  AI rules. The card reports outstanding judgments while they run. It also reports how many conversations
+  the classifier gave up on, names the cause in a tooltip, and offers a retry that asks for them again.
 - The rule editor offers a two-way choice under the split name: **AI rule** or **Manual rules**. A new
   split starts on AI rule while smart splits are on, and on Manual rules while they are off, where
   AI rule stays unavailable. An existing split opens on the choice it was saved with. Switching the
@@ -595,7 +596,12 @@ The inbox is divided into **splits** — tabs above the list, each an independen
 - Attn sends no smart-splits request while the consent is off, the key is absent, or no split holds a
   description. Withdrawing consent stops the classifier at the next batch.
 - A refused key stops the classifier until the user saves a different key. A rate limit makes it wait and
-  continue. A lost network makes it retry later. None of these lose a stored judgment.
+  try again; a rate limit that outlasts the ladder charges the conversation's own retry budget. A lost
+  network makes it retry later. None of these lose a stored judgment.
+- A rejected request never strands a conversation. The classifier asks again for each conversation of the
+  rejected pack on its own, so one bad conversation cannot cost the others their judgment. A conversation
+  that keeps failing retries on a widening delay, and after three attempts the card reports it as unjudged
+  instead of counting it as still pending. The retry on the card clears that record and asks again.
 - Local reads never wait for the classifier. A conversation keeps its current split until its judgment is
   stored.
 

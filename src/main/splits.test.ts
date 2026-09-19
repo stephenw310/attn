@@ -342,14 +342,16 @@ describe('split inbox', () => {
     expect(splitTriageCounts(db, 'account')).toEqual({
       describedSplits: 0,
       judgedThreads: 0,
-      pendingThreads: 0
+      pendingThreads: 0,
+      failedThreads: 0
     })
 
     const splitId = describedSplit('Invoices', 'Invoices I have to pay')
     expect(splitTriageCounts(db, 'account')).toEqual({
       describedSplits: 1,
       judgedThreads: 0,
-      pendingThreads: 2
+      pendingThreads: 2,
+      failedThreads: 0
     })
 
     // A judgment counts only when it answered this description against the
@@ -358,11 +360,43 @@ describe('split inbox', () => {
     expect(splitTriageCounts(db, 'account')).toEqual({
       describedSplits: 1,
       judgedThreads: 1,
-      pendingThreads: 1
+      pendingThreads: 1,
+      failedThreads: 0
     })
 
     insertJudgment('waiting', splitId, 'A different question', 0.99, 'waiting-message')
     expect(splitTriageCounts(db, 'account').pendingThreads).toBe(1)
+  })
+
+  it('reports a conversation the classifier gave up on instead of counting it as pending', () => {
+    insertThread('judged', 300, [{ id: 'judged-message', from: 'billing@supplier.test' }])
+    insertThread('waiting', 200, [{ id: 'waiting-message', from: 'friend@example.com' }])
+    const splitId = describedSplit('Invoices', 'Invoices I have to pay')
+    insertJudgment('judged', splitId, 'Invoices I have to pay', 0.1, 'judged-message')
+
+    expect(splitTriageCounts(db, 'account', new Set(['waiting']))).toEqual({
+      describedSplits: 1,
+      judgedThreads: 1,
+      pendingThreads: 0,
+      failedThreads: 1
+    })
+
+    // A failed conversation that has since been answered is no longer a
+    // failure the counts can see: the predicate, not the set, decides.
+    expect(splitTriageCounts(db, 'account', new Set(['judged']))).toEqual({
+      describedSplits: 1,
+      judgedThreads: 1,
+      pendingThreads: 1,
+      failedThreads: 0
+    })
+
+    // An id that is not a candidate at all cannot make a count negative.
+    expect(splitTriageCounts(db, 'account', new Set(['gone']))).toEqual({
+      describedSplits: 1,
+      judgedThreads: 1,
+      pendingThreads: 1,
+      failedThreads: 0
+    })
   })
 
   it('hashes a description through its normalized form and separates different texts', () => {

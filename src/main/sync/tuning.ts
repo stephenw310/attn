@@ -206,10 +206,24 @@ export const SPLIT_TRIAGE_CONCURRENCY = 4
  */
 export const SPLIT_TRIAGE_BROADCAST_INTERVAL_MS = 15_000
 
-/** A judged thread's retry ladder for 429 and 529, and the Retry-After cap. */
+/**
+ * A pack's retry ladder for 429 and 529, and the Retry-After cap. Six attempts
+ * walk 1, 2, 4, 8, 16 and 32 seconds, so a busy minute is waited out inside the
+ * request rather than charged to the conversations it carried.
+ */
 export const SPLIT_TRIAGE_RATE_LIMIT_BASE_MS = 1_000
-export const SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS = 3
+export const SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS = 6
 export const SPLIT_TRIAGE_RATE_LIMIT_MAX_WAIT_MS = 60_000
+
+/**
+ * A conversation's own retry ladder after a rejected or exhausted request, and
+ * how many attempts it gets. The record survives the pass, so a dropped pack
+ * comes back by itself instead of waiting for the next mail change. Past the
+ * last attempt the conversation is reported as unjudged rather than counted as
+ * pending forever.
+ */
+export const SPLIT_TRIAGE_FAILURE_BACKOFF_MS = [60_000, 300_000, 1_800_000]
+export const SPLIT_TRIAGE_MAX_ATTEMPTS = 3
 
 /** A pass paused by a network failure resumes after this delay. */
 export const SPLIT_TRIAGE_OFFLINE_RETRY_MS = 60_000

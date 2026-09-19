@@ -801,34 +801,62 @@ export interface SplitTriageCounts {
   describedSplits: number
   judgedThreads: number
   pendingThreads: number
+  failedThreads: number
 }
 
 /**
  * How far the classifier has got. `judged` is every candidate that is not
  * pending, so a thread with no stored message counts as neither: it is not
  * work the pass can do.
+ *
+ * `failedThreadIds` are the conversations the pass has given up on. They are
+ * still unanswered, so they are counted here and taken out of `pending`: a
+ * surface that showed them as pending would report work nobody is doing. The
+ * ids travel as one JSON parameter, because a broken service can fail an
+ * entire Inbox.
  */
-export function splitTriageCounts(db: Db, accountId: string): SplitTriageCounts {
+export function splitTriageCounts(
+  db: Db,
+  accountId: string,
+  failedThreadIds: ReadonlySet<string> = new Set()
+): SplitTriageCounts {
   const rules = describedSplitRules(db, accountId)
-  if (rules.length === 0) return { describedSplits: 0, judgedThreads: 0, pendingThreads: 0 }
+  const empty = { describedSplits: 0, judgedThreads: 0, pendingThreads: 0, failedThreads: 0 }
+  if (rules.length === 0) return empty
   const pending = pendingJudgmentPredicate(accountId, rules, {
     threadId: 'candidate.thread_id',
     evidenceKey: 'candidate.latest_message_id'
   })
+  const failedSql =
+    failedThreadIds.size > 0
+      ? `SUM(CASE WHEN (${pending.sql})
+                   AND candidate.thread_id IN (SELECT value FROM json_each(?))
+                  THEN 1 ELSE 0 END)`
+      : '0'
+  // The failed column repeats the pending predicate, so it repeats its params.
+  const failedParams =
+    failedThreadIds.size > 0 ? [...pending.params, JSON.stringify([...failedThreadIds])] : []
   const row = db
     .prepare(
       `WITH candidate AS (${triageCandidateSql()})
        SELECT COUNT(*) AS total,
-              SUM(CASE WHEN ${pending.sql} THEN 1 ELSE 0 END) AS pending
+              SUM(CASE WHEN ${pending.sql} THEN 1 ELSE 0 END) AS pending,
+              ${failedSql} AS failed
        FROM candidate
        WHERE latest_message_id IS NOT NULL`
     )
-    .get(accountId, ...pending.params) as { total: number; pending: number | null }
-  const pendingThreads = row.pending ?? 0
+    .get(accountId, ...pending.params, ...failedParams) as {
+    total: number
+    pending: number | null
+    failed: number | null
+  }
+  const unanswered = row.pending ?? 0
+  const failedThreads = row.failed ?? 0
   return {
     describedSplits: rules.length,
-    judgedThreads: row.total - pendingThreads,
-    pendingThreads
+    judgedThreads: row.total - unanswered,
+    pendingThreads: unanswered - failedThreads,
+    failedThreads
   }
 }
 

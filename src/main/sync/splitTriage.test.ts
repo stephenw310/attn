@@ -5,7 +5,13 @@ import { type Db, openDatabase } from '../db'
 import { descriptionHash, saveSplit, splitRevision } from '../splits'
 import type { SchedulerTime, TimerHandle } from '../time'
 import { SplitTriage, type SplitTriageOptions } from './splitTriage'
-import { SPLIT_TRIAGE_BATCH_SIZE, SPLIT_TRIAGE_BROADCAST_INTERVAL_MS } from './tuning'
+import {
+  SPLIT_TRIAGE_BATCH_SIZE,
+  SPLIT_TRIAGE_BROADCAST_INTERVAL_MS,
+  SPLIT_TRIAGE_FAILURE_BACKOFF_MS,
+  SPLIT_TRIAGE_MAX_ATTEMPTS,
+  SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS
+} from './tuning'
 
 /**
  * Deterministic clock. The pass, the client deadline and every retry wait ride
@@ -373,7 +379,7 @@ describe('split triage pass', () => {
     expect(judgments('account')).toHaveLength(1)
   })
 
-  it('skips every conversation in a pack the service rejects', async () => {
+  it('retries a rejected pack one conversation at a time', async () => {
     for (let index = 0; index < 3; index++) {
       insertThread('account', `t-${index}`, 'Q3 invoice', [{ id: `m-${index}`, at: 100 - index }])
     }
@@ -396,12 +402,167 @@ describe('split triage pass', () => {
     triage.kick()
     await triage.settled()
 
-    // The pack is skipped whole: no retry per conversation, and no judgment.
-    expect(attempts).toBe(1)
+    // The pack, then each conversation on its own: a service that rejects one
+    // conversation must not cost the other two their judgment.
+    expect(attempts).toBe(4)
     expect(judgments('account')).toHaveLength(0)
     expect(warnings).toEqual([
-      '[triage] smart splits request was rejected (HTTP 422); skipping 3 conversations'
+      '[triage] smart splits request was rejected (HTTP 422); retrying 3 conversations one at a time',
+      '[triage] smart splits request was rejected (HTTP 422); skipping 1 conversation',
+      '[triage] smart splits request was rejected (HTTP 422); skipping 1 conversation',
+      '[triage] smart splits request was rejected (HTTP 422); skipping 1 conversation'
     ])
+  })
+
+  it('judges the rest of a pack the service rejects for one conversation', async () => {
+    const poison = 'Lone surrogate'
+    for (let index = 0; index < 9; index++) {
+      insertThread('account', `t-${index}`, 'Q3 invoice', [{ id: `m-${index}`, at: 200 - index }])
+    }
+    insertThread('account', 't-poison', poison, [{ id: 'm-poison', at: 150 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    const warnings: string[] = []
+    const packed: string[][] = []
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const transport: TypeSafeTransport = (url, init) => {
+      attempts++
+      const body = JSON.parse(String(init.body)) as RecordedRequest
+      packed.push(subjectsOf(body))
+      if (subjectsOf(body).includes(poison)) return failingTransport(400)(url, init)
+      return answer(url, init)
+    }
+    const triage = makeTriage('account', transport, {
+      log: (_level, message) => {
+        warnings.push(message)
+      }
+    })
+
+    triage.kick()
+    await triage.settled()
+
+    // One rejected pack, then ten single-conversation requests.
+    expect(attempts).toBe(11)
+    expect(judgments('account')).toHaveLength(9)
+    expect(judgments('account').map((row) => row.thread_id)).not.toContain('t-poison')
+    expect(warnings[0]).toBe(
+      '[triage] smart splits request was rejected (HTTP 400); retrying 10 conversations one at a time'
+    )
+    // Only the rejected conversation was charged, so only it is waiting.
+    expect(timers.armed).toBe(1)
+    const asked = attempts
+    triage.kick()
+    await triage.settled()
+    expect(attempts).toBe(asked)
+
+    timers.nowMs += SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0]
+    timers.fire(SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0])
+    await triage.settled()
+    // Its second attempt carried that conversation alone; the other nine are answered.
+    expect(attempts).toBe(asked + 1)
+    expect(packed.at(-1)).toEqual([poison])
+  })
+
+  it('retries a rejected conversation after its backoff and judges it', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) => {
+      attempts++
+      return attempts === 1 ? failingTransport(400)(url, init) : answer(url, init)
+    })
+
+    triage.kick()
+    await triage.settled()
+    expect(attempts).toBe(1)
+    expect(judgments('account')).toHaveLength(0)
+    // The pass armed its own retry rather than waiting for the next mail change.
+    expect(timers.armed).toBe(1)
+
+    timers.nowMs += SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0]
+    timers.fire(SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0])
+    await triage.settled()
+    expect(attempts).toBe(2)
+    expect(judgments('account')).toHaveLength(1)
+    expect(triage.failedThreadIds().size).toBe(0)
+    expect(timers.armed).toBe(0)
+  })
+
+  it('gives up on a conversation at its attempt cap and takes it back on a retry', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    let rejecting = true
+    const warnings: string[] = []
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage(
+      'account',
+      (url, init) => {
+        attempts++
+        return rejecting ? failingTransport(400)(url, init) : answer(url, init)
+      },
+      {
+        log: (_level, message) => {
+          warnings.push(message)
+        }
+      }
+    )
+
+    triage.kick()
+    await triage.settled()
+    for (const step of SPLIT_TRIAGE_FAILURE_BACKOFF_MS.slice(0, SPLIT_TRIAGE_MAX_ATTEMPTS - 1)) {
+      timers.nowMs += step
+      timers.fire(step)
+      await triage.settled()
+    }
+
+    expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS)
+    expect([...triage.failedThreadIds()]).toEqual(['t-1'])
+    expect(triage.failedCauses()).toEqual(['rejected'])
+    expect(warnings).toContain('[triage] gave up on conversation t-1 after 3 attempts')
+    // It has left the queue: nothing is waiting, and a kick asks nothing.
+    expect(timers.armed).toBe(0)
+    triage.kick()
+    await triage.settled()
+    expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS)
+
+    rejecting = false
+    triage.retryFailed()
+    await triage.settled()
+    expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS + 1)
+    expect(triage.failedThreadIds().size).toBe(0)
+    expect(judgments('account')).toHaveLength(1)
+  })
+
+  it('charges the same budget when the rate-limit ladder runs out', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    const triage = makeTriage('account', (url, init) => {
+      attempts++
+      return failingTransport(429)(url, init)
+    })
+
+    triage.kick()
+    // The ladder doubles from a second, so each wait needs its own tick.
+    for (let step = 0; step < SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS; step++) {
+      await flush()
+      timers.nowMs += 32_000
+      timers.fire(32_000)
+    }
+    await triage.settled()
+
+    // Every ladder step rode one request, and the conversation then waits on
+    // the same per-conversation backoff a rejected one gets.
+    expect(attempts).toBe(SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS)
+    expect(judgments('account')).toHaveLength(0)
+    expect(triage.failedThreadIds().size).toBe(0)
+    expect(timers.armed).toBe(1)
+    timers.nowMs += SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0]
+    timers.fire(SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0])
+    await flush()
+    expect(attempts).toBe(SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS + 1)
   })
 
   it('never mixes one account judgments into another account', async () => {
@@ -518,5 +679,19 @@ describe('split triage pass', () => {
     await triage.settled()
     expect(recorded).toHaveLength(0)
     expect(timers.armed).toBe(0)
+  })
+
+  it('clears a waiting retry when it stops', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const triage = makeTriage('account', failingTransport(400))
+
+    triage.kick()
+    await triage.settled()
+    expect(timers.armed).toBe(1)
+
+    await triage.stop()
+    expect(timers.armed).toBe(0)
+    expect(triage.failedThreadIds().size).toBe(0)
   })
 })

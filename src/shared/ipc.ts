@@ -120,6 +120,7 @@ export const IPC_CHANNELS = {
   splitsReorder: 'splits:reorder',
   splitsRestorePreset: 'splits:restorePreset',
   splitsGetTriageStatus: 'splits:getTriageStatus',
+  splitsRetryTriage: 'splits:retryTriage',
   mailPeekActionsReverted: 'mail:peekActionsReverted',
   mailAcknowledgeActionsReverted: 'mail:acknowledgeActionsReverted',
   mailGetConversation: 'mail:getConversation',
@@ -340,6 +341,8 @@ export interface InvokeChannels {
   [IPC_CHANNELS.splitsReorder]: { args: [input: ReorderSplitsInput]; result: SplitState }
   [IPC_CHANNELS.splitsRestorePreset]: { args: [id: SplitPresetId]; result: SplitState }
   [IPC_CHANNELS.splitsGetTriageStatus]: { args: []; result: SplitTriageStatus }
+  /** True when a live classifier took the retry; false when no account is active. */
+  [IPC_CHANNELS.splitsRetryTriage]: { args: []; result: boolean }
   [IPC_CHANNELS.mailPeekActionsReverted]: {
     args: [accountId: string]
     result: ActionRevertNotice | null

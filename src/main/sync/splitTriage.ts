@@ -11,6 +11,7 @@
 
 import type { AiStoredSettings } from '../../shared/ai'
 import { TYPESAFE_DEFAULT_MODEL } from '../../shared/ai'
+import type { SplitTriageFailureCause } from '../../shared/splits'
 import {
   judgeThread,
   TypeSafeAuthError,
@@ -28,7 +29,7 @@ import {
   splitIdForThread,
   triageCandidateSql
 } from '../splits'
-import type { SchedulerTime } from '../time'
+import type { SchedulerTime, TimerHandle } from '../time'
 import { OfflineRetryScheduler } from './retry'
 import {
   buildPackedTriageRequest,
@@ -43,6 +44,8 @@ import {
   SPLIT_TRIAGE_BATCH_SIZE,
   SPLIT_TRIAGE_BROADCAST_INTERVAL_MS,
   SPLIT_TRIAGE_CONCURRENCY,
+  SPLIT_TRIAGE_FAILURE_BACKOFF_MS,
+  SPLIT_TRIAGE_MAX_ATTEMPTS,
   SPLIT_TRIAGE_OFFLINE_RETRY_MS,
   SPLIT_TRIAGE_PACK_SIZE,
   SPLIT_TRIAGE_RATE_LIMIT_BASE_MS,
@@ -79,6 +82,17 @@ interface TriageGate {
 interface WorkRow {
   threadId: string
   latestMessageId: string
+}
+
+/**
+ * What one conversation has spent of its retry budget. The record outlives the
+ * pass that made it: the defect it fixes was a pack dropped for the rest of the
+ * session while the status counted its conversations as still pending.
+ */
+interface FailureRecord {
+  attempts: number
+  nextAttemptAt: number
+  cause: SplitTriageFailureCause
 }
 
 interface PriorityRequest {
@@ -184,8 +198,10 @@ export class SplitTriage {
   private stopped = false
   private pass: Promise<void> | null = null
   private rerun = false
-  /** Threads whose request failed this pass; cleared when the next pass starts. */
-  private readonly skipped = new Set<string>()
+  /** Threads whose request failed, and what they have left. Cleared on a judgment. */
+  private readonly failures = new Map<string, FailureRecord>()
+  /** The one timer that brings a backed-off thread back without a mail change. */
+  private retryTimer: TimerHandle | null = null
   private readonly inFlight = new Set<string>()
   private readonly priorityThreads = new Set<string>()
   private readonly priority: PriorityRequest[] = []
@@ -244,12 +260,42 @@ export class SplitTriage {
     while (this.pass) await this.pass
   }
 
+  /**
+   * Conversations that spent their attempt budget. They are no longer queued,
+   * so the status reports them instead of counting them as pending forever.
+   */
+  failedThreadIds(): ReadonlySet<string> {
+    const ids = new Set<string>()
+    for (const [threadId, record] of this.failures) {
+      if (record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS) ids.add(threadId)
+    }
+    return ids
+  }
+
+  /** The distinct causes behind those conversations, for the surface to name. */
+  failedCauses(): SplitTriageFailureCause[] {
+    const causes = new Set<SplitTriageFailureCause>()
+    for (const record of this.failures.values()) {
+      if (record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS) causes.add(record.cause)
+    }
+    return [...causes].sort()
+  }
+
+  /** Forget every failure and ask again. The user's own retry. */
+  retryFailed(): void {
+    this.failures.clear()
+    this.clearRetryTimer()
+    this.kick()
+  }
+
   /** Cancel for shutdown or account teardown. Terminal: `kick` does nothing after it. */
   async stop(): Promise<void> {
     this.stopped = true
     this.abort.abort()
     this.offlineRetry.clear()
+    this.clearRetryTimer()
     await this.settled()
+    this.failures.clear()
     this.releasePriority()
   }
 
@@ -302,7 +348,6 @@ export class SplitTriage {
   }
 
   private async runPass(): Promise<void> {
-    this.skipped.clear()
     // Start the throttle window at the pass, not at the first change: a pass
     // that moves ten threads in a few milliseconds should bump the revision
     // once, when it is done, not once for the first thread and once at the end.
@@ -315,16 +360,65 @@ export class SplitTriage {
       if ((await this.judgeBatch(gate, batch)) === 'stop') break
     }
     this.flushAssignments()
+    this.scheduleFailureRetry()
     // A `judgeNow` that arrived while this pass was draining queued a rerun;
     // its callers wait for that pass rather than being released by this one.
     if (!this.rerun) this.releasePriority()
+  }
+
+  /**
+   * The pass stops at a thread whose backoff has not elapsed, so without this
+   * nothing would look again until the next mail change. One timer, at the
+   * earliest deadline: the pass it starts re-reads every record anyway.
+   */
+  private scheduleFailureRetry(): void {
+    this.clearRetryTimer()
+    if (this.stopped) return
+    const now = this.time.now()
+    let earliest: number | null = null
+    for (const record of this.failures.values()) {
+      if (record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS || record.nextAttemptAt <= now) continue
+      if (earliest === null || record.nextAttemptAt < earliest) earliest = record.nextAttemptAt
+    }
+    if (earliest === null) return
+    this.retryTimer = this.time.timers.setTimeout(() => {
+      this.retryTimer = null
+      this.kick()
+    }, earliest - now)
+  }
+
+  private clearRetryTimer(): void {
+    if (this.retryTimer === null) return
+    this.time.timers.clearTimeout(this.retryTimer)
+    this.retryTimer = null
+  }
+
+  /** True while this thread is out of the queue: backing off, or given up on. */
+  private isBlocked(threadId: string): boolean {
+    const record = this.failures.get(threadId)
+    if (!record) return false
+    return record.attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS || record.nextAttemptAt > this.time.now()
+  }
+
+  /**
+   * Charge one attempt to this conversation and put it back after its backoff.
+   * Past the budget it leaves the queue for good, and the status says so.
+   */
+  private recordFailure(threadId: string, cause: SplitTriageFailureCause): void {
+    const attempts = (this.failures.get(threadId)?.attempts ?? 0) + 1
+    const step = Math.min(attempts, SPLIT_TRIAGE_FAILURE_BACKOFF_MS.length) - 1
+    const backoff = SPLIT_TRIAGE_FAILURE_BACKOFF_MS[step] ?? 0
+    this.failures.set(threadId, { attempts, cause, nextAttemptAt: this.time.now() + backoff })
+    if (attempts === SPLIT_TRIAGE_MAX_ATTEMPTS) {
+      this.log('warn', `[triage] gave up on conversation ${threadId} after ${attempts} attempts`)
+    }
   }
 
   private nextBatch(gate: TriageGate): WorkRow[] {
     const rows: WorkRow[] = []
     const seen = new Set<string>()
     const waiting = [...this.priorityThreads]
-      .filter((threadId) => !this.inFlight.has(threadId) && !this.skipped.has(threadId))
+      .filter((threadId) => !this.inFlight.has(threadId) && !this.isBlocked(threadId))
       .slice(0, SPLIT_TRIAGE_BATCH_SIZE)
     if (waiting.length > 0) {
       for (const row of this.selectWork(gate, waiting, SPLIT_TRIAGE_BATCH_SIZE)) {
@@ -352,9 +446,17 @@ export class SplitTriage {
    */
   private selectWork(gate: TriageGate, threadIds: string[] | null, limit: number): WorkRow[] {
     if (limit <= 0) return []
+    // A whole Inbox can be backing off at once, so the exclusion travels as one
+    // JSON parameter rather than one bound id per thread.
     const excluded = threadIds
       ? []
-      : [...new Set([...this.skipped, ...this.inFlight, ...this.priorityThreads])]
+      : [
+          ...new Set([
+            ...[...this.failures.keys()].filter((threadId) => this.isBlocked(threadId)),
+            ...this.inFlight,
+            ...this.priorityThreads
+          ])
+        ]
     const params: unknown[] = [this.accountId]
     const filters: string[] = []
     if (threadIds) {
@@ -365,8 +467,8 @@ export class SplitTriage {
       threadId: 'candidate.thread_id',
       evidenceKey: 'candidate.latest_message_id'
     })
-    const exclusion =
-      excluded.length > 0 ? `AND thread_id NOT IN (${excluded.map(() => '?').join(', ')})` : ''
+    const exclusion = excluded.length > 0 ? 'AND thread_id NOT IN (SELECT value FROM json_each(?))' : ''
+    const exclusionParams = excluded.length > 0 ? [JSON.stringify(excluded)] : []
     const rows = this.db
       .prepare(
         `WITH candidate AS (${triageCandidateSql(filters.join(' '))})
@@ -378,7 +480,7 @@ export class SplitTriage {
          ORDER BY sort_at DESC, thread_id DESC
          LIMIT ?`
       )
-      .all(...params, ...excluded, ...unanswered.params, limit) as {
+      .all(...params, ...exclusionParams, ...unanswered.params, limit) as {
       thread_id: string
       latest_message_id: string
     }[]
@@ -393,7 +495,7 @@ export class SplitTriage {
   private nextPriorityRow(gate: TriageGate): WorkRow | null {
     for (;;) {
       if (this.priorityThreads.size === 0) return null
-      const threadId = [...this.priorityThreads].find((id) => !this.inFlight.has(id) && !this.skipped.has(id))
+      const threadId = [...this.priorityThreads].find((id) => !this.inFlight.has(id) && !this.isBlocked(id))
       if (!threadId) return null
       const [row] = this.selectWork(gate, [threadId], 1)
       if (row) return row
@@ -466,8 +568,8 @@ export class SplitTriage {
     const settleAll = (): void => {
       for (const entry of loaded) this.settleThread(entry.row.threadId, false)
     }
-    const skipAll = (): void => {
-      for (const entry of loaded) this.skipped.add(entry.row.threadId)
+    const chargeAll = (cause: SplitTriageFailureCause): void => {
+      for (const entry of loaded) this.recordFailure(entry.row.threadId, cause)
     }
     const { state, questions, targets } = buildPackedTriageRequest(
       loaded.map((entry) => entry.state),
@@ -499,7 +601,9 @@ export class SplitTriage {
         }
         if (error instanceof TypeSafeRateLimitError) {
           if (attempt >= SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS) {
-            skipAll()
+            const count = `${loaded.length} conversation${loaded.length === 1 ? '' : 's'}`
+            this.log('warn', `[triage] ${describeError(error)}; ${count} wait for a later pass`)
+            chargeAll('rate-limited')
             settleAll()
             return 'ok'
           }
@@ -522,8 +626,25 @@ export class SplitTriage {
           return 'stop'
         }
         const count = `${loaded.length} conversation${loaded.length === 1 ? '' : 's'}`
+        // A rejected pack is usually one bad conversation, not ten. Ask again
+        // one conversation at a time, in this worker: the other nine are judged
+        // in the same pass, and only a conversation that fails alone is charged.
+        if (error instanceof TypeSafeRequestError && loaded.length > 1) {
+          this.log('warn', `[triage] ${describeError(error)}; retrying ${count} one at a time`)
+          for (const [index, entry] of loaded.entries()) {
+            const halted = this.stopped || !this.options.isActive()
+            if (halted || (await this.judgePack(gate, [entry.row])) === 'stop') {
+              // The singleton settled its own row; release the ones never tried.
+              for (const rest of loaded.slice(halted ? index : index + 1)) {
+                this.settleThread(rest.row.threadId, false)
+              }
+              return 'stop'
+            }
+          }
+          return 'ok'
+        }
         this.log('warn', `[triage] ${describeError(error)}; skipping ${count}`)
-        skipAll()
+        chargeAll('rejected')
         settleAll()
         return 'ok'
       }
@@ -606,6 +727,8 @@ export class SplitTriage {
   }
 
   private settleThread(threadId: string, judged: boolean): void {
+    // An answer spends the budget back: the next failure starts the ladder again.
+    if (judged) this.failures.delete(threadId)
     this.priorityThreads.delete(threadId)
     for (const request of [...this.priority]) {
       if (!request.pending.delete(threadId)) continue
@@ -656,7 +779,7 @@ export class SplitTriage {
   }
 }
 
-/** Honour Retry-After when it is sane, else the 1s/2s/4s ladder. */
+/** Honour Retry-After when it is sane, else the doubling ladder from one second. */
 function rateLimitWaitMs(retryAfterMs: number | null, attempt: number): number {
   const ladder = SPLIT_TRIAGE_RATE_LIMIT_BASE_MS * 2 ** (attempt - 1)
   const wait = retryAfterMs ?? ladder

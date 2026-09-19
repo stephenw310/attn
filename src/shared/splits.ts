@@ -73,13 +73,24 @@ export type SaveSplitInput =
     }
   | { id?: string; name: string; notify: boolean; mode: 'description'; description: string }
 
+/**
+ * Why the classifier gave up on a conversation. A lost network or a timed-out
+ * request pauses the whole pass instead, so neither appears here.
+ */
+export type SplitTriageFailureCause = 'rate-limited' | 'rejected'
+
 /** What the smart-splits surface reports about the classifier's progress. */
 export interface SplitTriageStatus {
   enabled: boolean
   keyPresent: boolean
   describedSplits: number
   judgedThreads: number
+  /** Conversations still queued. It excludes the ones the pass gave up on. */
   pendingThreads: number
+  /** Conversations that spent their attempt budget. `retryTriage` asks again. */
+  failedThreads: number
+  /** The distinct causes behind those failures; empty when none failed. */
+  failedCauses: SplitTriageFailureCause[]
 }
 
 export interface ReorderSplitsInput {

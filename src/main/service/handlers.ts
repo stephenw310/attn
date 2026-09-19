@@ -1016,11 +1016,26 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   // utility reports false and main overwrites it from the encrypted key file.
   handle(IPC_CHANNELS.splitsGetTriageStatus, () => {
     const account = context.currentAccountId()
+    const triage = context.activeSession()?.splitTriage
+    // The failures live in the pass, not in SQLite: they are this session's
+    // account of what it could not do, and a restart is a fresh start.
+    const failed = triage?.failedThreadIds()
     const counts =
       !account || (context.testUserData && !hasSplitSetup(context.db, account))
-        ? { describedSplits: 0, judgedThreads: 0, pendingThreads: 0 }
-        : splitTriageCounts(context.db, account)
-    return { ...counts, enabled: readAiStoredSettings(context.db).triageEnabled, keyPresent: false }
+        ? { describedSplits: 0, judgedThreads: 0, pendingThreads: 0, failedThreads: 0 }
+        : splitTriageCounts(context.db, account, failed)
+    return {
+      ...counts,
+      failedCauses: counts.failedThreads > 0 ? (triage?.failedCauses() ?? []) : [],
+      enabled: readAiStoredSettings(context.db).triageEnabled,
+      keyPresent: false
+    }
+  })
+  handle(IPC_CHANNELS.splitsRetryTriage, () => {
+    const triage = context.activeSession()?.splitTriage
+    if (!triage) return false
+    triage.retryFailed()
+    return true
   })
   handle(IPC_CHANNELS.mailGetConversation, async (_event, threadId, allowHydration, mailbox) => {
     if (typeof threadId !== 'string') return null

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { TYPESAFE_DEFAULT_MODEL } from '../../../shared/ai'
-import type { SplitTriageStatus } from '../../../shared/splits'
+import type { SplitTriageFailureCause, SplitTriageStatus } from '../../../shared/splits'
 import { ACTION_BUTTON, INPUT } from './settingsStyles'
 
 // The smart-splits surface (SPEC F11, F17). It lives on the Split rules screen
@@ -24,13 +24,30 @@ export function describeTriageStatus(status: SplitTriageStatus | null): string {
   if (!status?.enabled) return OFF_NOTE
   if (status.describedSplits === 0) return 'On · no AI rules yet'
   const splits = `${status.describedSplits} AI rule${status.describedSplits === 1 ? '' : 's'}`
-  const total = (status.judgedThreads + status.pendingThreads).toLocaleString()
+  const failed = status.failedThreads
+  // Conversations the classifier gave up on still count in the total: they are
+  // Inbox mail with no answer, and leaving them out would move the finish line.
+  const total = (status.judgedThreads + status.pendingThreads + failed).toLocaleString()
   const judged = status.judgedThreads.toLocaleString()
-  const progress =
-    status.pendingThreads > 0
-      ? `judging ${judged} of ${total}…`
-      : `${judged} of ${total} conversations judged`
-  return `On · ${splits} · ${progress}`
+  if (status.pendingThreads > 0) return `On · ${splits} · judging ${judged} of ${total}…`
+  // Finished work needs no number: only what is left to do, or what was lost.
+  if (failed === 0) return `On · ${splits}`
+  return `On · ${splits} · ${failed.toLocaleString()} could not be judged`
+}
+
+const CAUSE_NOTES: Record<SplitTriageFailureCause, string> = {
+  'rate-limited': 'the service rate limited the request',
+  rejected: 'the service rejected the request'
+}
+
+/** The tooltip behind the status line, or nothing while every judgment landed. */
+export function describeTriageFailures(status: SplitTriageStatus | null): string | undefined {
+  const failed = status?.failedThreads ?? 0
+  if (!status || failed === 0) return undefined
+  const count = `${failed.toLocaleString()} conversation${failed === 1 ? '' : 's'}`
+  const causes = status.failedCauses.map((cause) => CAUSE_NOTES[cause]).filter(Boolean)
+  const because = causes.length > 0 ? `: ${causes.join(', ')}` : ''
+  return `${count} could not be judged${because}. Retry to ask again.`
 }
 
 interface SmartSplitsCardProps {
@@ -67,9 +84,28 @@ export function SmartSplitsCard(props: SmartSplitsCardProps): React.JSX.Element 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <div className="min-w-[13rem] flex-1">
           <h3 className="text-xs font-medium text-ink">Smart splits</h3>
-          <p data-testid="smart-splits-status" className="mt-1 text-[11px] leading-[1.65] text-ink-dim">
+          <p
+            data-testid="smart-splits-status"
+            title={describeTriageFailures(status)}
+            className="mt-1 text-[11px] leading-[1.65] text-ink-dim"
+          >
             {describeTriageStatus(status)}
           </p>
+          {(status?.failedThreads ?? 0) > 0 && (
+            <button
+              type="button"
+              data-testid="smart-splits-retry"
+              onClick={() =>
+                after(
+                  window.attn?.splits.retryTriage() ?? Promise.resolve(),
+                  'The conversations could not be judged again'
+                )
+              }
+              className={`mt-1.5 ${ACTION_BUTTON}`}
+            >
+              Retry
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2 text-[10px] text-ink-dim">
           <span>TypeSafe key</span>
