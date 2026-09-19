@@ -39,7 +39,7 @@ describe('plain-text alternative', () => {
       () => {
         const signature = new GmailSignatureNode().append(
           $createParagraphNode().append($createTextNode('Best,')),
-          $createParagraphNode().append($createTextNode('Chao Wu'))
+          $createParagraphNode().append($createTextNode('Alex Morgan'))
         )
         $getRoot().append($createParagraphNode().append($createTextNode('Hello')), signature)
       },
@@ -56,7 +56,7 @@ describe('plain-text alternative', () => {
     expect(wrapper?.parentElement?.getAttribute('dir')).toBe('ltr')
     expect(wrapper?.parentElement?.parentElement).toBe(document.body)
     expect(wrapper?.children).toHaveLength(1)
-    expect(bodyText).toBe('Hello\n\nBest,\nChao Wu')
+    expect(bodyText).toBe('Hello\n\nBest,\nAlex Morgan')
   })
 
   it('serializes inline images to CID without leaking the private marker', () => {
@@ -212,7 +212,7 @@ describe('plain-text alternative', () => {
                 {
                   type: 'paragraph',
                   version: 1,
-                  children: [{ type: 'styled-text', version: 1, text: 'Chao Wu' }]
+                  children: [{ type: 'styled-text', version: 1, text: 'Alex Morgan' }]
                 },
                 {
                   type: 'paragraph',
@@ -221,7 +221,7 @@ describe('plain-text alternative', () => {
                     {
                       type: 'link',
                       version: 1,
-                      children: [{ type: 'styled-text', version: 1, text: 'https://chaowu.xyz' }]
+                      children: [{ type: 'styled-text', version: 1, text: 'https://alexmorgan.example' }]
                     }
                   ]
                 }
@@ -235,6 +235,6 @@ describe('plain-text alternative', () => {
           version: 1
         }
       } as unknown as SerializedEditorState)
-    ).toBe('\nBest,\nChao Wu\nhttps://chaowu.xyz')
+    ).toBe('\nBest,\nAlex Morgan\nhttps://alexmorgan.example')
   })
 })

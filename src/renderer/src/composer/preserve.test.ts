@@ -55,7 +55,7 @@ describe('composer HTML fidelity', () => {
 
   it('keeps a Gmail signature wrapper on the editable path', () => {
     const html =
-      '<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><a href="https://chaowu.xyz" target="_blank">Chao Wu</a></div>'
+      '<div class="gmail_signature" data-smartmail="gmail_signature" dir="ltr"><div>Best,</div><a href="https://alexmorgan.example" target="_blank">Alex Morgan</a></div>'
     const prepared = prepareHtmlForEditor(html)
 
     expect(prepared.issues).toEqual([])
@@ -85,13 +85,13 @@ describe('composer HTML fidelity', () => {
     // sanitizer drops `clear` either way, so freezing the remaining `<br>`
     // would preserve nothing and only cost editability.
     const html =
-      '<div dir="ltr"><div><br clear="all"></div><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><div dir="ltr"><div>Bests,</div>Chao Wu<div><a href="https://chaowu.xyz" target="_blank">https://chaowu.xyz</a><br></div></div></div></div></div>'
+      '<div dir="ltr"><div><br clear="all"></div><div><div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature"><div dir="ltr"><div>Bests,</div>Alex Morgan<div><a href="https://alexmorgan.example" target="_blank">https://alexmorgan.example</a><br></div></div></div></div></div>'
     const prepared = prepareHtmlForEditor(html)
 
     expect(prepared.issues).toEqual([])
     expect(prepared.html).not.toContain('data-attn-opaque')
     expect(prepared.html).toContain('<br>')
-    expect(prepared.html).toContain('https://chaowu.xyz')
+    expect(prepared.html).toContain('https://alexmorgan.example')
   })
 
   it('still freezes a region that survives sanitization, and reports its nested issues', () => {

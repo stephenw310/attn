@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DraftSaveInput } from '../../shared/drafts'
-import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL } from '../../shared/settings'
+import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL, isAttnSignatureLine } from '../../shared/settings'
 import type { Db } from '../db'
 import { textFromRaw } from '../gmail/parse'
 import { readAccountSetting, writeAccountSetting } from '../settings'
@@ -18,7 +18,7 @@ export const ATTN_SIGNATURE_SETTING = 'attnSignatureEnabled'
     secondary; the marker attribute is what identity survives on. */
 const ATTN_FOOTER_HTML =
   '<div data-attn-signature="footer"><br><span style="color:#888888">Sent with ' +
-  `<a href="${ATTN_SIGNATURE_URL}" style="color:#888888;text-decoration:underline">Attn:</a></span></div>`
+  `<a href="${ATTN_SIGNATURE_URL}" style="color:#888888;text-decoration:underline">Attn</a></span></div>`
 const ATTN_FOOTER_SELECTOR = '[data-attn-signature="footer"]'
 
 export function attnSignatureEnabled(db: Db, accountId: string): boolean {
@@ -131,7 +131,7 @@ function signatureContainsFooterLine(signatureHtml: string): boolean {
   if (!signature) return false
   return textFromRaw('text/html', signature.innerHTML)
     .split('\n')
-    .some((line) => line.trim() === ATTN_SIGNATURE_LINE)
+    .some((line) => isAttnSignatureLine(line.trim()))
 }
 
 /** Append a visibly separated footer after the signature wrapper, inside the body envelope. */

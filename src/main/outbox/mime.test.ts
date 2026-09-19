@@ -211,9 +211,9 @@ describe('MIME builder', () => {
   })
 
   it('writes the configured sender display name into From', () => {
-    const raw = buildMime(CASES[0].draft, { ...OPTIONS, accountName: 'Chao Zhou' })
+    const raw = buildMime(CASES[0].draft, { ...OPTIONS, accountName: 'Alex Morgan' })
 
-    expect(parseTopHeaders(raw).get('from')).toBe('Chao Zhou <me@example.com>')
+    expect(parseTopHeaders(raw).get('from')).toBe('Alex Morgan <me@example.com>')
   })
 
   it('base64-wraps attachment content at no more than 76 columns', () => {

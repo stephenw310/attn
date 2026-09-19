@@ -51,7 +51,7 @@ export function LoginScreen(props: LoginScreenProps): React.JSX.Element {
       />
       <main className="relative flex min-h-0 flex-1 justify-center overflow-y-auto px-6 pt-[22vh] pb-10">
         <section className="app-no-drag w-full max-w-[480px] text-center">
-          <div className="mb-16 text-[32px] font-semibold tracking-tight text-ink">attn:</div>
+          <div className="mb-16 text-[32px] font-semibold tracking-tight text-ink">Attn</div>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Your mail, at your pace.</h1>
           <p className="mt-5 text-sm text-ink">Sign in with Google to bring your Gmail into Attn.</p>
 

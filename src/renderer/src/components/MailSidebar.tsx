@@ -97,7 +97,7 @@ export function MailSidebar(props: MailSidebarProps): React.JSX.Element {
         data-testid="sidebar-brand"
         className="flex h-14 flex-none items-center px-2.5 pb-2 text-[26px] leading-none font-bold tracking-[-0.04em]"
       >
-        attn:
+        Attn
       </div>
       <nav className="flex flex-none flex-col gap-0.5" aria-label="Mailboxes">
         <div className="flex min-h-8 items-center px-2.5 pb-1.5">

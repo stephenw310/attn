@@ -15,7 +15,7 @@ import {
   resolveProviderTarget
 } from './protocol'
 
-const voice = { tone: 'formal', rules: "sign off with 'Best, Chao'" } as const
+const voice = { tone: 'formal', rules: "sign off with 'Best, Alex'" } as const
 
 const replyRequest: AiReplyRequest = {
   purpose: 'reply',
@@ -30,7 +30,7 @@ describe('buildPrompt', () => {
   it('reply prompts carry the thread, tone, standing rules, and style examples', () => {
     const prompt = buildPrompt(replyRequest, voice)
     expect(prompt.system).toContain('formal')
-    expect(prompt.system).toContain("sign off with 'Best, Chao'")
+    expect(prompt.system).toContain("sign off with 'Best, Alex'")
     expect(prompt.system).toContain('Thanks — sending it over now.')
     expect(prompt.messages).toHaveLength(1)
     expect(prompt.messages[0].content).toContain('Can you review the roadmap?')
@@ -130,7 +130,7 @@ describe('buildPrompt', () => {
     }
     const prompt = buildPrompt(request, voice)
     const payload = prompt.system + prompt.messages.map((message) => message.content).join('')
-    expect(payload).toContain("sign off with 'Best, Chao'")
+    expect(payload).toContain("sign off with 'Best, Alex'")
     expect(payload).toContain('formal')
     expect(payload).toContain('Revised launch plan')
     expect(payload).toContain('Can you send the revised launch plan?')

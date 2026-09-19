@@ -92,7 +92,7 @@ export interface AiStoredSettings {
   /** Model override; null = the provider preset's default. */
   model: string | null
   voiceTone: AiVoiceTone
-  /** Free-text standing rules ("sign off with 'Best, Chao'"). Not mail content. */
+  /** Free-text standing rules ("sign off with 'Best, Alex'"). Not mail content. */
   voiceRules: string
   /** Send a few of the user's own recent sent replies as style examples (T37). */
   voiceMatchingEnabled: boolean

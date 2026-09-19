@@ -146,7 +146,7 @@ describe('findHtmlTrimStart', () => {
   })
 
   it('still trims at an ordinary signature separator', () => {
-    const content = fragment('<div>Answer</div><div>-- </div><div>Chao</div>')
+    const content = fragment('<div>Answer</div><div>-- </div><div>Alex</div>')
     const boundary = findHtmlTrimStart(content)
 
     expect(boundary).not.toBeNull()
