@@ -130,7 +130,6 @@ interface PriorityRequest {
    * caller asked about that arrival, so only a judgment of it answers the wait.
    */
   evidence: Map<string, string>
-  judgedLate: LateJudgment[]
   resolved: boolean
   resolve: () => void
   /** When the wait was made, so a pass can drop one too old to notify for. */
@@ -372,7 +371,6 @@ export class SplitTriage {
     const request: PriorityRequest = {
       pending: new Set(evidence.keys()),
       evidence,
-      judgedLate: [],
       resolved: false,
       resolve: () => {},
       createdAt: this.time.now()
@@ -751,6 +749,15 @@ export class SplitTriage {
     const chargeAll = (cause: SplitTriageFailureCause): void => {
       for (const entry of loaded) this.recordFailure(gate, entry.row, cause)
     }
+    // A charged failure keeps its wait while the backoff timer will bring the
+    // conversation back, so that retry can still report the arrival late. At
+    // the attempt cap nobody asks again, and the wait ends with the budget.
+    const settleCharged = (): void => {
+      for (const entry of loaded) {
+        const attempts = this.failures.get(entry.row.threadId)?.attempts ?? 0
+        this.settleThread(entry.row.threadId, attempts >= SPLIT_TRIAGE_MAX_ATTEMPTS ? 'gone' : 'retry')
+      }
+    }
     const { state, questions, targets } = buildPackedTriageRequest(
       loaded.map((entry) => entry.state),
       gate.rules
@@ -790,9 +797,7 @@ export class SplitTriage {
             const count = `${loaded.length} conversation${loaded.length === 1 ? '' : 's'}`
             this.log('warn', `[triage] ${describeError(error)}; ${count} wait for a later pass`)
             chargeAll('rate-limited')
-            // The backoff timer brings this pack back, so the waits stay with
-            // their conversations and the retry can still report them late.
-            settleAll('retry')
+            settleCharged()
             return 'ok'
           }
           await this.wait(rateLimitWaitMs(error.retryAfterMs, attempt))
@@ -841,9 +846,7 @@ export class SplitTriage {
         }
         this.log('warn', `[triage] ${describeError(error)}; skipping ${count}`)
         chargeAll('rejected')
-        // The service refused this conversation on its own, so no retry in
-        // this pass or the next few answers the question. Release the waits.
-        settleAll('gone')
+        settleCharged()
         return 'ok'
       }
     }
@@ -983,8 +986,11 @@ export class SplitTriage {
         continue
       }
       request.pending.delete(threadId)
+      // A judgment that lands after the deadline reports at once. The rest of
+      // its group may still be on a retry, or expire first, and neither should
+      // hold back an answer that already qualifies for a notification.
       if (outcome === 'judged' && request.resolved && waited !== undefined) {
-        request.judgedLate.push({ threadId, messageId: waited })
+        this.options.onLateJudgment([{ threadId, messageId: waited }])
       }
       if (request.pending.size > 0) continue
       const index = this.priority.indexOf(request)
@@ -992,9 +998,7 @@ export class SplitTriage {
       if (!request.resolved) {
         request.resolved = true
         request.resolve()
-        continue
       }
-      if (request.judgedLate.length > 0) this.options.onLateJudgment([...request.judgedLate])
     }
     if (!stillWaiting) this.priorityThreads.delete(threadId)
   }

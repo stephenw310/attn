@@ -168,6 +168,49 @@ describe('typesafe client', () => {
     expect((failure as Error).message).toBe('smart splits request timed out')
   })
 
+  it('reports a body the deadline cut off as a network failure', async () => {
+    const timers = new ManualTimers()
+    let reading = false
+    const failure = await call(
+      () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          json: () =>
+            new Promise<unknown>((_resolve, reject) => {
+              // The headers arrived, and the deadline fires while the body is
+              // still on its way.
+              reading = true
+              timers.fire(SPLIT_TRIAGE_REQUEST_TIMEOUT_MS)
+              reject(new Error('aborted while the body was read'))
+            })
+        } as unknown as Response),
+      timers.time
+    ).catch((error: unknown) => error)
+    expect(reading).toBe(true)
+    // The service refused nothing, so the pass pauses rather than charging
+    // every conversation in the pack for a request it never answered.
+    expect(failure).toBeInstanceOf(TypeSafeNetworkError)
+    expect((failure as Error).message).toBe('smart splits request timed out')
+  })
+
+  it('reports a body that is not JSON as a request error', async () => {
+    const timers = new ManualTimers()
+    const failure = await call(
+      () =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          json: () => Promise.reject(new Error('unexpected token'))
+        } as unknown as Response),
+      timers.time
+    ).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(TypeSafeRequestError)
+    expect((failure as Error).message).toBe('smart splits answer was not JSON')
+  })
+
   it('treats a server failure as a network failure, not a bad request', async () => {
     const timers = new ManualTimers()
     await expect(call(() => Promise.resolve(response(503, {})), timers.time)).rejects.toBeInstanceOf(

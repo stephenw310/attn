@@ -139,6 +139,14 @@ export async function judgeThread(request: JudgeThreadRequest): Promise<Record<s
     try {
       body = await response.json()
     } catch {
+      // The deadline can abort the body read after the headers arrived. That
+      // is the network failing, not the service refusing the request, so the
+      // pass pauses and retries instead of charging every conversation.
+      if (timedOut || controller.signal.aborted) {
+        throw new TypeSafeNetworkError(
+          timedOut ? 'smart splits request timed out' : 'smart splits request was canceled'
+        )
+      }
       throw new TypeSafeRequestError('smart splits answer was not JSON')
     }
     return parseProbabilities(body, questionIds)

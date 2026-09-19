@@ -848,6 +848,163 @@ describe('split triage pass', () => {
     expect(late).toEqual([[{ threadId: 't-1', messageId: 'm-1' }]])
   })
 
+  it('keeps a waiting conversation queued across a rejected request and reports it after the backoff', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let rejecting = true
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) =>
+      rejecting ? failingTransport(400)(url, init) : answer(url, init)
+    )
+
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+
+    // The service refused this attempt, but the budget still has attempts in
+    // it, so the conversation keeps its place and the wait stays with it.
+    expect(judgments('account')).toHaveLength(0)
+    expect(resolved).toBe(false)
+    // The caller's deadline and the conversation's own backoff, both armed.
+    expect(timers.armed).toBe(2)
+
+    timers.fire(2_000)
+    await waiting
+    expect(resolved).toBe(true)
+    expect(late).toEqual([])
+    expect(timers.armed).toBe(1)
+
+    rejecting = false
+    timers.nowMs += SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0]
+    timers.fire(SPLIT_TRIAGE_FAILURE_BACKOFF_MS[0])
+    await triage.settled()
+
+    // The retry judged the arrival the caller asked about, so the move into
+    // the described split is still reported.
+    expect(judgments('account')[0]?.evidence_key).toBe('m-1')
+    expect(late).toEqual([[{ threadId: 't-1', messageId: 'm-1' }]])
+
+    triage.kick()
+    await triage.settled()
+    expect(late).toHaveLength(1)
+  })
+
+  it('releases a waiting conversation when the rejected request spends its last attempt', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    const triage = makeTriage('account', (url, init) => {
+      attempts++
+      return failingTransport(400)(url, init)
+    })
+
+    // Every attempt but the last is spent on ordinary passes.
+    triage.kick()
+    await triage.settled()
+    for (const step of SPLIT_TRIAGE_FAILURE_BACKOFF_MS.slice(0, SPLIT_TRIAGE_MAX_ATTEMPTS - 2)) {
+      timers.nowMs += step
+      timers.fire(step)
+      await triage.settled()
+    }
+    expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS - 1)
+
+    // The wait arrives once that backoff has elapsed, so its own request is
+    // the one that spends the budget.
+    timers.nowMs += SPLIT_TRIAGE_FAILURE_BACKOFF_MS[SPLIT_TRIAGE_MAX_ATTEMPTS - 2]
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+
+    // Nothing asks again, so the caller is released with the budget rather
+    // than held until its deadline for an answer nobody is bringing.
+    expect(resolved).toBe(true)
+    await waiting
+    await triage.settled()
+    expect(attempts).toBe(SPLIT_TRIAGE_MAX_ATTEMPTS)
+    expect([...triage.failedThreadIds()]).toEqual(['t-1'])
+    expect(judgments('account')).toHaveLength(0)
+    expect(late).toEqual([])
+    expect(timers.armed).toBe(0)
+  })
+
+  it('reports a late judgment at once while the rest of its group is still on a retry', async () => {
+    insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 200 }])
+    insertThread('account', 't-2', 'Lunch plans', [{ id: 'm-2', at: 100 }])
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    const held: Array<() => void> = []
+    const packed: string[][] = []
+    let offline = true
+    const answer = scriptedTransport(() => 0.9, recorded)
+    const triage = makeTriage('account', (url, init) => {
+      const subjects = subjectsOf(JSON.parse(String(init.body)) as RecordedRequest)
+      packed.push(subjects)
+      return new Promise<Response>((resolve, reject) => {
+        held.push(() => {
+          if (subjects.length > 1) void failingTransport(422)(url, init).then(resolve)
+          else if (subjects.includes('Lunch plans') && offline) reject(new Error('connection refused'))
+          else void answer(url, init).then(resolve)
+        })
+      })
+    })
+
+    let resolved = false
+    const waiting = triage.judgeNow(['t-1', 't-2'], 2_000).then(() => {
+      resolved = true
+    })
+    await flush()
+    // Both waiting conversations ride one request. The script below answers
+    // for the first one and drops the connection on the second, so the order
+    // is asserted rather than assumed.
+    expect(packed).toEqual([['Q3 invoice', 'Lunch plans']])
+
+    timers.fire(2_000)
+    await waiting
+    expect(resolved).toBe(true)
+    expect(late).toEqual([])
+
+    // The service refuses the pack, so each conversation is asked about alone.
+    held[0]()
+    await flush()
+    expect(packed[1]).toEqual(['Q3 invoice'])
+
+    held[1]()
+    await flush()
+    // The judgment is reported the moment it lands, and it names only its own
+    // conversation: the other one has not been answered for yet.
+    expect(late).toEqual([[{ threadId: 't-1', messageId: 'm-1' }]])
+    expect(packed[2]).toEqual(['Lunch plans'])
+
+    // The second conversation loses its connection, so it keeps its wait.
+    held[2]()
+    await triage.settled()
+    expect(late).toHaveLength(1)
+    expect(judgments('account').map((row) => row.thread_id)).toEqual(['t-1'])
+
+    // The group outlives the window a late notification could fire in, so the
+    // pass that finds the network still down ends the wait.
+    timers.nowMs += SPLIT_TRIAGE_LATE_NOTIFY_WINDOW_MS + 1
+    timers.fire(SPLIT_TRIAGE_OFFLINE_RETRY_MS)
+    await flush()
+    expect(packed[3]).toEqual(['Lunch plans'])
+    held[3]()
+    await triage.settled()
+
+    offline = false
+    timers.nowMs += SPLIT_TRIAGE_OFFLINE_RETRY_MS
+    timers.fire(SPLIT_TRIAGE_OFFLINE_RETRY_MS)
+    await flush()
+    held[4]()
+    await triage.settled()
+
+    // The conversation is judged; nobody is told about it a second time.
+    expect(judgments('account').map((row) => row.thread_id)).toEqual(['t-1', 't-2'])
+    expect(late).toHaveLength(1)
+  })
+
   it('drops a wait older than the late-notification window at the end of a pass', async () => {
     insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
     describedSplit('account', 'Invoices', 'Bills I have to pay')
