@@ -406,9 +406,7 @@ export function AiSettingsSection({ onOpenSplits }: { onOpenSplits: () => void }
       <div className={ROW}>
         <span className="flex min-w-0 flex-col">
           <span className="text-sm text-ink">Smart splits</span>
-          <span className={NOTE}>
-            Set up in Split rules: describe a split and TypeSafe sorts mail into it.
-          </span>
+          <span className={NOTE}>Set up in Split rules: write an AI rule and AI sorts mail into it.</span>
         </span>
         <button
           type="button"

@@ -97,7 +97,7 @@ test('turns smart splits on from its card and describes a split in the editor', 
   const card = page.getByTestId('smart-splits-card')
   const toggle = page.getByTestId('smart-splits-enabled')
   await expect(card).toBeVisible()
-  await expect(page.getByTestId('smart-splits-status')).toContainText('Off · Describe a split')
+  await expect(page.getByTestId('smart-splits-status')).toContainText('Off · Write an AI rule')
   await expect(page.getByTestId('smart-splits-model')).toHaveAttribute('placeholder', 'jev-latest')
   // Without a TypeSafe key there is nothing to consent to.
   await expect(toggle).toBeDisabled()
@@ -108,7 +108,7 @@ test('turns smart splits on from its card and describes a split in the editor', 
   await expect(page.getByTestId('split-rule-mode-rules')).toHaveAttribute('aria-pressed', 'true')
   const describeIt = page.getByTestId('split-rule-mode-description')
   await expect(describeIt).toBeDisabled()
-  await expect(describeIt).toHaveAttribute('title', 'Turn on smart splits to describe a split')
+  await expect(describeIt).toHaveAttribute('title', 'Turn on smart splits to use an AI rule')
 
   // The key round trip shows presence only, never the value.
   await page.getByTestId('smart-splits-key').fill('ts-test-key-e2e')
@@ -135,7 +135,7 @@ test('turns smart splits on from its card and describes a split in the editor', 
   await toggle.click()
   await page.getByTestId('smart-splits-enable-apply').click()
   await expect(toggle).toBeChecked()
-  await expect(page.getByTestId('smart-splits-status')).toContainText('On \u00b7 no described splits yet')
+  await expect(page.getByTestId('smart-splits-status')).toContainText('On \u00b7 no AI rules yet')
   // Smart splits never turn AI writing on, and they carry a separate key.
   const aiSettings = await page.evaluate(() => window.attn.ai.getSettings())
   expect(aiSettings.enabled).toBe(false)
@@ -147,7 +147,7 @@ test('turns smart splits on from its card and describes a split in the editor', 
   await card.screenshot({ path: cardPath, animations: 'disabled' })
   await testInfo.attach('split-rules-smart-card', { path: cardPath, contentType: 'image/png' })
 
-  // With smart splits on, a new split starts on Describe it.
+  // With smart splits on, a new split starts on AI rule.
   await page.getByTestId('split-rule-new').click()
   await expect(describeIt).toHaveAttribute('aria-pressed', 'true')
   await page.getByTestId('split-rule-name').fill('Landlord')
@@ -163,7 +163,7 @@ test('turns smart splits on from its card and describes a split in the editor', 
   // A mode switch never throws away typed words behind the user's back.
   await page.getByTestId('split-rule-mode-rules').click()
   const modeConfirm = page.getByTestId('split-rule-mode-confirm')
-  await expect(modeConfirm).toContainText('Discard the description?')
+  await expect(modeConfirm).toContainText('Discard the AI rule?')
   await expect(describeIt).toHaveAttribute('aria-pressed', 'true')
   await page.getByTestId('split-rule-mode-confirm-cancel').click()
   await expect(modeConfirm).toHaveCount(0)
@@ -186,13 +186,13 @@ test('turns smart splits on from its card and describes a split in the editor', 
   const summary = saved.getByTestId('split-rule-summary')
   await expect(saved).toHaveCount(1)
   await expect(summary).toContainText('Landlord')
-  await expect(summary).toContainText('Described')
+  await expect(summary).toContainText('AI rule')
   await expect(summary).not.toContainText('paused')
 
   // Turning smart splits off pauses the description; it never deletes it.
   await toggle.click()
   await expect(toggle).not.toBeChecked()
-  await expect(summary).toContainText('Described \u00b7 paused')
+  await expect(summary).toContainText('AI rule \u00b7 paused')
 
   // Removing the key withdraws the consent and blocks the toggle again.
   await page.getByTestId('smart-splits-key-remove').click()
@@ -202,7 +202,7 @@ test('turns smart splits on from its card and describes a split in the editor', 
   const cleared = await page.evaluate(() => window.attn.ai.getSettings())
   expect(cleared.triageEnabled).toBe(false)
   expect(cleared.triageKeyPresent).toBe(false)
-  await expect(summary).toContainText('Described \u00b7 paused')
+  await expect(summary).toContainText('AI rule \u00b7 paused')
 
   await summary.click()
   await expect(page.getByTestId('split-rule-description')).toHaveValue(

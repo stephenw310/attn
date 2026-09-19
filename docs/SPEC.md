@@ -544,15 +544,15 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   nearby rows rearrange immediately, and release chooses the nearest position. A focused drag handle also
   accepts Up and Down for keyboard access. Attn never recreates a changed or deleted preset during launch,
   sync, or an app update. The rule manager can restore a preset only after an explicit user action.
-- The split-rule manager keeps the sortable list beside the selected rule editor. It identifies the current account and explains first-match ordering. Important and Other show their built-in behavior and notification preference. Custom rules expose their existing conditions, notification preference, save, and delete actions. The manager selects the first rule on opening. Escape closes it in one step, except during a drag.
+- The split-rule manager keeps the sortable list beside the selected rule editor. It explains first-match ordering. Important and Other show their built-in behavior and notification preference. Custom rules expose their existing conditions, notification preference, save, and delete actions. The manager selects the first rule on opening. Escape closes it in one step, except during a drag.
 - A smart-splits card spans the top of the manager, above the rule list. It holds the consent switch, the
-  TypeSafe key, the judgment model, and one status line: off, on with no described split, or on with the
-  count of described splits and judged conversations. The card reports outstanding judgments while they run.
-- The rule editor offers a two-way choice under the split name: **Describe it** or **Match by rules**. A new
-  split starts on Describe it while smart splits are on, and on Match by rules while they are off, where
-  Describe it stays unavailable. An existing split opens on the choice it was saved with. Switching the
+  TypeSafe key, the judgment model, and one status line: off, on with no AI rule, or on with the
+  count of AI rules and judged conversations. The card reports outstanding judgments while they run.
+- The rule editor offers a two-way choice under the split name: **AI rule** or **Manual rules**. A new
+  split starts on AI rule while smart splits are on, and on Manual rules while they are off, where
+  AI rule stays unavailable. An existing split opens on the choice it was saved with. Switching the
   choice asks before it discards what the other side holds.
-- Each row summarizes its rule: `Described`, `Described · paused` while smart splits are off, the condition
+- Each row summarizes its rule: `AI rule`, `AI rule · paused` while smart splits are off, the condition
   count for a rule-based split, or the built-in behavior of Important and Other.
 - A split expression combines conditions with **any** or **all**. Conditions match a sender address, a sender
   domain, an exact `List-Id`, `List-Id` presence, a label, an attachment MIME type, or an attachment filename
@@ -776,7 +776,7 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
   drafting. Removing the TypeSafe key withdraws the consent and stops the classifier; it touches neither the
   writing key nor the OAuth credentials. The consent, the key, and the model live in the Split rules
   manager, beside the descriptions they judge; the AI writing settings page only links there. A described
-  split's row reads `Described · paused` while smart splits are off.
+  split's row reads `AI rule · paused` while smart splits are off.
 - **Never auto-sends.** Accepted autocomplete text and generated replies use the normal editable draft
   and send flow, undo send included. Unaccepted suggestions are never sent.
 

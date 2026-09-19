@@ -28,7 +28,6 @@ import { Kbd } from './Kbd'
 import { SmartSplitsCard } from './SmartSplitsCard'
 
 interface SplitRuleManagerProps {
-  accountEmail?: string
   state: SplitState
   onSave: (input: SaveSplitInput) => Promise<void>
   onNotify: (id: string, notify: boolean) => Promise<void>
@@ -143,7 +142,7 @@ function hasContent(draft: RuleDraft, mode: DraftMode): boolean {
 function summarize(split: SplitSummary, triageUsable: boolean): string {
   if (split.id === OTHER_SPLIT_ID) return 'Remaining Inbox mail'
   if (split.id === IMPORTANT_SPLIT_ID) return 'Gmail Important'
-  if (split.description !== null) return triageUsable ? 'Described' : 'Described · paused'
+  if (split.description !== null) return triageUsable ? 'AI rule' : 'AI rule · paused'
   const count = split.match.conditions.length
   return `${count} ${count === 1 ? 'rule' : 'rules'}`
 }
@@ -469,8 +468,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               Split rules
             </h2>
             <p className="mt-6 text-xs text-ink-dim">
-              For {props.accountEmail ?? 'this account'}. A conversation appears in the first matching split.
-              Other always stays last.
+              A conversation appears in the first matching split. Other always stays last.
             </p>
           </div>
           <button
@@ -644,7 +642,6 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                 })
               }}
             >
-              <p className="mb-4 text-[11px] text-ink-dim">Current account · {props.accountEmail}</p>
               <h3 className="mb-[22px] text-[17px] font-medium text-ink">{draft.name || 'New split'}</h3>
               <label className="block text-[11px] text-ink-dim">
                 Split name
@@ -667,11 +664,11 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   data-testid="split-rule-mode-description"
                   aria-pressed={draft.mode === 'description'}
                   disabled={!triageUsable}
-                  title={triageUsable ? undefined : 'Turn on smart splits to describe a split'}
+                  title={triageUsable ? undefined : 'Turn on smart splits to use an AI rule'}
                   onClick={() => requestMode('description')}
                   className={MODE_BUTTON(draft.mode === 'description')}
                 >
-                  Describe it
+                  AI rule
                 </button>
                 <button
                   type="button"
@@ -680,7 +677,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   onClick={() => requestMode('rules')}
                   className={MODE_BUTTON(draft.mode === 'rules')}
                 >
-                  Match by rules
+                  Manual rules
                 </button>
               </fieldset>
               {modeConfirm && (
@@ -689,7 +686,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   className="mt-2.5 flex flex-wrap items-center gap-2.5 rounded-md border border-accent/40 bg-accent/10 px-3 py-2"
                 >
                   <span className="text-[11px] leading-[1.65] text-ink-dim">
-                    {modeConfirm === 'rules' ? 'Discard the description?' : 'Discard the rules?'}
+                    {modeConfirm === 'rules' ? 'Discard the AI rule?' : 'Discard the manual rules?'}
                   </span>
                   <button
                     type="button"
@@ -827,7 +824,7 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               )}
               <p className="mb-[27px] text-[11px] leading-[1.65] text-ink-dim">
                 {draft.mode === 'description'
-                  ? 'TypeSafe judges each Inbox conversation against your words.'
+                  ? 'AI judges each Inbox conversation against your words.'
                   : draft.operator === 'all'
                     ? 'The same message must satisfy every condition.'
                     : 'A thread matches when a message satisfies any condition.'}{' '}
@@ -879,13 +876,9 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
                   Save changes
                 </button>
               </footer>
-              <p className="mt-[25px] border-t border-edge pt-[17px] text-[11px] text-ink-dim">
-                Changes apply to this account’s Inbox.
-              </p>
             </form>
           ) : (
             <div className="min-w-0 flex-1 overflow-y-auto pl-[33px] pr-4 pt-2">
-              <p className="mb-4 text-[11px] text-ink-dim">Current account · {props.accountEmail}</p>
               <h3 className="mb-[22px] text-[17px] font-medium text-ink">
                 {builtIn?.name ?? 'Select a split'}
               </h3>

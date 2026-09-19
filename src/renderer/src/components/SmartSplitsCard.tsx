@@ -17,13 +17,13 @@ export const TRIAGE_DISCLOSURE =
   'message. Judgments run ' +
   'in the background without a command, and content already sent cannot be recalled.'
 
-const OFF_NOTE = 'Off · Describe a split in your own words and TypeSafe sorts mail into it.'
+const OFF_NOTE = 'Off · Write an AI rule in your own words and AI sorts mail into it.'
 
 /** The one line that reports the classifier's progress. */
 export function describeTriageStatus(status: SplitTriageStatus | null): string {
   if (!status?.enabled) return OFF_NOTE
-  if (status.describedSplits === 0) return 'On · no described splits yet'
-  const splits = `${status.describedSplits} described split${status.describedSplits === 1 ? '' : 's'}`
+  if (status.describedSplits === 0) return 'On · no AI rules yet'
+  const splits = `${status.describedSplits} AI rule${status.describedSplits === 1 ? '' : 's'}`
   const total = (status.judgedThreads + status.pendingThreads).toLocaleString()
   const judged = status.judgedThreads.toLocaleString()
   const progress =
