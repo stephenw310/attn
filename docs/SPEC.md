@@ -790,8 +790,9 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 
 **Acceptance criteria**
 
-- Master AI disabled → zero requests to any LLM endpoint, including after relaunch. Autocomplete disabled
-  → zero typing-triggered requests even when explicit reply drafting is enabled.
+- AI writing disabled → zero writing-provider requests, including after relaunch. Smart splits remain
+  governed by their separate consent. Autocomplete disabled → zero typing-triggered requests even when
+  explicit reply drafting is enabled.
 - UI never blocks during either feature; composer keystroke and suggestion acceptance meet §7. `Esc`
   cancels reply streaming, retaining partial text; for autocomplete it dismisses the preview first.
 - With voice matching off, reply requests contain no additional sent-mail style examples. Autocomplete
@@ -1005,7 +1006,7 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 
 **Security and privacy:** OAuth tokens and AI provider keys use `safeStorage`. SQLite mail data stays under the operating-system user profile. Attn does not encrypt the mail database.
 
-The app connects to Google for mail. AI requests go to the selected provider only after opt-in. Reply commands send the specified mail context. Separately enabled autocomplete sends a limited excerpt of unsent text. AI does not process the mailbox in the background.
+The app connects to Google for mail. AI writing requests go to the selected provider only after opt-in. Reply commands send the specified mail context. Separately enabled autocomplete sends a limited excerpt of unsent text. AI writing does not process the mailbox in the background. Smart splits use separate consent and a separate TypeSafe key to classify Inbox conversations in the background, as described in F11 and F17.
 
 Signed release builds contact the configured update feed. Attn has no telemetry. Remote images load directly from senders by default. A global block setting and per-sender exceptions control those requests.
 
@@ -1036,7 +1037,7 @@ The rolling update feed declares the target schema and the oldest supported sche
 | New-mail notification latency (app running) | ≤ 30s |
 | Memory, steady state (50k messages synced) | < 500MB |
 
-The dedicated Electron performance job now drives a 10,000-thread production build on every pull request. It enforces a windowed DOM, p95 scroll-frame pacing, the 500 MB application-owned memory ceiling, cached conversation open, single/bulk triage feedback, and composer open/mutation/paint budgets. Use `npm run e2e:perf` to reproduce these checks. Use `npm run e2e:perf:scale` for reads that must remain bounded as the store grows.
+See the [performance test guide](TESTING.md#performance-checks) for test profiles and measurement procedures, and [CI coverage](TESTING.md#ci-and-git-hooks) for automated checks.
 
 Initial sync is measured at both completion points above: time to interactive-ready is a product budget;
 time to finish background indexing is reported with mailbox size, stage request counts, effective
