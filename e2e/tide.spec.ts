@@ -66,6 +66,90 @@ test('Tide palettes preserve appearance, persist, and keep app text readable', a
   await expect.poll(() => relaunched.page.evaluate(() => window.attn.settings.initialPalette)).toBe('dusk')
 })
 
+test('native window icons follow a palette command and persist across relaunch', async ({
+  page,
+  app,
+  boot
+}) => {
+  test.skip(
+    process.platform !== 'darwin' && process.platform !== 'win32',
+    'native icon surfaces are macOS/Windows only'
+  )
+
+  await app.evaluate(({ BrowserWindow, app: electronApp }) => {
+    const state = globalThis as typeof globalThis & { __attnIconCalls?: string[] }
+    state.__attnIconCalls = []
+    if (process.platform === 'darwin') {
+      const dock = electronApp.dock
+      if (!dock) throw new Error('macOS Dock is unavailable')
+      const setIcon = dock.setIcon.bind(dock)
+      dock.setIcon = (icon) => {
+        state.__attnIconCalls?.push(typeof icon === 'string' ? icon : 'native-image')
+        return setIcon(icon)
+      }
+      return
+    }
+    const setIcon = BrowserWindow.prototype.setIcon
+    BrowserWindow.prototype.setIcon = function (icon) {
+      state.__attnIconCalls?.push(typeof icon === 'string' ? icon : 'native-image')
+      return setIcon.call(this, icon)
+    }
+  })
+
+  await runPaletteCommand(page, 'Use Dusk color palette')
+  await expect
+    .poll(() => page.evaluate(async () => (await window.attn.settings.getAll()).palette))
+    .toBe('dusk')
+  await expect
+    .poll(() =>
+      app.evaluate(() =>
+        (globalThis as typeof globalThis & { __attnIconCalls?: string[] }).__attnIconCalls?.some((icon) =>
+          icon.includes('icon-dusk')
+        )
+      )
+    )
+    .toBe(true)
+
+  const relaunched = await boot.relaunch()
+  await expect(relaunched.page.locator('html')).toHaveAttribute('data-palette', 'dusk')
+  await expect
+    .poll(() => relaunched.page.evaluate(async () => (await window.attn.settings.getAll()).palette))
+    .toBe('dusk')
+
+  await relaunched.app.evaluate(({ BrowserWindow, app: electronApp }) => {
+    const state = globalThis as typeof globalThis & { __attnIconCalls?: string[] }
+    state.__attnIconCalls = []
+    if (process.platform === 'darwin') {
+      const dock = electronApp.dock
+      if (!dock) throw new Error('macOS Dock is unavailable')
+      const setIcon = dock.setIcon.bind(dock)
+      dock.setIcon = (icon) => {
+        state.__attnIconCalls?.push(typeof icon === 'string' ? icon : 'native-image')
+        return setIcon(icon)
+      }
+      return
+    }
+    const setIcon = BrowserWindow.prototype.setIcon
+    BrowserWindow.prototype.setIcon = function (icon) {
+      state.__attnIconCalls?.push(typeof icon === 'string' ? icon : 'native-image')
+      return setIcon.call(this, icon)
+    }
+  })
+  await runPaletteCommand(relaunched.page, 'Use Matcha color palette')
+  await expect
+    .poll(() => relaunched.page.evaluate(async () => (await window.attn.settings.getAll()).palette))
+    .toBe('matcha')
+  await expect
+    .poll(() =>
+      relaunched.app.evaluate(() =>
+        (globalThis as typeof globalThis & { __attnIconCalls?: string[] }).__attnIconCalls?.some((icon) =>
+          icon.includes('icon-matcha')
+        )
+      )
+    )
+    .toBe(true)
+})
+
 test.describe('Tide split shell', () => {
   test.use({ seed: 'fixtures/seed-splits.json' })
   test('opening Outbox closes split rules', async ({ page }) => {
