@@ -146,7 +146,14 @@ export const IPC_CHANNELS = {
   syncState: 'sync:state'
 } as const
 
-export type MailChangeReason = 'split-metadata'
+/**
+ * Why mail changed, where the renderer reacts to the reason rather than to the
+ * bare event. `split-judgments` moves conversations between Inbox splits and
+ * changes nothing else, so it never reloads counts or an open conversation.
+ */
+export const MAIL_CHANGE_REASONS = ['split-metadata', 'split-judgments'] as const
+
+export type MailChangeReason = (typeof MAIL_CHANGE_REASONS)[number]
 
 /**
  * E2E-only channels, registered by the main process solely under

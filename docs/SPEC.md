@@ -571,6 +571,8 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   conversation the request carries the subject, the sender, the recipient count, the Gmail categories, the
   mailing-list flag, the message count, and two bounded excerpts. It never carries recipient addresses,
   attachments, or HTML. It asks one question per conversation and described split.
+- A stored judgment changes the split counts in place. The Inbox list re-reads only while it is the
+  surface on screen, and otherwise when the user returns to it.
 - The classifier re-asks when the user edits the description or the conversation receives a message. It
   judges an arriving conversation before Attn decides whether to notify, and waits at most two seconds. A
   judgment that lands later still notifies, once, while the message is recent and unread.

@@ -155,7 +155,9 @@ export function useMailData(
   selectedThreadIdRef: React.RefObject<string | null>,
   selectedDraftIdRef: React.RefObject<string | null>,
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>,
-  splitsReady = true
+  splitsReady = true,
+  /** True while the Inbox list itself is the surface on screen (F11). */
+  inboxListOnScreen = true
 ): MailDataState {
   const [sync, setSync] = useState<SyncState>({ phase: 'idle' })
   const [inboxBackfillReady, setInboxBackfillReady] = useState<boolean | null>(null)
@@ -190,7 +192,14 @@ export function useMailData(
   const inboxSplitChangeRef = useRef(0)
   const inboxReadyRequestRef = useRef(0)
   const effectAccountRef = useRef<string | null | undefined>(undefined)
+  const effectSplitIdRef = useRef<string | null | undefined>(undefined)
   const effectSplitRevisionRef = useRef<number | null | undefined>(undefined)
+  const inboxListOnScreenRef = useRef(inboxListOnScreen)
+  inboxListOnScreenRef.current = inboxListOnScreen
+  // A stored judgment waiting for the list to come back, and the live refresh
+  // that will read it. Both outlive one run of the subscription effect below.
+  const deferredSplitRefreshRef = useRef(false)
+  const refreshRef = useRef<(() => void) | null>(null)
   const threadPaginationRef = useRef(threadPagination)
   threadPaginationRef.current = threadPagination
   const loadedRowCountsRef = useRef<Record<string, number | undefined>>({})
@@ -328,7 +337,11 @@ export function useMailData(
       stateKey = nextKey
       refresh()
     })
-    const offMail = bridge.mail.onChanged(() => refresh())
+    // A judgment moves a conversation between splits. It finishes no backfill
+    // phase, so the readiness answer cannot have changed.
+    const offMail = bridge.mail.onChanged((_serverSearchRequestId, reason) => {
+      if (reason !== 'split-judgments') refresh()
+    })
     return () => {
       offState()
       offMail()
@@ -471,9 +484,16 @@ export function useMailData(
 
   useEffect(() => {
     const accountChanged = effectAccountRef.current !== activeAccount
+    const splitChanged = effectSplitIdRef.current !== activeSplitId
     const revisionChanged = effectSplitRevisionRef.current !== splitRevisionValue
     effectAccountRef.current = activeAccount
+    effectSplitIdRef.current = activeSplitId
     effectSplitRevisionRef.current = splitRevisionValue
+    // A judging pass bumps the split revision before it broadcasts, so its
+    // change arrives here as a revision change. The loaded rows survive it:
+    // only the cached pages of the other splits are dropped, and the re-read
+    // waits until the Inbox list is the surface on screen again.
+    const judgmentOnly = deferredSplitRefreshRef.current && !accountChanged && !splitChanged
     if (accountChanged || revisionChanged) {
       inboxSplitPreloadRef.current += 1
       inboxSplitChangeRef.current += 1
@@ -503,20 +523,24 @@ export function useMailData(
       preserveSelectionOnRefreshRef.current = true
     } else {
       if (revisionChanged) inboxSplitCacheRef.current.clear()
-      const candidate = activeSplitId ? inboxSplitCacheRef.current.get(activeSplitId) : undefined
-      const cached = candidate?.splitRevision === splitRevisionValue ? candidate : undefined
-      setRealThreads(cached?.rows ?? null)
-      setLoadedInboxSplitId(cached && activeSplitId ? activeSplitId : null)
-      setLoadedInboxSplitStale(cached?.stale ?? false)
-      setThreadPagination((current) => {
-        const next = { ...current }
-        if (cached) next.inbox = cached.pagination
-        else delete next.inbox
-        return next
-      })
-      mailboxRefreshVersionRef.current.inbox = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
-      loadMoreInFlightRef.current.delete('inbox')
-      preserveSelectionOnRefreshRef.current = true
+      // A judgment leaves the loaded rows exactly as they are. Everything else
+      // reloads them, from the cache for this split where it is still valid.
+      if (!judgmentOnly) {
+        const candidate = activeSplitId ? inboxSplitCacheRef.current.get(activeSplitId) : undefined
+        const cached = candidate?.splitRevision === splitRevisionValue ? candidate : undefined
+        setRealThreads(cached?.rows ?? null)
+        setLoadedInboxSplitId(cached && activeSplitId ? activeSplitId : null)
+        setLoadedInboxSplitStale(cached?.stale ?? false)
+        setThreadPagination((current) => {
+          const next = { ...current }
+          if (cached) next.inbox = cached.pagination
+          else delete next.inbox
+          return next
+        })
+        mailboxRefreshVersionRef.current.inbox = (mailboxRefreshVersionRef.current.inbox ?? 0) + 1
+        loadMoreInFlightRef.current.delete('inbox')
+        preserveSelectionOnRefreshRef.current = true
+      }
     }
     const bridge = window.attn
     if (!bridge || !activeAccount || !splitsReady) return
@@ -526,6 +550,10 @@ export function useMailData(
     let pendingMailChangeSource: string | null | undefined
     let refreshInFlight = false
     let refreshQueued = false
+    // Judgments move conversations between splits. They change no mailbox
+    // total, no label, and no queued action, so a run that only carries them
+    // reads the rows alone. Any other event restores the whole snapshot.
+    let countsPending = !judgmentOnly
     const refresh = (): void => {
       if (cancelled) return
       const delay = deferRefreshUntilRef.current - Date.now()
@@ -539,6 +567,8 @@ export function useMailData(
         return
       }
       refreshInFlight = true
+      const includeCounts = countsPending
+      countsPending = false
       // Past the defer gate, so conversation caches age out with the thread list
       // rather than once per raw event: a burst during backfill, or an archive
       // animation holding the refresh, invalidates once instead of per event.
@@ -556,10 +586,10 @@ export function useMailData(
       })
       // Queue counts after the visible reads, but do not wait for their IPC
       // responses or unrelated labels/drafts before showing the new totals.
-      refreshMailboxCounts()
+      if (includeCounts) refreshMailboxCounts()
       void refreshingRows
         .then(async () => {
-          if (cancelled) return
+          if (cancelled || !includeCounts) return
           const [nextLabels, actionStatus] = await Promise.all([
             bridge.mail.listLabels(),
             bridge.mail.getActionQueueStatus()
@@ -577,14 +607,30 @@ export function useMailData(
           refresh()
         })
     }
-    refresh()
-    const offMail = bridge.mail.onChanged((serverSearchRequestId) => {
+    refreshRef.current = refresh
+    // A judgment read waits while the Inbox list is off screen: the flag stays
+    // set, and the flush effect below reads when the list comes back.
+    if (!judgmentOnly || inboxListOnScreenRef.current) {
+      deferredSplitRefreshRef.current = false
+      refresh()
+    }
+    const offMail = bridge.mail.onChanged((serverSearchRequestId, reason) => {
       // Inactive split pages remain useful immediately after ordinary mail
       // writes. Keep them visible on the next switch, then re-read that split
       // through this effect so stale rows converge without a blank frame.
       inboxSplitChangeRef.current += 1
       for (const cached of inboxSplitCacheRef.current.values()) cached.stale = true
+      if (reason === 'split-judgments') {
+        // The pass bumped the split revision before it announced itself, so
+        // this effect re-runs with that revision and owns the read. Reading
+        // here would ask for rows at a revision SQLite has already left.
+        deferredSplitRefreshRef.current = true
+        return
+      }
       if (activeSplitIdRef.current) setLoadedInboxSplitStale(true)
+      // A full refresh subsumes a judgment waiting for the list to come back.
+      deferredSplitRefreshRef.current = false
+      countsPending = true
       pendingMailChangeSource = mailChangedPending
         ? pendingMailChangeSource === serverSearchRequestId
           ? pendingMailChangeSource
@@ -600,6 +646,8 @@ export function useMailData(
       if (change.kind === 'failed') setOutboxFailure(change)
       // Reply/forward rows are projected into the open conversation while
       // queued, so outbox transitions invalidate that cache as well as lists.
+      deferredSplitRefreshRef.current = false
+      countsPending = true
       pendingMailChangeSource = null
       mailChangedPending = true
       refresh()
@@ -610,11 +658,21 @@ export function useMailData(
       inboxSplitPreloadRef.current += 1
       mailboxCountsRequestRef.current += 1
       if (deferredRefreshTimer !== null) window.clearTimeout(deferredRefreshTimer)
+      refreshRef.current = null
       offMail()
       offOutbox()
       offProgress()
     }
   }, [activeAccount, activeSplitId, splitRevisionValue, splitsReady, refreshMailboxCounts, runRefresh])
+
+  // The deferred judgment read. It must stay below the subscription effect:
+  // when both run in one commit, that effect installs the current `refresh`
+  // before this one calls it.
+  useEffect(() => {
+    if (!inboxListOnScreen || !deferredSplitRefreshRef.current) return
+    deferredSplitRefreshRef.current = false
+    refreshRef.current?.()
+  }, [inboxListOnScreen])
 
   // One shared wait behind the defer gate, mirroring the coalescing timer the
   // event-driven refresh above uses: N closes during one triage animation

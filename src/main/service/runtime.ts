@@ -642,7 +642,9 @@ export class ServiceRuntime {
       triageKey: () => this.storedTriageKey,
       shouldYield: () => this.foregroundProviderWork.size > 0,
       isActive: () => !this.stopped && this.sessions.get(id) === session,
-      onAssignmentsChanged: () => this.broadcastMailChanged(id),
+      // A judgment only moves a conversation between Inbox splits, so the
+      // renderer updates the split counts in place instead of reloading.
+      onAssignmentsChanged: () => this.broadcastMailChanged(id, undefined, 'split-judgments'),
       onLateJudgment: (threadIds) => this.emitLateNotificationCandidates(id, threadIds),
       log: (level, message) => this.log(level, message)
     })

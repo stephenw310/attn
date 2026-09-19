@@ -2,9 +2,16 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { GmailThread } from '../src/main/gmail/parse'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
-import { emitSeam, flushRendererIpc, installFakeTriage, runTriagePass, triageRequests } from './seams'
+import {
+  emitSeam,
+  flushRendererIpc,
+  installFakeTriage,
+  observeInvokes,
+  runTriagePass,
+  triageRequests
+} from './seams'
 
 test.use({ seed: 'fixtures/seed-splits.json' })
 
@@ -96,6 +103,78 @@ test('classifies a described split and sends only the disclosed state', async ({
       expect(JSON.stringify(request.questions[id]?.criteria)).toContain(DESCRIPTION)
     }
   }
+})
+
+/**
+ * Watch the thread-list channel from a quiet moment. A warm read started
+ * before the conversation opened can still be in flight, so the watch restarts
+ * until it records nothing: what it holds afterwards belongs to the pass.
+ */
+async function watchQuietListReads(
+  app: ElectronApplication,
+  page: Page
+): Promise<() => Promise<unknown[][]>> {
+  const listCalls = await observeInvokes(app, IPC_CHANNELS.mailListThreads)
+  await expect
+    .poll(async () => {
+      await flushRendererIpc(page)
+      const calls = await listCalls()
+      if (calls.length > 0) await observeInvokes(app, IPC_CHANNELS.mailListThreads)
+      return calls.length
+    })
+    .toBe(0)
+  return listCalls
+}
+
+test('judges behind an open conversation without re-reading the Inbox list', async ({ app, page }) => {
+  const strip = page.getByTestId('split-strip')
+  const rows = page.getByTestId('thread-row')
+  await expect(strip).toBeVisible()
+
+  // Consent without the key: the classifier cannot run, so the described
+  // split is saved and the Inbox settles before any judgment exists.
+  await installFakeTriage(app, {
+    default: 0.05,
+    bySubject: [{ subjectIncludes: 'Dinner Friday', probabilities: { Dinners: 0.94 } }]
+  })
+  await page.evaluate(() => window.attn.ai.setSetting('triageEnabled', true))
+  await page.evaluate(async (description) => {
+    await window.attn.splits.save({
+      name: 'Dinners',
+      notify: false,
+      mode: 'description',
+      description
+    })
+  }, DESCRIPTION)
+
+  const dinners = page.locator('[data-testid="split-tab"][data-split-id^="custom:"]')
+  await expect(dinners.getByTestId('split-unread-count')).toHaveCount(0)
+  await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
+  await expect(rows).toHaveCount(2)
+
+  // Read the conversation the pass leaves where it is. It is already read, so
+  // opening it writes no mail and the list is quiet while the pass runs.
+  await rows.filter({ hasText: 'Weekend walk' }).click()
+  await expect(page.getByTestId('conversation-view')).toContainText('Weekend walk')
+  await expect(strip).toHaveCount(0)
+
+  const listCalls = await watchQuietListReads(app, page)
+  const splitCalls = await observeInvokes(app, IPC_CHANNELS.splitsGetState)
+  await page.evaluate(() => window.attn.ai.setTriageKey('ts-test-key-e2e'))
+  await runTriagePass(app)
+  // The additive half of the policy: the counts behind the strip reload.
+  await expect.poll(async () => (await splitCalls()).length).toBeGreaterThan(0)
+  await flushRendererIpc(page)
+  expect(await listCalls()).toEqual([])
+
+  // Leaving the reader shows the judged count and reads the moved rows once.
+  await page.keyboard.press('Escape')
+  await expect(dinners).toHaveText(/Dinners1/)
+  await expect(rows).toHaveCount(1)
+  await expect(rows.filter({ hasText: 'Weekend walk' })).toHaveAttribute('data-selected', 'true')
+  await dinners.click()
+  await expect(rows).toHaveCount(1)
+  await expect(rows).toContainText('Dinner Friday?')
 })
 
 test('turns smart splits on from its card and describes a split in the editor', async ({

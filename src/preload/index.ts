@@ -14,7 +14,13 @@ import type {
   DraftKind,
   DraftSaveInput
 } from '../shared/drafts'
-import { type InvokeChannel, type InvokeChannels, IPC_CHANNELS, type MailChangeReason } from '../shared/ipc'
+import {
+  type InvokeChannel,
+  type InvokeChannels,
+  IPC_CHANNELS,
+  MAIL_CHANGE_REASONS,
+  type MailChangeReason
+} from '../shared/ipc'
 import type {
   Conversation,
   ConversationMailbox,
@@ -224,7 +230,7 @@ const api = {
       ): void =>
         cb(
           typeof payload?.serverSearchRequestId === 'string' ? payload.serverSearchRequestId : null,
-          payload?.reason === 'split-metadata' ? payload.reason : null
+          MAIL_CHANGE_REASONS.find((reason) => reason === payload?.reason) ?? null
         )
       ipcRenderer.on(IPC_CHANNELS.mailChanged, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.mailChanged, listener)
