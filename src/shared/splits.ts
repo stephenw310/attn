@@ -1,9 +1,6 @@
 export const IMPORTANT_SPLIT_ID = 'base:important'
 export const OTHER_SPLIT_ID = 'fallback:other'
 
-export const SPLIT_PRESET_IDS = ['preset:calendar', 'preset:github', 'preset:newsletters'] as const
-
-export type SplitPresetId = (typeof SPLIT_PRESET_IDS)[number]
 type SplitOperator = 'any' | 'all'
 
 /**
@@ -28,6 +25,11 @@ export interface SplitMatchExpression {
   conditions: SplitCondition[]
 }
 
+/**
+ * `preset` is a legacy stored kind. Earlier setups seeded starter rules with it,
+ * and those rows stay exactly as editable and deletable as a `custom` rule. No
+ * code creates one, and nothing migrates one.
+ */
 export type SplitKind = 'preset' | 'base' | 'custom' | 'fallback'
 
 /**
@@ -53,7 +55,6 @@ export interface SplitSummary extends SplitRule {
 export interface SplitState {
   revision: number
   splits: SplitSummary[]
-  restorablePresetIds: SplitPresetId[]
 }
 
 export interface SplitThreadLocation {

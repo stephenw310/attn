@@ -535,15 +535,12 @@ the reminder states affected by triage.
 The inbox is divided into **splits** — tabs above the list, each an independently triaged queue:
 
 - Base splits: **Important** (Gmail's `IMPORTANT` label) and **Other**.
-- The first split setup also creates **Calendar**, **GitHub**, and **Newsletters** from starter presets.
-  Calendar matches known calendar-notification senders, locally stored `.ics` attachments, or a cached
-  `text/calendar` MIME part. GitHub matches the `github.com` sender domain. Newsletters matches messages with
-  a `List-Id` or Gmail's Promotions label.
-- Starter presets become user-owned rules after setup. Users can rename them, change their conditions,
-  reorder them with leading drag handles, or delete them. During a pointer drag, the row follows the pointer,
-  nearby rows rearrange immediately, and release chooses the nearest position. A focused drag handle also
-  accepts Up and Down for keyboard access. Attn never recreates a changed or deleted preset during launch,
-  sync, or an app update. The rule manager can restore a preset only after an explicit user action.
+- The first split setup creates **Important** and **Other**, and nothing else. The user adds every other
+  split, as an AI rule or as manual rules.
+- Users can rename a rule, change its conditions, reorder it with its leading drag handle, or delete it.
+  During a pointer drag, the row follows the pointer, nearby rows rearrange immediately, and release chooses
+  the nearest position. A focused drag handle also accepts Up and Down for keyboard access. Attn never
+  recreates a changed or deleted rule during launch, sync, or an app update.
 - The split-rule manager keeps the sortable list beside the selected rule editor. It explains first-match ordering. Important and Other show their built-in behavior and notification preference. Custom rules expose their existing conditions, notification preference, save, and delete actions. The manager selects the first rule on opening. Escape closes it in one step, except during a drag.
 - A smart-splits card spans the top of the manager, above the rule list. It holds the consent switch, the
   TypeSafe key, the judgment model, and one status line: off, on with no AI rule, or on with the count of
@@ -590,9 +587,8 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   against SQLite. An unresolved cold page shows a loading state; it never reports `Inbox empty` before the
   query completes.
 - Rule changes re-bucket the inbox in < 1s for 10k threads, with no thread appearing in two splits.
-- Users can edit or delete every starter preset. A changed or deleted preset stays changed or deleted after
-  relaunch, sync, and an app update. Deleting all starter presets does not seed them again. Users can restore
-  each preset explicitly.
+- Users can edit or delete every rule. A changed or deleted rule stays changed or deleted after relaunch,
+  sync, and an app update.
 - Attn sends no smart-splits request while the consent is off, the key is absent, or no split holds a
   description. Withdrawing consent stops the classifier at the next batch.
 - A refused key stops the classifier until the user saves a different key. A rate limit makes it wait and

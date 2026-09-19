@@ -52,7 +52,6 @@ import type { Snippet, SnippetSaveInput } from '../shared/snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
-  SplitPresetId,
   SplitState,
   SplitThreadLocation,
   SplitTriageStatus
@@ -308,7 +307,6 @@ const api = {
       invoke(IPC_CHANNELS.splitsSetNotify, id, notify),
     delete: (id: string): Promise<SplitState> => invoke(IPC_CHANNELS.splitsDelete, id),
     reorder: (input: ReorderSplitsInput): Promise<SplitState> => invoke(IPC_CHANNELS.splitsReorder, input),
-    restorePreset: (id: SplitPresetId): Promise<SplitState> => invoke(IPC_CHANNELS.splitsRestorePreset, id),
     getTriageStatus: (): Promise<SplitTriageStatus> => invoke(IPC_CHANNELS.splitsGetTriageStatus),
     /** Ask again for the conversations the classifier gave up on. */
     retryTriage: (): Promise<boolean> => invoke(IPC_CHANNELS.splitsRetryTriage)

@@ -50,7 +50,6 @@ export function InboxOverlays({ controller: c }: { controller: InboxController }
           onNotify={c.splits.setNotify}
           onDelete={c.splits.remove}
           onReorder={(ids) => c.splits.reorder({ ids })}
-          onRestore={c.splits.restorePreset}
           onClose={() => c.setSplitRulesOpen(false)}
         />
       )}

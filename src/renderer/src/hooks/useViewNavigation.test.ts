@@ -41,8 +41,7 @@ function splits(activeSplitId: string | null, ids: readonly string[]): SplitData
     save: vi.fn(),
     setNotify: vi.fn(),
     remove: vi.fn(),
-    reorder: vi.fn(),
-    restorePreset: vi.fn()
+    reorder: vi.fn()
   }
   return data as unknown as SplitData
 }

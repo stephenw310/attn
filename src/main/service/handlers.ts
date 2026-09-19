@@ -30,8 +30,7 @@ import {
   type ThreadRow
 } from '../../shared/mail'
 import { validateAccountSettingUpdate } from '../../shared/settings'
-import type { ReorderSplitsInput, SaveSplitInput, SplitCondition, SplitPresetId } from '../../shared/splits'
-import { SPLIT_PRESET_IDS } from '../../shared/splits'
+import type { ReorderSplitsInput, SaveSplitInput, SplitCondition } from '../../shared/splits'
 import { isThemePreference, normalizeThemePreference } from '../../shared/theme'
 import {
   actionQueueStatus,
@@ -101,7 +100,6 @@ import {
   deleteSplit,
   hasSplitSetup,
   reorderSplits,
-  restoreSplitPreset,
   saveSplit,
   setSplitNotify,
   splitLocationForThread,
@@ -965,7 +963,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.splitsGetState, () => {
     const account = context.currentAccountId()
     if (!account || (context.testUserData && !hasSplitSetup(context.db, account))) {
-      return { revision: 0, splits: [], restorablePresetIds: [] }
+      return { revision: 0, splits: [] }
     }
     return context.splitState(account)
   })
@@ -1001,14 +999,6 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
   handle(IPC_CHANNELS.splitsReorder, (_event, input) => {
     if (!isReorderSplitsInput(input)) throw new Error('invalid split order')
     const state = reorderSplits(context.db, requireAccount(context), input)
-    context.broadcastMailChanged()
-    return state
-  })
-  handle(IPC_CHANNELS.splitsRestorePreset, (_event, id) => {
-    if (typeof id !== 'string' || !(SPLIT_PRESET_IDS as readonly string[]).includes(id)) {
-      throw new Error('invalid split preset')
-    }
-    const state = restoreSplitPreset(context.db, requireAccount(context), id as SplitPresetId)
     context.broadcastMailChanged()
     return state
   })

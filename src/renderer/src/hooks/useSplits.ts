@@ -3,7 +3,6 @@ import {
   IMPORTANT_SPLIT_ID,
   type ReorderSplitsInput,
   type SaveSplitInput,
-  type SplitPresetId,
   type SplitState
 } from '../../../shared/splits'
 
@@ -15,7 +14,6 @@ export interface SplitData {
   setNotify: (id: string, notify: boolean) => Promise<void>
   remove: (id: string) => Promise<void>
   reorder: (input: ReorderSplitsInput) => Promise<void>
-  restorePreset: (id: SplitPresetId) => Promise<void>
 }
 
 function defaultActiveSplit(state: SplitState): string | null {
@@ -98,10 +96,6 @@ export function useSplits(account: string | null, initialSplitId: string | null 
     (input: ReorderSplitsInput) => mutate(() => splitBridge().reorder(input)),
     [mutate]
   )
-  const restorePreset = useCallback(
-    (id: SplitPresetId) => mutate(() => splitBridge().restorePreset(id)),
-    [mutate]
-  )
 
   // Inbox threads this object through `switchSplit` into the ~60-command batch
   // `useInboxCommands` registers, so a fresh literal per render would unregister
@@ -114,9 +108,8 @@ export function useSplits(account: string | null, initialSplitId: string | null 
       save,
       setNotify,
       remove,
-      reorder,
-      restorePreset
+      reorder
     }),
-    [activeSplitId, remove, reorder, restorePreset, save, setActiveSplitId, setNotify, state]
+    [activeSplitId, remove, reorder, save, setActiveSplitId, setNotify, state]
   )
 }

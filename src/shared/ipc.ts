@@ -35,7 +35,6 @@ import type { Snippet, SnippetSaveInput } from './snippets'
 import type {
   ReorderSplitsInput,
   SaveSplitInput,
-  SplitPresetId,
   SplitState,
   SplitThreadLocation,
   SplitTriageStatus
@@ -118,7 +117,6 @@ export const IPC_CHANNELS = {
   splitsSetNotify: 'splits:setNotify',
   splitsDelete: 'splits:delete',
   splitsReorder: 'splits:reorder',
-  splitsRestorePreset: 'splits:restorePreset',
   splitsGetTriageStatus: 'splits:getTriageStatus',
   splitsRetryTriage: 'splits:retryTriage',
   mailPeekActionsReverted: 'mail:peekActionsReverted',
@@ -339,7 +337,6 @@ export interface InvokeChannels {
   }
   [IPC_CHANNELS.splitsDelete]: { args: [id: string]; result: SplitState }
   [IPC_CHANNELS.splitsReorder]: { args: [input: ReorderSplitsInput]; result: SplitState }
-  [IPC_CHANNELS.splitsRestorePreset]: { args: [id: SplitPresetId]; result: SplitState }
   [IPC_CHANNELS.splitsGetTriageStatus]: { args: []; result: SplitTriageStatus }
   /** True when a live classifier took the retry; false when no account is active. */
   [IPC_CHANNELS.splitsRetryTriage]: { args: []; result: boolean }

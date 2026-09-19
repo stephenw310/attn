@@ -696,7 +696,7 @@ test.describe('@perf 10,000-thread profile with paged mailboxes', () => {
     expect(mutation.durationMs, 'rule mutation and 10,000-thread re-bucket').toBeLessThan(
       SPLIT_REBUCKET_CEILING_MS
     )
-    await expect(page.getByTestId('split-tab')).toHaveCount(6)
+    await expect(page.getByTestId('split-tab')).toHaveCount(3)
 
     // New custom splits follow Important. Exercise the supported Tab navigation;
     // numbered G chords are no longer assigned to split commands.

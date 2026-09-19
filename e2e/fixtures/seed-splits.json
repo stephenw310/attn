@@ -1,6 +1,63 @@
 {
   "account": "splits@attn.test",
   "splitSetup": true,
+  "splitRules": [
+    {
+      "id": "preset:calendar",
+      "name": "Calendar",
+      "operator": "any",
+      "conditions": [
+        {
+          "type": "senderAddress",
+          "value": "calendar-notification@google.com"
+        },
+        {
+          "type": "senderAddress",
+          "value": "notifications@cal.com"
+        },
+        {
+          "type": "senderAddress",
+          "value": "noreply@cal.com"
+        },
+        {
+          "type": "attachmentMimeType",
+          "value": "text/calendar"
+        },
+        {
+          "type": "attachmentFilenameSuffix",
+          "value": ".ics"
+        }
+      ],
+      "notify": false
+    },
+    {
+      "id": "preset:github",
+      "name": "GitHub",
+      "operator": "any",
+      "conditions": [
+        {
+          "type": "senderDomain",
+          "value": "github.com"
+        }
+      ],
+      "notify": false
+    },
+    {
+      "id": "preset:newsletters",
+      "name": "Newsletters",
+      "operator": "any",
+      "conditions": [
+        {
+          "type": "listIdPresent"
+        },
+        {
+          "type": "label",
+          "value": "CATEGORY_PROMOTIONS"
+        }
+      ],
+      "notify": false
+    }
+  ],
   "threads": [
     {
       "id": "t-calendar-sender",

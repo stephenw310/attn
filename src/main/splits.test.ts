@@ -15,7 +15,6 @@ import {
   normalizeDescription,
   notificationEnabledSplitIds,
   reorderSplits,
-  restoreSplitPreset,
   saveSplit,
   splitLocationForThread,
   splitRevision,
@@ -100,7 +99,7 @@ describe('split inbox', () => {
 
   afterEach(() => db.close())
 
-  it('seeds editable presets once and assigns every Inbox thread to one ordered split', () => {
+  it('seeds Important and Other once and assigns every Inbox thread to one ordered split', () => {
     insertThread(
       'github-newsletter',
       500,
@@ -115,17 +114,14 @@ describe('split inbox', () => {
     const state = getSplitState(db, 'account')
     expect(state.revision).toBe(1)
     expect(state.splits.map((split) => [split.id, split.total, split.unread])).toEqual([
-      ['preset:calendar', 1, 1],
-      ['preset:github', 1, 1],
-      ['preset:newsletters', 1, 0],
       [IMPORTANT_SPLIT_ID, 1, 1],
-      ['fallback:other', 1, 0]
+      ['fallback:other', 4, 2]
     ])
-    expect(listInboxThreads(db, 'account', 100, null, 'preset:github').map((row) => row.id)).toEqual([
-      'github-newsletter'
+    expect(listInboxThreads(db, 'account', 100, null, IMPORTANT_SPLIT_ID).map((row) => row.id)).toEqual([
+      'important'
     ])
     expect(splitLocationForThread(db, 'account', 'github-newsletter')).toEqual({
-      splitId: 'preset:github',
+      splitId: 'fallback:other',
       revision: state.revision
     })
     const assigned = state.splits.flatMap((split) =>
@@ -156,9 +152,7 @@ describe('split inbox', () => {
     })
     const custom = saved.splits.find((split) => split.kind === 'custom')
     if (!custom) throw new Error('Expected custom split')
-    reorderSplits(db, 'account', {
-      ids: [custom.id, 'preset:calendar', 'preset:github', 'preset:newsletters', IMPORTANT_SPLIT_ID]
-    })
+    reorderSplits(db, 'account', { ids: [custom.id, IMPORTANT_SPLIT_ID] })
 
     const first = listInboxThreads(db, 'account', 1, null, custom.id)
     expect(first.map((row) => row.id)).toEqual(['same'])
@@ -167,7 +161,11 @@ describe('split inbox', () => {
         (row) => row.id
       )
     ).toEqual(['same-older'])
-    expect(listInboxThreads(db, 'account', 10, null, 'preset:github').map((row) => row.id)).toEqual(['cross'])
+    // `cross` satisfies both conditions, but across two messages, so the `all`
+    // rule never claims it and Important takes it on its label.
+    expect(listInboxThreads(db, 'account', 10, null, IMPORTANT_SPLIT_ID).map((row) => row.id)).toEqual([
+      'cross'
+    ])
   })
 
   it('stops evaluating old messages once the requested recent split page is full', () => {
@@ -233,42 +231,66 @@ describe('split inbox', () => {
     expect(statements.filter((sql) => /^\s*(insert|update|delete)/i.test(sql))).toEqual([])
   })
 
-  it('does not recreate deleted presets and restores only the requested preset', () => {
+  it('treats a legacy preset row as an ordinary rule and never recreates a deleted one', () => {
+    // Profiles that predate this setup hold `kind = 'preset'` rows. They stay
+    // editable and deletable, and no migration touches them.
     ensureSplitSetup(db, 'account')
-    const initialRevision = splitRevision(db, 'account')
-    deleteSplit(db, 'account', 'preset:github')
-    deleteSplit(db, 'account', 'preset:calendar')
-    ensureSplitSetup(db, 'account')
-    const deleted = getSplitState(db, 'account')
-    expect(deleted.splits.map((split) => split.id)).not.toContain('preset:github')
-    expect(deleted.splits.map((split) => split.id)).not.toContain('preset:calendar')
-    expect(deleted.restorablePresetIds).toEqual(['preset:calendar', 'preset:github'])
-    expect(deleted.revision).toBe(initialRevision + 2)
+    db.prepare(
+      `INSERT INTO split_rules (account_id, id, position, name, kind, match_json, notify, description)
+       VALUES ('account', 'preset:github', 0, 'GitHub', 'preset',
+               '{"version":1,"operator":"any","conditions":[{"type":"senderDomain","value":"github.com"}]}',
+               0, NULL)`
+    ).run()
+    insertThread('github', 200, [{ id: 'github-message', from: 'updates@github.com' }])
 
-    const restored = restoreSplitPreset(db, 'account', 'preset:github')
-    expect(restored.splits.map((split) => split.id)).toContain('preset:github')
-    expect(restored.splits.map((split) => split.id)).not.toContain('preset:calendar')
-    expect(restored.restorablePresetIds).toEqual(['preset:calendar'])
+    expect(listInboxThreads(db, 'account', 10, null, 'preset:github').map((row) => row.id)).toEqual([
+      'github'
+    ])
+    const renamed = saveSplit(db, 'account', {
+      id: 'preset:github',
+      name: 'Code reviews',
+      mode: 'rules',
+      operator: 'any',
+      conditions: [{ type: 'senderDomain', value: 'github.com' }],
+      notify: false
+    })
+    expect(renamed.splits.find((split) => split.id === 'preset:github')?.name).toBe('Code reviews')
+
+    deleteSplit(db, 'account', 'preset:github')
+    const afterDelete = getSplitState(db, 'account')
+    expect(afterDelete.splits.map((split) => split.id)).toEqual([IMPORTANT_SPLIT_ID, 'fallback:other'])
+
+    // A second setup is a pure read, so the deleted rule stays deleted.
+    ensureSplitSetup(db, 'account')
+    expect(getSplitState(db, 'account')).toEqual(afterDelete)
+    expect(listInboxThreads(db, 'account', 10, null, 'fallback:other').map((row) => row.id)).toEqual([
+      'github'
+    ])
   })
 
   it('skips malformed stored rules and preserves notification preferences', () => {
     insertThread('github', 200, [{ id: 'github-message', from: 'updates@github.com' }], true)
     insertThread('important', 100, [{ id: 'important-message', labels: ['IMPORTANT'] }], true)
-    getSplitState(db, 'account')
+    const saved = saveSplit(db, 'account', {
+      name: 'GitHub',
+      mode: 'rules',
+      operator: 'any',
+      conditions: [{ type: 'senderDomain', value: 'github.com' }],
+      notify: false
+    })
+    const custom = saved.splits.find((split) => split.kind === 'custom')
+    if (!custom) throw new Error('Expected custom split')
+    expect(listInboxThreads(db, 'account', 10, null, custom.id).map((row) => row.id)).toEqual(['github'])
     db.prepare(
       `UPDATE split_rules SET match_json = '{"version":2}'
-       WHERE account_id = 'account' AND id = 'preset:github'`
-    ).run()
+       WHERE account_id = 'account' AND id = ?`
+    ).run(custom.id)
 
-    expect(listInboxThreads(db, 'account', 10, null, 'preset:github')).toEqual([])
+    expect(listInboxThreads(db, 'account', 10, null, custom.id)).toEqual([])
     expect(listInboxThreads(db, 'account', 10, null, 'fallback:other').map((row) => row.id)).toEqual([
       'github'
     ])
     expect(notificationEnabledSplitIds(db, 'account')).toEqual([IMPORTANT_SPLIT_ID])
-    expect(getSplitState(db, 'account').restorablePresetIds).toContain('preset:github')
-    expect(restoreSplitPreset(db, 'account', 'preset:github').restorablePresetIds).not.toContain(
-      'preset:github'
-    )
   })
 
   it('collapses description whitespace, keeps case, and rejects lengths outside the limits', () => {
@@ -453,9 +475,7 @@ describe('split inbox', () => {
     expect(listInboxThreads(db, 'account', 10, null, firstId).map((row) => row.id)).toEqual(['contested'])
     expect(listInboxThreads(db, 'account', 10, null, secondId)).toEqual([])
 
-    reorderSplits(db, 'account', {
-      ids: [secondId, firstId, 'preset:calendar', 'preset:github', 'preset:newsletters', IMPORTANT_SPLIT_ID]
-    })
+    reorderSplits(db, 'account', { ids: [secondId, firstId, IMPORTANT_SPLIT_ID] })
     expect(listInboxThreads(db, 'account', 10, null, secondId).map((row) => row.id)).toEqual(['contested'])
     expect(listInboxThreads(db, 'account', 10, null, firstId)).toEqual([])
     const counts = getSplitState(db, 'account').splits

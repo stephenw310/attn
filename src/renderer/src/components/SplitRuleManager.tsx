@@ -17,7 +17,6 @@ import {
   type SaveSplitInput,
   SPLIT_DESCRIPTION_MAX_LENGTH,
   type SplitCondition,
-  type SplitPresetId,
   type SplitRule,
   type SplitState,
   type SplitSummary,
@@ -33,7 +32,6 @@ interface SplitRuleManagerProps {
   onNotify: (id: string, notify: boolean) => Promise<void>
   onDelete: (id: string) => Promise<void>
   onReorder: (ids: string[]) => Promise<void>
-  onRestore: (id: SplitPresetId) => Promise<void>
   onClose: () => void
 }
 
@@ -52,11 +50,6 @@ const CONDITION_LABELS: Record<SplitCondition['type'], string> = {
 }
 
 const CONDITION_TYPES = Object.keys(CONDITION_LABELS) as SplitCondition['type'][]
-const PRESET_NAMES: Record<SplitPresetId, string> = {
-  'preset:calendar': 'Calendar',
-  'preset:github': 'GitHub',
-  'preset:newsletters': 'Newsletters'
-}
 
 /** The two exclusive ways to define a split, as the editor holds them. */
 type DraftMode = 'description' | 'rules'
@@ -290,7 +283,7 @@ function SortableSplitRuleRow(props: SplitRuleRowProps): React.JSX.Element {
 }
 
 export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Element {
-  const { state, onSave, onNotify, onDelete, onReorder, onRestore, onClose } = props
+  const { state, onSave, onNotify, onDelete, onReorder, onClose } = props
   const [draft, setDraft] = useState<RuleDraft | null>(() => {
     const first = state.splits[0]
     return first && first.id !== IMPORTANT_SPLIT_ID && first.id !== OTHER_SPLIT_ID ? draftFor(first) : null
@@ -584,18 +577,6 @@ export function SplitRuleManager(props: SplitRuleManagerProps): React.JSX.Elemen
               >
                 ＋ New split
               </button>
-              {state.restorablePresetIds.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  data-testid="split-rule-restore"
-                  disabled={busy}
-                  onClick={() => void run(() => onRestore(id))}
-                  className="h-9 cursor-pointer rounded-md px-2 text-xs text-ink-dim hover:bg-active hover:text-ink"
-                >
-                  Restore {PRESET_NAMES[id]}
-                </button>
-              ))}
             </div>
             <p
               id="split-reorder-help"
