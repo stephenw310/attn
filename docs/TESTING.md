@@ -6,7 +6,8 @@ Run tests from the repository root. Install dependencies with `npm install` firs
 
 | Command | Purpose |
 | --- | --- |
-| `npm run verify` | Required check before completion, commit, or push |
+| `npm run verify:fast` | Run type checks, lint, and unit tests without a build or Electron launch |
+| `npm run verify` | Run the complete check for broad changes and release or integration work |
 | `npm run typecheck` | Check all three TypeScript projects |
 | `npm run lint` | Check code style and formatting |
 | `npm run test:unit` | Run main, preload, renderer, shared, and script unit tests |
@@ -21,6 +22,12 @@ Run tests from the repository root. Install dependencies with `npm install` firs
 | `npm run toolchain` | Repair the Electron and SQLite installation |
 
 Use an `:only` command only when `out/` matches the current source.
+
+For ordinary code changes, `npm run verify:fast` and the affected E2E specs must pass before completion, commit, or push. Use `npm run e2e -- <spec-or-options>` so the source is rebuilt first.
+
+Run the complete `npm run verify` suite for IPC, startup, shared fixtures, dependencies, build configuration, database schema or migrations, account isolation, mail or credential security, send recovery, and other broadly used infrastructure changes.
+
+CI keeps the full functional E2E suite for every pull request and runs its four shards on separate runners.
 
 ## Unit tests
 

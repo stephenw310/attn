@@ -112,7 +112,11 @@ Write documentation with STE-style instructions. Use active voice, one instructi
 
 ## Verify the change
 
-For code, dependency, build, or runtime changes, `npm run verify` must pass before you claim completion, commit, or push. Use focused checks during iteration, and rerun affected checks after fixes. For documentation-only or instruction-only changes, check the edited content and links. Run application checks only when executable examples or behavior are affected. Report failures and verification limits without claiming success.
+For ordinary code changes, `npm run verify:fast` and the affected E2E specs must pass before completion, commit, or push. The fast command runs type checks, lint, and unit tests. Run focused E2E coverage with `npm run e2e -- <spec-or-options>` so the source is rebuilt first. Use `e2e:only` only when `out/` already matches the source.
+
+Run the complete `npm run verify` suite for IPC, startup, shared fixtures, dependencies, build configuration, database schema or migrations, account isolation, mail or credential security, send recovery, and other broadly used infrastructure changes. These checks must pass before completion, commit, or push.
+
+Rerun affected checks after fixes. For documentation-only or instruction-only changes, check the edited content and links. Report failures and verification limits without claiming success.
 
 Local tests use disposable profiles and require no Google credentials. Run them and fix failures caused by the requested change without asking at each step. Do not use a developer's credentials or personal mail profile.
 
@@ -120,7 +124,7 @@ Local tests use disposable profiles and require no Google credentials. Run them 
 npm run verify
 ```
 
-The command runs all three TypeScript project checks, Biome, unit tests, a production build, and the Electron end-to-end suite.
+The command runs all three TypeScript project checks, Biome, unit tests, a production build, and the complete Electron end-to-end suite. The fast command intentionally omits the build and E2E suite; pair it with affected E2E specs for ordinary feature work.
 
 After a UI change, inspect every affected screenshot in `e2e/.artifacts/`. Confirm the layout and colors. Do not leave text-selection highlights in screenshots. Find screenshot writers with `rg -n '\.artifacts' e2e --glob '*.spec.ts'`.
 

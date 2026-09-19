@@ -60,11 +60,13 @@ jobs:
       - name: Build
         run: npm run build
 
-  electron-smoke:
-    name: Electron smoke
+  electron-smoke-shard:
+    name: Electron smoke shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
-    # The full Playwright suite runs one worker and takes roughly 30 minutes;
-    # a 20-minute limit cancelled every run before it could report.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     timeout-minutes: 45
 
     steps:
@@ -92,19 +94,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # The static passes run inside this job rather than behind `needs:` on
-      # the verify job: they cost about a minute against a warm npm cache and
-      # they run before the 30-minute suite, so a lint or type error fails this
-      # job just as fast as a dependency would have — without adding the verify
-      # job's wall clock to every Electron run.
-      - name: Check lint and formatting
-        run: npx biome ci .
-
-      - name: Typecheck
-        run: npm run typecheck
-
+      # Each runner keeps one Electron worker (see playwright.config.ts), while
+      # Playwright distributes the complete functional suite across four jobs.
       - name: Run Electron smoke tests
-        run: npm run e2e
+        run: npm run e2e -- --shard=${{ matrix.shard }}/4
 
       # `retries: 1` in CI turns a flake into a green run. The JSON reporter
       # records it; this prints it so the job log says so out loud.
@@ -116,7 +109,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: electron-smoke-artifacts
+          name: electron-smoke-artifacts-${{ matrix.shard }}
           path: e2e/.artifacts/
           if-no-files-found: ignore
           # The e2e output directories are dot-directories, which v4 skips by default.
@@ -126,11 +119,21 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: electron-smoke-traces
+          name: electron-smoke-traces-${{ matrix.shard }}
           path: e2e/.results/
           if-no-files-found: ignore
           # The e2e output directories are dot-directories, which v4 skips by default.
           include-hidden-files: true
+
+  electron-smoke:
+    name: Electron smoke
+    if: always()
+    needs: [verify, electron-smoke-shard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every E2E shard to pass
+        if: needs.verify.result != 'success' || needs.electron-smoke-shard.result != 'success'
+        run: exit 1
 
   electron-perf:
     name: Electron performance smoke
@@ -161,14 +164,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      # Same reasoning as the smoke job: the static passes up front keep this
-      # job's meaning identical to a local `npm run verify` and fail it fast.
-      - name: Check lint and formatting
-        run: npx biome ci .
-
-      - name: Typecheck
-        run: npm run typecheck
 
       - name: Run Electron performance smoke
         # This job measures requestAnimationFrame paint latency. Keep the app
