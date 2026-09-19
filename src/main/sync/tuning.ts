@@ -171,19 +171,40 @@ export const SPLIT_TRIAGE_THRESHOLD = 0.7
  */
 export const SPLIT_TRIAGE_EXCERPT_CHARS = 1_500
 
-/** One thread's judgment request, aborted at this deadline. */
+/** One pack's judgment request, aborted at this deadline. */
 export const SPLIT_TRIAGE_REQUEST_TIMEOUT_MS = 10_000
 
-/** Threads selected per batch, and requests in flight inside one batch. */
-export const SPLIT_TRIAGE_BATCH_SIZE = 20
+/**
+ * Conversations carried by one request. Measured on 2026-09-18 against 95
+ * labeled Inbox conversations, four AI rules and `jev-latest`, comparing packed
+ * answers with single-conversation answers at threshold 0.7.
+ *
+ * At ten per request the mean absolute change was 0.03 to 0.06. Three rules
+ * flipped nothing; the fourth dropped one false positive, so its precision rose
+ * from 0.82 to 0.90. The change by slot ran from 0.016 at slot 0 to 0.071 at
+ * slots 1 to 9. All 95 conversations were judged in ten requests in 0.9 s.
+ *
+ * At twenty-five per request the mean absolute change was 0.16 to 0.24, 26
+ * answers flipped, precision fell to 0.70 to 0.87, and slots 12 to 23 drifted
+ * 0.19 to 0.36. Pack ten, never more.
+ *
+ * The cap counts conversations, not questions: the measurement ran four rules,
+ * so ten conversations were forty questions in one request.
+ */
+export const SPLIT_TRIAGE_PACK_SIZE = 10
+
+/** Threads selected per batch (four packs), and requests in flight inside one batch. */
+export const SPLIT_TRIAGE_BATCH_SIZE = 40
 export const SPLIT_TRIAGE_CONCURRENCY = 4
 
 /**
- * Floor between split-revision bumps while a pass runs. Each bump invalidates
- * the renderer's cached Inbox pages, so a pass that moved fifty threads still
- * re-renders about once a second rather than fifty times.
+ * Floor between split-revision bumps while a pass runs. Each broadcast makes
+ * the renderer refetch the list and every split count, so on an 11k-thread
+ * Inbox a one-second cadence starved multi-page reads: they abort when the
+ * split revision changes mid-read. Fifteen seconds keeps the app usable while a
+ * pass runs, and the pass still broadcasts once when it ends.
  */
-export const SPLIT_TRIAGE_BROADCAST_INTERVAL_MS = 1_000
+export const SPLIT_TRIAGE_BROADCAST_INTERVAL_MS = 15_000
 
 /** A judged thread's retry ladder for 429 and 529, and the Retry-After cap. */
 export const SPLIT_TRIAGE_RATE_LIMIT_BASE_MS = 1_000

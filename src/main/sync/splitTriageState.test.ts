@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTriageQuestions, buildTriageState, type TriageMessageInput } from './splitTriageState'
+import { buildPackedTriageRequest, buildTriageState, type TriageMessageInput } from './splitTriageState'
 import { SPLIT_TRIAGE_EXCERPT_CHARS } from './tuning'
 
 const message = (overrides: Partial<TriageMessageInput> = {}): TriageMessageInput => ({
@@ -107,28 +107,56 @@ describe('split triage state', () => {
     ])
   })
 
-  it('asks one code-named question per described split and maps the answer back', () => {
+  it('asks one code-named question per conversation and split, and maps the answer back', () => {
     const rules = [
       { splitId: 'custom:one', name: 'Invoices', description: 'Bills I have to pay', descriptionHash: 'h1' },
       { splitId: 'custom:two', name: 'Recruiters', description: 'Cold hiring pitches', descriptionHash: 'h2' }
     ]
-    const { questions, targets } = buildTriageQuestions(rules)
-    expect(Object.keys(questions)).toEqual(['s0', 's1'])
-    expect(questions.s0).toEqual({
+    const states = [
+      buildTriageState({
+        subject: 'Q3 invoice',
+        messageCount: 1,
+        mailingList: false,
+        first: message(),
+        latest: message()
+      }),
+      buildTriageState({
+        subject: 'Lunch plans',
+        messageCount: 1,
+        mailingList: false,
+        first: message(),
+        latest: message()
+      })
+    ]
+    const { state, questions, targets } = buildPackedTriageRequest(states, rules)
+
+    // The envelope is the whole state: one key, and every conversation inside it.
+    expect(Object.keys(state)).toEqual(['threads'])
+    expect(state.threads).toEqual(states)
+    expect(Object.keys(questions)).toEqual(['t0_s0', 't0_s1', 't1_s0', 't1_s1'])
+    expect(questions.t1_s0).toEqual({
       type: 'noul',
       instructions:
         'The user keeps a mailbox named "Invoices" and described what belongs in it. ' +
         'Decide whether this conversation belongs in that mailbox. ' +
-        'Judge it by its content, its sender, and its purpose, not by its wording alone.',
+        'Judge it by its content, its sender, and its purpose, not by its wording alone. ' +
+        'This question is about the conversation at `threads[1]` only.',
       criteria: {
         true: { what: 'Bills I have to pay' },
         false: { what: 'The conversation does not fit that description' }
       }
     })
     expect(targets).toEqual({
-      s0: { splitId: 'custom:one', descriptionHash: 'h1' },
-      s1: { splitId: 'custom:two', descriptionHash: 'h2' }
+      t0_s0: { threadIndex: 0, splitId: 'custom:one', descriptionHash: 'h1' },
+      t0_s1: { threadIndex: 0, splitId: 'custom:two', descriptionHash: 'h2' },
+      t1_s0: { threadIndex: 1, splitId: 'custom:one', descriptionHash: 'h1' },
+      t1_s1: { threadIndex: 1, splitId: 'custom:two', descriptionHash: 'h2' }
     })
-    expect(buildTriageQuestions([])).toEqual({ questions: {}, targets: {} })
+    expect(buildPackedTriageRequest([], rules)).toEqual({
+      state: { threads: [] },
+      questions: {},
+      targets: {}
+    })
+    expect(buildPackedTriageRequest(states, []).questions).toEqual({})
   })
 })

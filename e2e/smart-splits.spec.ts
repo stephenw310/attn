@@ -15,6 +15,9 @@ test.use({ seed: 'fixtures/seed-splits.json' })
 
 const DESCRIPTION = 'Personal invitations to meet up in person'
 
+/** The measured cap on conversations per request (`SPLIT_TRIAGE_PACK_SIZE`). */
+const MAX_THREADS_PER_REQUEST = 10
+
 /** The complete state contract. Anything else here would be an F17 leak. */
 const ALLOWED_STATE_KEYS = [
   'subject',
@@ -67,19 +70,31 @@ test('classifies a described split and sends only the disclosed state', async ({
   const requests = await triageRequests(app)
   expect(requests.length).toBeGreaterThan(0)
   for (const request of requests) {
-    for (const key of Object.keys(request.state)) expect(ALLOWED_STATE_KEYS).toContain(key)
-    const messages = [request.state.first_message, request.state.latest_message].filter(Boolean) as {
-      from: string
-      excerpt: string
-    }[]
-    for (const message of messages) {
-      expect(Object.keys(message).sort()).toEqual(['excerpt', 'from'])
-      expect(message.excerpt.length).toBeLessThanOrEqual(1_500)
-      expect(message.excerpt).not.toContain('<')
+    // The envelope holds conversations and nothing else, and it is bounded.
+    expect(Object.keys(request.state)).toEqual(['threads'])
+    expect(request.state.threads.length).toBeGreaterThan(0)
+    expect(request.state.threads.length).toBeLessThanOrEqual(MAX_THREADS_PER_REQUEST)
+    for (const thread of request.state.threads) {
+      for (const key of Object.keys(thread)) expect(ALLOWED_STATE_KEYS).toContain(key)
+      const messages = [thread.first_message, thread.latest_message].filter(Boolean) as {
+        from: string
+        excerpt: string
+      }[]
+      for (const message of messages) {
+        expect(Object.keys(message).sort()).toEqual(['excerpt', 'from'])
+        expect(message.excerpt.length).toBeLessThanOrEqual(1_500)
+        expect(message.excerpt).not.toContain('<')
+      }
     }
-    // One question per described split, asking about the user's own words.
-    expect(Object.keys(request.questions)).toEqual(['s0'])
-    expect(JSON.stringify(request.questions.s0?.criteria)).toContain(DESCRIPTION)
+    // One question per conversation and described split, naming the
+    // conversation it asks about and quoting the user's own words.
+    const ids = Object.keys(request.questions)
+    expect(ids).toHaveLength(request.state.threads.length)
+    for (const [index, id] of ids.entries()) {
+      expect(id).toBe(`t${index}_s0`)
+      expect(request.questions[id]?.instructions).toContain(`threads[${index}]`)
+      expect(JSON.stringify(request.questions[id]?.criteria)).toContain(DESCRIPTION)
+    }
   }
 })
 

@@ -5,7 +5,7 @@ import { type Db, openDatabase } from '../db'
 import { descriptionHash, saveSplit, splitRevision } from '../splits'
 import type { SchedulerTime, TimerHandle } from '../time'
 import { SplitTriage, type SplitTriageOptions } from './splitTriage'
-import { SPLIT_TRIAGE_BROADCAST_INTERVAL_MS } from './tuning'
+import { SPLIT_TRIAGE_BATCH_SIZE, SPLIT_TRIAGE_BROADCAST_INTERVAL_MS } from './tuning'
 
 /**
  * Deterministic clock. The pass, the client deadline and every retry wait ride
@@ -50,11 +50,19 @@ async function flush(): Promise<void> {
 }
 
 interface RecordedRequest {
-  state: { subject?: string }
+  state: { threads: { subject?: string }[] }
   questions: Record<string, { instructions: string }>
 }
 
-/** A transport that answers every question with the probability the test picks. */
+/** The subjects one request carried, in the order they were packed. */
+function subjectsOf(request: RecordedRequest): string[] {
+  return request.state.threads.map((thread) => thread.subject ?? '')
+}
+
+/**
+ * A transport that answers every question with the probability the test picks,
+ * against the conversation the question id names (`t2_s0` is `threads[2]`).
+ */
 function scriptedTransport(
   answer: (subject: string, instructions: string) => number,
   recorded: RecordedRequest[]
@@ -64,7 +72,9 @@ function scriptedTransport(
     recorded.push(body)
     const answers: Record<string, { type: string; noul: number }> = {}
     for (const [id, question] of Object.entries(body.questions)) {
-      answers[id] = { type: 'noul', noul: answer(body.state.subject ?? '', question.instructions) }
+      const threadIndex = Number(/^t(\d+)_s\d+$/.exec(id)?.[1] ?? 0)
+      const subject = body.state.threads[threadIndex]?.subject ?? ''
+      answers[id] = { type: 'noul', noul: answer(subject, question.instructions) }
     }
     return Promise.resolve({
       ok: true,
@@ -213,7 +223,10 @@ describe('split triage pass', () => {
     triage.kick()
     await triage.settled()
 
-    expect(recorded).toHaveLength(2)
+    // Both conversations rode one request, each with its own question.
+    expect(recorded).toHaveLength(1)
+    expect(subjectsOf(recorded[0])).toEqual(['Q3 invoice', 'Lunch plans'])
+    expect(Object.keys(recorded[0].questions)).toEqual(['t0_s0', 't1_s0'])
     expect(judgments('account')).toEqual([
       {
         account_id: 'account',
@@ -284,7 +297,7 @@ describe('split triage pass', () => {
   })
 
   it('throttles the broadcast while a long pass keeps moving threads', async () => {
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < 25; index++) {
       insertThread('account', `t-${index}`, 'Q3 invoice', [{ id: `m-${index}`, at: 100 - index }])
     }
     describedSplit('account', 'Invoices', 'Bills I have to pay')
@@ -296,10 +309,13 @@ describe('split triage pass', () => {
     const triage = makeTriage('account', transport)
     triage.kick()
     await triage.settled()
-    expect(recorded).toHaveLength(4)
-    // Four moves, but the flushes are spaced: strictly fewer bumps than moves.
+    // Ten conversations per request: three requests, not twenty-five.
+    expect(recorded).toHaveLength(3)
+    expect(recorded.map((request) => request.state.threads.length)).toEqual([10, 10, 5])
+    expect(judgments('account')).toHaveLength(25)
+    // Twenty-five moves, but the flushes are spaced: far fewer bumps than moves.
     expect(broadcasts).toBeGreaterThan(0)
-    expect(broadcasts).toBeLessThan(4)
+    expect(broadcasts).toBeLessThan(25)
   })
 
   it('stops on a refused key and stays stopped until the key changes', async () => {
@@ -357,6 +373,37 @@ describe('split triage pass', () => {
     expect(judgments('account')).toHaveLength(1)
   })
 
+  it('skips every conversation in a pack the service rejects', async () => {
+    for (let index = 0; index < 3; index++) {
+      insertThread('account', `t-${index}`, 'Q3 invoice', [{ id: `m-${index}`, at: 100 - index }])
+    }
+    describedSplit('account', 'Invoices', 'Bills I have to pay')
+    let attempts = 0
+    const warnings: string[] = []
+    const triage = makeTriage(
+      'account',
+      (url, init) => {
+        attempts++
+        return failingTransport(422)(url, init)
+      },
+      {
+        log: (_level, message) => {
+          warnings.push(message)
+        }
+      }
+    )
+
+    triage.kick()
+    await triage.settled()
+
+    // The pack is skipped whole: no retry per conversation, and no judgment.
+    expect(attempts).toBe(1)
+    expect(judgments('account')).toHaveLength(0)
+    expect(warnings).toEqual([
+      '[triage] smart splits request was rejected (HTTP 422); skipping 3 conversations'
+    ])
+  })
+
   it('never mixes one account judgments into another account', async () => {
     insertThread('account', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
     insertThread('other', 't-1', 'Q3 invoice', [{ id: 'm-1', at: 100 }])
@@ -404,10 +451,10 @@ describe('split triage pass', () => {
     expect(late).toEqual([['t-1']])
   })
 
-  it('judges a waiting thread ahead of the backlog it is already working through', async () => {
-    // Twelve unjudged threads, all newer than the arrival, so the queue order
-    // alone would put the arrival last.
-    for (let index = 0; index < 12; index++) {
+  it('sends a waiting thread in the next pack, ahead of the backlog still queued', async () => {
+    // One batch of unjudged threads plus one, all newer than the arrival, so
+    // the queue order alone would put the arrival last.
+    for (let index = 0; index < SPLIT_TRIAGE_BATCH_SIZE + 1; index++) {
       insertThread('account', `t-backlog-${index}`, 'Q3 invoice', [
         { id: `m-backlog-${index}`, at: 500 + index }
       ])
@@ -416,10 +463,15 @@ describe('split triage pass', () => {
     describedSplit('account', 'Invoices', 'Bills I have to pay')
     let triage: SplitTriage | null = null
     let waiting: Promise<void> | null = null
+    let resolved = false
     const answer = scriptedTransport(() => 0.5, recorded)
     const transport: TypeSafeTransport = (url, init) => {
       // The arrival turns up once the pass is already draining the backlog.
-      if (recorded.length === 2 && !waiting && triage) waiting = triage.judgeNow(['t-arrival'], 2_000)
+      if (recorded.length === 1 && !waiting && triage) {
+        waiting = triage.judgeNow(['t-arrival'], 2_000).then(() => {
+          resolved = true
+        })
+      }
       return answer(url, init)
     }
     triage = makeTriage('account', transport)
@@ -428,12 +480,19 @@ describe('split triage pass', () => {
     await triage.settled()
     await waiting
 
-    const subjects = recorded.map((request) => request.state.subject ?? '')
-    expect(subjects).toHaveLength(13)
-    const arrival = subjects.indexOf('Dinner Friday')
-    // Not last: the wait would have expired long before its turn came up.
-    expect(arrival).toBeGreaterThan(0)
-    expect(arrival).toBeLessThan(8)
+    // The measured pack size is a cap, not an average: no request exceeds it.
+    for (const request of recorded) expect(request.state.threads.length).toBeLessThanOrEqual(10)
+    const arrival = recorded.findIndex((request) => subjectsOf(request).includes('Dinner Friday'))
+    const lastBacklog = recorded.reduce(
+      (last, request, index) => (subjectsOf(request).includes('Q3 invoice') ? index : last),
+      -1
+    )
+    // The arrival rode a request of its own while backlog threads were still
+    // queued, rather than waiting for every one of them to be judged.
+    expect(arrival).toBeGreaterThanOrEqual(0)
+    expect(arrival).toBeLessThan(lastBacklog)
+    expect(resolved).toBe(true)
+    expect(judgments('account')).toHaveLength(SPLIT_TRIAGE_BATCH_SIZE + 2)
   })
 
   it('resolves judgeNow without a request when the gate is closed', async () => {

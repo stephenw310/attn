@@ -3,6 +3,10 @@
 // network, no clock — the background pass supplies rows, and a dogfood eval
 // script builds the same payloads from a fixture to tune the wording.
 //
+// One request carries a pack of conversations, up to
+// `SPLIT_TRIAGE_PACK_SIZE` of them, and every (conversation, split) pair rides
+// as its own question that names the conversation it asks about.
+//
 // The state is a deliberate cut, not everything the store holds. TypeSafe's
 // System One models read state literally and unrelated detail costs accuracy,
 // so the thread arrives as subject, who wrote it, how wide it is, the Gmail
@@ -50,6 +54,11 @@ export interface TriageState {
   latest_message?: TriageStateMessage
 }
 
+/** One request's conversations. The questions address them by this path. */
+export interface PackedTriageState {
+  threads: TriageState[]
+}
+
 export interface NoulQuestion {
   type: 'noul'
   instructions: string
@@ -58,11 +67,14 @@ export interface NoulQuestion {
 
 /** What a question id answers for, so the pass can store the answer. */
 export interface TriageQuestionTarget {
+  /** The index into `state.threads` this question asks about. */
+  threadIndex: number
   splitId: string
   descriptionHash: string
 }
 
-export interface TriageQuestionSet {
+export interface PackedTriageRequest {
+  state: PackedTriageState
   questions: Record<string, NoulQuestion>
   targets: Record<string, TriageQuestionTarget>
 }
@@ -138,21 +150,32 @@ export function triageInstructions(splitName: string): string {
 export const TRIAGE_FALSE_CRITERION = 'The conversation does not fit that description'
 
 /**
- * One Noul question per described split, evaluated in parallel against one
- * state. Question ids are code-only (`s0`, `s1`, …): split ids are user data
- * and have no business in the request body.
+ * One request for a pack of conversations: `state.threads[i]` holds one
+ * conversation, and every (conversation, split) pair is its own Noul question
+ * that names its conversation by path. The service evaluates them in parallel.
+ *
+ * Question ids are code-only (`t0_s1`, …): split ids are user data and have no
+ * business in the request body. `targets` maps each id back to the conversation
+ * and the split whose answer it is.
  */
-export function buildTriageQuestions(rules: readonly TriageRule[]): TriageQuestionSet {
+export function buildPackedTriageRequest(
+  states: readonly TriageState[],
+  rules: readonly TriageRule[]
+): PackedTriageRequest {
   const questions: Record<string, NoulQuestion> = {}
   const targets: Record<string, TriageQuestionTarget> = {}
-  rules.forEach((rule, index) => {
-    const id = `s${index}`
-    questions[id] = {
-      type: 'noul',
-      instructions: triageInstructions(rule.name),
-      criteria: { true: { what: rule.description }, false: { what: TRIAGE_FALSE_CRITERION } }
-    }
-    targets[id] = { splitId: rule.splitId, descriptionHash: rule.descriptionHash }
+  states.forEach((_, threadIndex) => {
+    rules.forEach((rule, ruleIndex) => {
+      const id = `t${threadIndex}_s${ruleIndex}`
+      questions[id] = {
+        type: 'noul',
+        instructions:
+          `${triageInstructions(rule.name)} ` +
+          `This question is about the conversation at \`threads[${threadIndex}]\` only.`,
+        criteria: { true: { what: rule.description }, false: { what: TRIAGE_FALSE_CRITERION } }
+      }
+      targets[id] = { threadIndex, splitId: rule.splitId, descriptionHash: rule.descriptionHash }
+    })
   })
-  return { questions, targets }
+  return { state: { threads: [...states] }, questions, targets }
 }

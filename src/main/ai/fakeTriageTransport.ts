@@ -12,10 +12,12 @@ import { type SchedulerTime, systemTime } from '../time'
 import type { TypeSafeTransport } from './typesafeClient'
 
 /**
- * Scripted answers. `bySubject` matches the state's subject; within a match,
- * `probabilities` is keyed by split name (the question instructions quote it)
- * with `'*'` as that entry's catch-all. `status` and `hang` drive the failure
- * paths; `delayMs` rides the injected clock in unit runs.
+ * Scripted answers. `bySubject` matches one conversation's subject; within a
+ * match, `probabilities` is keyed by split name (the question instructions
+ * quote it) with `'*'` as that entry's catch-all. One request carries a pack of
+ * conversations, so each question is answered against the conversation its id
+ * names. `status` and `hang` drive the failure paths; `delayMs` rides the
+ * injected clock in unit runs.
  */
 export interface FakeTriageScript {
   default?: number
@@ -51,6 +53,16 @@ function subjectOf(state: unknown): string {
   return typeof subject === 'string' ? subject : ''
 }
 
+/** `t3_s1` asks about `state.threads[3]`. An unpacked state answers for itself. */
+const PACKED_QUESTION_ID = /^t(\d+)_s\d+$/
+
+function threadStateFor(state: unknown, questionId: string): unknown {
+  const match = PACKED_QUESTION_ID.exec(questionId)
+  if (!match || !state || typeof state !== 'object') return state
+  const threads = (state as { threads?: unknown }).threads
+  return Array.isArray(threads) ? threads[Number(match[1])] : state
+}
+
 export class FakeTriageTransport {
   private script: FakeTriageScript = {}
   private readonly requests: RecordedTriageRequest[] = []
@@ -66,9 +78,9 @@ export class FakeTriageTransport {
   }
 
   /** The probability this script answers for one question of one thread. */
-  private probabilityFor(state: unknown, instructions: string): number {
+  private probabilityFor(threadState: unknown, instructions: string): number {
     const fallback = this.script.default ?? 0
-    const subject = subjectOf(state)
+    const subject = subjectOf(threadState)
     const entry = this.script.bySubject?.find((row) => subject.includes(row.subjectIncludes))
     if (!entry) return fallback
     // The split's name is what the question quotes, so a scripted answer names
@@ -99,7 +111,7 @@ export class FakeTriageTransport {
         for (const [id, question] of Object.entries(parsed.questions)) {
           answers[id] = {
             type: 'noul',
-            noul: this.probabilityFor(parsed.state, question.instructions ?? '')
+            noul: this.probabilityFor(threadStateFor(parsed.state, id), question.instructions ?? '')
           }
         }
         resolve({

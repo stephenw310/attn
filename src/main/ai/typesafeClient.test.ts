@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTriageQuestions, buildTriageState } from '../sync/splitTriageState'
+import { buildPackedTriageRequest, buildTriageState } from '../sync/splitTriageState'
 import { SPLIT_TRIAGE_REQUEST_TIMEOUT_MS } from '../sync/tuning'
 import type { SchedulerTime, TimerHandle } from '../time'
 import {
@@ -40,7 +40,7 @@ class ManualTimers {
   }
 }
 
-const STATE = buildTriageState({
+const THREAD = buildTriageState({
   subject: 'Q3 invoice',
   messageCount: 1,
   mailingList: false,
@@ -62,9 +62,10 @@ const STATE = buildTriageState({
   }
 })
 
-const QUESTIONS = buildTriageQuestions([
-  { splitId: 'custom:one', name: 'Invoices', description: 'Bills I pay', descriptionHash: 'h1' }
-]).questions
+const { state: STATE, questions: QUESTIONS } = buildPackedTriageRequest(
+  [THREAD],
+  [{ splitId: 'custom:one', name: 'Invoices', description: 'Bills I pay', descriptionHash: 'h1' }]
+)
 
 function response(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return {
@@ -93,10 +94,10 @@ describe('typesafe client', () => {
     const probabilities = await call((url, init) => {
       seen = { url, init }
       return Promise.resolve(
-        response(200, { model: 'jev-latest', answers: { s0: { type: 'noul', noul: 0.93 } } })
+        response(200, { model: 'jev-latest', answers: { t0_s0: { type: 'noul', noul: 0.93 } } })
       )
     }, timers.time)
-    expect(probabilities).toEqual({ s0: 0.93 })
+    expect(probabilities).toEqual({ t0_s0: 0.93 })
     const request = seen as unknown as { url: string; init: RequestInit }
     expect(request.url).toBe('https://api.typesafe.ai/v1/systemone')
     expect(request.init.method).toBe('POST')
@@ -140,7 +141,7 @@ describe('typesafe client', () => {
       TypeSafeRequestError
     )
     await expect(
-      call(() => Promise.resolve(response(200, { answers: { s0: { noul: 'yes' } } })), timers.time)
+      call(() => Promise.resolve(response(200, { answers: { t0_s0: { noul: 'yes' } } })), timers.time)
     ).rejects.toBeInstanceOf(TypeSafeRequestError)
     await expect(
       call(() => Promise.resolve(response(200, { answers: {} })), timers.time)

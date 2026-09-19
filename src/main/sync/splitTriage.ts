@@ -1,9 +1,9 @@
 // The smart-splits classifier pass: one account session's background walk of
 // Inbox conversations that some described split has not answered for yet
 // (SPEC F17 triage consent). It is a local-first worker in the utility
-// process — it reads the store, asks TypeSafe about one thread at a time, and
-// writes the answers back as `split_judgments` rows. Nothing it does depends
-// on Gmail, and nothing it writes is mail content.
+// process — it reads the store, asks TypeSafe about a pack of threads at a
+// time, and writes the answers back as `split_judgments` rows. Nothing it does
+// depends on Gmail, and nothing it writes is mail content.
 //
 // The gate is re-read at the start of every pass and every batch: withdrawing
 // consent, deleting the key, or removing the last described split stops the
@@ -31,10 +31,11 @@ import {
 import type { SchedulerTime } from '../time'
 import { OfflineRetryScheduler } from './retry'
 import {
-  buildTriageQuestions,
+  buildPackedTriageRequest,
   buildTriageState,
   type TriageMessageInput,
   type TriageQuestionTarget,
+  type TriageState,
   type TriageThreadInput
 } from './splitTriageState'
 import {
@@ -43,6 +44,7 @@ import {
   SPLIT_TRIAGE_BROADCAST_INTERVAL_MS,
   SPLIT_TRIAGE_CONCURRENCY,
   SPLIT_TRIAGE_OFFLINE_RETRY_MS,
+  SPLIT_TRIAGE_PACK_SIZE,
   SPLIT_TRIAGE_RATE_LIMIT_BASE_MS,
   SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS,
   SPLIT_TRIAGE_RATE_LIMIT_MAX_WAIT_MS
@@ -384,9 +386,9 @@ export class SplitTriage {
   }
 
   /**
-   * A thread some caller is waiting on, ahead of the queue. Checked inside the
-   * batch loop rather than only between batches: an arrival that waits two
-   * seconds cannot afford to sit behind a twenty-thread backlog.
+   * A thread some caller is waiting on, ahead of the queue. Taken first when a
+   * pack is filled rather than only between batches: an arrival that waits two
+   * seconds cannot afford to sit behind a forty-thread backlog.
    */
   private nextPriorityRow(gate: TriageGate): WorkRow | null {
     for (;;) {
@@ -412,23 +414,35 @@ export class SplitTriage {
         return row
       }
     }
+    // One request carries a pack, and a waiting thread fills it first, so an
+    // arrival rides the next request rather than the next batch. The whole
+    // pack is claimed before the first await, so two workers never share a row.
+    const nextPack = (): WorkRow[] => {
+      const pack: WorkRow[] = []
+      while (pack.length < SPLIT_TRIAGE_PACK_SIZE) {
+        const row = this.nextPriorityRow(gate) ?? nextQueued()
+        if (!row) break
+        handled.add(row.threadId)
+        this.inFlight.add(row.threadId)
+        pack.push(row)
+      }
+      return pack
+    }
     let stop = false
     const worker = async (): Promise<void> => {
       for (;;) {
         if (stop || this.stopped || !this.options.isActive()) return
-        const row = this.nextPriorityRow(gate) ?? nextQueued()
-        if (!row) return
-        handled.add(row.threadId)
-        this.inFlight.add(row.threadId)
+        const pack = nextPack()
+        if (pack.length === 0) return
         try {
           await this.yieldToForeground()
           if (stop || this.stopped) return
-          if ((await this.judgeOne(gate, row)) === 'stop') {
+          if ((await this.judgePack(gate, pack)) === 'stop') {
             stop = true
             return
           }
         } finally {
-          this.inFlight.delete(row.threadId)
+          for (const row of pack) this.inFlight.delete(row.threadId)
         }
       }
     }
@@ -436,14 +450,29 @@ export class SplitTriage {
     return stop ? 'stop' : 'continue'
   }
 
-  private async judgeOne(gate: TriageGate, row: WorkRow): Promise<'ok' | 'stop'> {
-    const thread = this.loadThread(row.threadId)
-    if (!thread) {
-      this.settleThread(row.threadId, false)
-      return 'ok'
+  private async judgePack(gate: TriageGate, pack: WorkRow[]): Promise<'ok' | 'stop'> {
+    // A thread that no longer loads is settled here and leaves the pack, so
+    // `threadIndex` always indexes `loaded` rather than the rows we started with.
+    const loaded: { row: WorkRow; state: TriageState }[] = []
+    for (const row of pack) {
+      const thread = this.loadThread(row.threadId)
+      if (!thread) {
+        this.settleThread(row.threadId, false)
+        continue
+      }
+      loaded.push({ row, state: buildTriageState(thread) })
     }
-    const state = buildTriageState(thread)
-    const { questions, targets } = buildTriageQuestions(gate.rules)
+    if (loaded.length === 0) return 'ok'
+    const settleAll = (): void => {
+      for (const entry of loaded) this.settleThread(entry.row.threadId, false)
+    }
+    const skipAll = (): void => {
+      for (const entry of loaded) this.skipped.add(entry.row.threadId)
+    }
+    const { state, questions, targets } = buildPackedTriageRequest(
+      loaded.map((entry) => entry.state),
+      gate.rules
+    )
     for (let attempt = 1; ; attempt++) {
       try {
         const probabilities = await judgeThread({
@@ -455,32 +484,34 @@ export class SplitTriage {
           time: this.time,
           signal: this.abort.signal
         })
-        this.writeJudgments(row, targets, probabilities)
-        this.settleThread(row.threadId, true)
+        loaded.forEach((entry, threadIndex) => {
+          this.writeJudgments(entry.row, threadIndex, targets, probabilities)
+          this.settleThread(entry.row.threadId, true)
+        })
         this.maybeBroadcast()
         return 'ok'
       } catch (error) {
         if (error instanceof TypeSafeAuthError) {
           this.authFailedKey = gate.key
           this.log('warn', `[triage] ${describeError(error)}; smart splits paused until the key changes`)
-          this.settleThread(row.threadId, false)
+          settleAll()
           return 'stop'
         }
         if (error instanceof TypeSafeRateLimitError) {
           if (attempt >= SPLIT_TRIAGE_RATE_LIMIT_MAX_ATTEMPTS) {
-            this.skipped.add(row.threadId)
-            this.settleThread(row.threadId, false)
+            skipAll()
+            settleAll()
             return 'ok'
           }
           await this.wait(rateLimitWaitMs(error.retryAfterMs, attempt))
           if (this.stopped) {
-            this.settleThread(row.threadId, false)
+            settleAll()
             return 'stop'
           }
           continue
         }
         if (error instanceof TypeSafeNetworkError) {
-          this.settleThread(row.threadId, false)
+          settleAll()
           if (!this.stopped) {
             this.log('warn', `[triage] ${describeError(error)}; retrying later`)
             this.offlineRetry.schedule(
@@ -490,9 +521,10 @@ export class SplitTriage {
           }
           return 'stop'
         }
-        this.log('warn', `[triage] ${describeError(error)}; skipping one conversation`)
-        this.skipped.add(row.threadId)
-        this.settleThread(row.threadId, false)
+        const count = `${loaded.length} conversation${loaded.length === 1 ? '' : 's'}`
+        this.log('warn', `[triage] ${describeError(error)}; skipping ${count}`)
+        skipAll()
+        settleAll()
         return 'ok'
       }
     }
@@ -506,8 +538,10 @@ export class SplitTriage {
     return readTriageThread(this.db, this.accountId, threadId)
   }
 
+  /** One thread's answers out of the pack's, in their own transaction. */
   private writeJudgments(
     row: WorkRow,
+    threadIndex: number,
     targets: Record<string, TriageQuestionTarget>,
     probabilities: Record<string, number>
   ): void {
@@ -525,6 +559,7 @@ export class SplitTriage {
     const changed = this.db.transaction(() => {
       const before = splitIdForThread(this.db, this.accountId, row.threadId)
       for (const [questionId, target] of Object.entries(targets)) {
+        if (target.threadIndex !== threadIndex) continue
         const probability = probabilities[questionId]
         if (probability === undefined) continue
         upsert.run(

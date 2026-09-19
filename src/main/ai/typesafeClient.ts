@@ -1,14 +1,14 @@
 // The TypeSafe System One client behind smart splits (F17 triage consent).
-// One request judges one thread: the thread's state travels once, and every
-// described split rides along as its own Noul question, which the service
-// evaluates in parallel against that state.
+// One request judges a pack of threads: the pack's state travels once, and
+// every (thread, described split) pair rides along as its own Noul question,
+// which the service evaluates in parallel against that state.
 //
 // Nothing here logs a request body, a response body, or the key. Failures
 // carry a fixed sentence and, where it exists, the HTTP status — enough to act
 // on and to read in a log, and never enough to leak mail or a credential.
 
 import { TYPESAFE_BASE_URL } from '../../shared/ai'
-import type { NoulQuestion, TriageState } from '../sync/splitTriageState'
+import type { NoulQuestion, PackedTriageState, TriageState } from '../sync/splitTriageState'
 import { SPLIT_TRIAGE_REQUEST_TIMEOUT_MS } from '../sync/tuning'
 import type { SchedulerTime, TimerHandle } from '../time'
 
@@ -18,7 +18,7 @@ export type TypeSafeTransport = (url: string, init: RequestInit) => Promise<Resp
 /** The key is refused. The pass stops until a different key arrives. */
 export class TypeSafeAuthError extends Error {}
 
-/** 429 or 529. The caller waits, then asks again for the same thread. */
+/** 429 or 529. The caller waits, then asks again for the same pack. */
 export class TypeSafeRateLimitError extends Error {
   constructor(
     message: string,
@@ -28,7 +28,7 @@ export class TypeSafeRateLimitError extends Error {
   }
 }
 
-/** A request this thread will keep failing: skip it for the pass. */
+/** A request this pack will keep failing: skip it for the pass. */
 export class TypeSafeRequestError extends Error {}
 
 /** The service was unreachable, or the deadline passed: pause the pass. */
@@ -37,7 +37,8 @@ export class TypeSafeNetworkError extends Error {}
 export interface JudgeThreadRequest {
   key: string
   model: string
-  state: TriageState
+  /** One thread, or a pack of them under `threads`. */
+  state: TriageState | PackedTriageState
   questions: Record<string, NoulQuestion>
   transport: TypeSafeTransport
   time: SchedulerTime
@@ -79,9 +80,9 @@ function parseProbabilities(body: unknown, questionIds: readonly string[]): Reco
 }
 
 /**
- * Judge one thread. Resolves with the yes-probability per question id, in the
- * ids the caller asked about; a missing or malformed answer fails the whole
- * request rather than writing a judgment nobody made.
+ * Judge one pack of threads. Resolves with the yes-probability per question
+ * id, in the ids the caller asked about; a missing or malformed answer fails
+ * the whole request rather than writing a judgment nobody made.
  */
 export async function judgeThread(request: JudgeThreadRequest): Promise<Record<string, number>> {
   const questionIds = Object.keys(request.questions)

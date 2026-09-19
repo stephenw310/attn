@@ -56,9 +56,13 @@ export function aiRequests(app: ElectronApplication): Promise<RecordedAiRequest[
   return callSeam<RecordedAiRequest[]>(app, TEST_CHANNELS.aiProviderRequests)
 }
 
-/** One smart-splits request as it left the utility — the privacy proof for F17. */
+/**
+ * One smart-splits request as it left the utility — the privacy proof for F17.
+ * A request carries a pack of conversations, so `state.threads` is the whole
+ * envelope and each entry is one conversation's disclosed state.
+ */
 export interface RecordedTriageRequest {
-  state: Record<string, unknown>
+  state: { threads: Record<string, unknown>[] }
   questions: Record<string, { instructions?: string; criteria?: unknown }>
 }
 

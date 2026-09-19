@@ -567,9 +567,10 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   description, and changing it to a description clears its conditions.
 - Smart splits stay off until the user gives separate consent and saves a TypeSafe key. They use their own
   service, their own key, and their own switch. Enabling AI writing never enables them.
-- The classifier sends one request per conversation. The request carries the subject, the sender, the
-  recipient count, the Gmail categories, the mailing-list flag, the message count, and two bounded excerpts.
-  It never carries recipient addresses, attachments, or HTML. It asks one question per described split.
+- The classifier sends up to ten conversations per request, each judged by its own questions. For each
+  conversation the request carries the subject, the sender, the recipient count, the Gmail categories, the
+  mailing-list flag, the message count, and two bounded excerpts. It never carries recipient addresses,
+  attachments, or HTML. It asks one question per conversation and described split.
 - The classifier re-asks when the user edits the description or the conversation receives a message. It
   judges an arriving conversation before Attn decides whether to notify, and waits at most two seconds. A
   judgment that lands later still notifies, once, while the message is recent and unread.
