@@ -12,6 +12,10 @@ const message = (overrides: Partial<TriageMessageInput> = {}): TriageMessageInpu
   ...overrides
 })
 
+/** A high surrogate with no low surrogate after it, or a low one with no high before it. */
+const hasLoneSurrogate = (value: string): boolean =>
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(value)
+
 describe('split triage state', () => {
   it('carries only the disclosed fields for a single-message thread', () => {
     // The literal is the contract: anything a future edit adds to the state
@@ -86,6 +90,37 @@ describe('split triage state', () => {
       latest: message({ bodyText: `word ${'x'.repeat(SPLIT_TRIAGE_EXCERPT_CHARS + 500)}` })
     })
     expect(long.latest_message?.excerpt).toHaveLength(SPLIT_TRIAGE_EXCERPT_CHARS)
+  })
+
+  it('never sends a lone surrogate, whether stored or created by the cut', () => {
+    // One emoji straddles the excerpt boundary: the cut keeps its first half.
+    const straddling = `${'a'.repeat(SPLIT_TRIAGE_EXCERPT_CHARS - 1)}\u{1F600} tail`
+    const cut = buildTriageState({
+      subject: 'Half a smile',
+      messageCount: 1,
+      mailingList: false,
+      first: message({ bodyText: straddling }),
+      latest: message({ bodyText: straddling })
+    })
+    expect(hasLoneSurrogate(cut.first_message.excerpt)).toBe(false)
+    expect(cut.first_message.excerpt.length).toBeLessThanOrEqual(SPLIT_TRIAGE_EXCERPT_CHARS)
+    expect(() => JSON.parse(JSON.stringify(cut))).not.toThrow()
+
+    // A stored lone surrogate, as a bad decode can leave one, is repaired too.
+    const stored = buildTriageState({
+      subject: 'Broken \uD83D decode',
+      messageCount: 1,
+      mailingList: false,
+      first: message({ fromName: 'A\uDE00B', bodyText: 'x \uD835 y' }),
+      latest: message({ fromName: 'A\uDE00B', bodyText: 'x \uD835 y' })
+    })
+    const fields = [
+      stored.subject,
+      stored.sender.name,
+      stored.first_message.from,
+      stored.first_message.excerpt
+    ]
+    for (const value of fields) expect(hasLoneSurrogate(value)).toBe(false)
   })
 
   it('never exposes recipients, attachments, or HTML', () => {

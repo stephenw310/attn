@@ -194,7 +194,18 @@ async function judge(args: Args): Promise<number> {
       console.error(`No such account. Known: ${accounts.map((account) => account.id).join(', ') || 'none'}`)
       return 2
     }
-    const samples = loadSamples(db, accountId, flagNumber(args, 'limit', 100))
+    // `--ids a,b,c` judges exactly those threads, for reproducing a failed pack.
+    const requestedIds = flagText(args, 'ids', '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+    const samples =
+      requestedIds.length > 0
+        ? requestedIds.flatMap((threadId) => {
+            const input = readTriageThread(db as unknown as Db, accountId, threadId)
+            return input ? [{ threadId, input }] : []
+          })
+        : loadSamples(db, accountId, flagNumber(args, 'limit', 100))
     // The shipped shape: one request carries a pack of conversations.
     const groups = chunk(samples, SPLIT_TRIAGE_PACK_SIZE)
     console.log(

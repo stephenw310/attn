@@ -87,13 +87,27 @@ export interface TriageRule {
   descriptionHash: string
 }
 
+/**
+ * A lone surrogate — half of an emoji or a mathematical letter — serializes
+ * to JSON that a strict parser rejects, and the service answers HTTP 400 for
+ * the whole request. Stored mail can carry one from a bad decode, and the
+ * excerpt cut below can create one. Each becomes U+FFFD.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
+function wellFormed(value: string): string {
+  return value.replace(LONE_SURROGATE, '�')
+}
+
 function collapse(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
+  return wellFormed(value.replace(/\s+/g, ' ').trim())
 }
 
 export function triageExcerpt(message: TriageMessageInput): string {
   const source = message.bodyText?.trim() ? message.bodyText : (message.snippet ?? '')
-  return collapse(source).slice(0, SPLIT_TRIAGE_EXCERPT_CHARS)
+  // The cut is in UTF-16 units, so it can land between the halves of one
+  // character; repair after cutting, not before.
+  return wellFormed(collapse(source).slice(0, SPLIT_TRIAGE_EXCERPT_CHARS))
 }
 
 function displayFrom(message: TriageMessageInput): string {
