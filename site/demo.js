@@ -150,15 +150,19 @@ function markDone() {
   document.getElementById(`demo-${conversation.id}`).dataset.leaving = ''
   window.setTimeout(() => {
     leaving = false
-    inbox.splice(index, 1)
-    done.push({ conversation, index })
-    selectedId = (inbox[index] ?? inbox[index - 1])?.id
+    // The list can change during the animation, so find the row again by id.
+    const at = inbox.indexOf(conversation)
+    if (at < 0) return
+    inbox.splice(at, 1)
+    done.push({ conversation, index: at })
+    selectedId = (inbox[at] ?? inbox[at - 1])?.id
     status.textContent = `Marked done: ${conversation.subject}. Press Z to undo.`
     render()
   }, LEAVE_MS)
 }
 
 function undo() {
+  if (leaving) return
   const last = done.pop()
   if (!last) return
   inbox.splice(last.index, 0, last.conversation)
