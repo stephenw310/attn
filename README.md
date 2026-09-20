@@ -89,6 +89,10 @@ Select **Sign in with Google**. Complete sign-in in your browser.
 
 Google shows a page that says "Google hasn't verified this app", because Google has not reviewed your client. Check that the page names your own project. Then select **Advanced**, and select **Go to** your app name. Google shows this page once for each account.
 
+<img src="docs/images/google-unverified-warning.png" width="560" alt="The Google warning page after you select Advanced. It shows the heading Google hasn't verified this app, a Hide Advanced link, and a Go to attn (unsafe) link at the bottom.">
+
+The gray boxes cover the developer email. On your page, that email is your own Google account.
+
 The first conversations appear while Attn syncs the rest of the mailbox. Older messages can require a connection when you first open them. The sync status shows background progress.
 
 To add another account, open the account menu and select **Add account**.
