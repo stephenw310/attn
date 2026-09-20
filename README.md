@@ -8,7 +8,7 @@ A desktop Gmail client built around keyboard shortcuts and offline mail. For mac
 
 Read cached mail, write drafts, and organize your inbox without a network connection. Changes save locally and sync with Gmail when you reconnect. Use the command palette to find actions without leaving the keyboard.
 
-> **Developer preview.** Build from source with your own Google OAuth client. No installer is published. Google projects in Testing status require sign-in again after seven days. See [Get started](#get-started).
+> **Developer preview.** Build from source with your own Google OAuth client. No installer is published. Google shows an unverified-app warning when you sign in. See [Get started](#get-started).
 
 ## What you can do
 
@@ -55,11 +55,13 @@ Each user supplies a Google OAuth client. The same client can connect all your G
 1. Open the [Google Cloud Console](https://console.cloud.google.com/).
 2. Create a project or select an existing project.
 3. Enable the Gmail API for the project.
-4. Configure Google Auth Platform with an External audience and Testing status.
-5. Add each Gmail address you want to connect as a test user.
+4. Configure Google Auth Platform with an External audience.
+5. On the **Audience** page, select **Publish app** to set the publishing status to **In production**.
 6. Create an OAuth client with the **Desktop app** application type.
 7. Copy `oauth.config.example.json` to `oauth.config.json` in the repository root.
 8. Put the client ID and client secret in the corresponding fields.
+
+Do not submit the app for verification. The console says that the app needs verification because it requests Gmail access. You can ignore that notice for a client that only you use.
 
 Attn expects this file structure:
 
@@ -75,7 +77,7 @@ Keep `oauth.config.json` private. Git ignores this file. Set the quota value to 
 
 Attn requests `gmail.modify`, `openid`, and `email`. The mail scope permits mail reading, composition, sending, and label changes. See [Google's scope reference](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
-External apps in Testing status receive refresh tokens that expire after seven days when they request Gmail access. Expect to sign in again. See [Google's token expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration).
+Use **In production** status, not **Testing**. Google expires the sign-in of a test user after seven days, and it limits a Testing project to the test users you list. An unverified production client keeps you signed in. Google allows it 100 users, which is enough for your own accounts. See [Google's publishing status rules](https://support.google.com/cloud/answer/15549945).
 
 ### 4. Start Attn
 
@@ -83,7 +85,9 @@ External apps in Testing status receive refresh tokens that expire after seven d
 npm run dev
 ```
 
-Select **Sign in with Google**. Complete sign-in in your browser. If Google shows an unverified-app notice, check that the client belongs to your project before you continue.
+Select **Sign in with Google**. Complete sign-in in your browser.
+
+Google shows a page that says "Google hasn't verified this app", because Google has not reviewed your client. Check that the page names your own project. Then select **Advanced**, and select **Go to** your app name. Google shows this page once for each account.
 
 The first conversations appear while Attn syncs the rest of the mailbox. Older messages can require a connection when you first open them. The sync status shows background progress.
 
