@@ -23,7 +23,9 @@ jobs:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # A job-level map replaces the workflow-level map, so contents must be listed again.
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
