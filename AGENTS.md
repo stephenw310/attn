@@ -20,7 +20,7 @@ You need Node.js 22.12 or later. You do not need Google credentials to build or 
 | `src/main/ipc.ts` | Main-process IPC registration and forwarding |
 | `src/main/service/` | Utility process, supervisor, and request handlers |
 | `src/shared/ipc.ts` | Typed IPC channel contract shared across processes |
-| `site/` | Static landing site for GitHub Pages: home page, privacy policy, and sign-in warning |
+| `site/` | Static landing site for GitHub Pages: home page and privacy policy |
 
 ## Process boundaries
 
