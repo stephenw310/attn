@@ -2,7 +2,7 @@
 
 A desktop Gmail client built around keyboard shortcuts and offline mail. For macOS and Windows.
 
-[Get started](#get-started) · [Keyboard shortcuts](#use-the-keyboard) · [Data and privacy](#data-and-privacy) · [Contribute](#contribute)
+[Website](https://useattn.com) · [Get started](#get-started) · [Keyboard shortcuts](#use-the-keyboard) · [Data and privacy](#data-and-privacy) · [Contribute](#contribute)
 
 <img src="docs/images/inbox-light.png" alt="The Attn inbox with the mailbox sidebar, a conversation list, and the keyboard shortcut bar">
 
@@ -136,7 +136,7 @@ Personal macOS builds use an ad-hoc signature and are not notarized. Personal Wi
 
 Attn stores cached mail and local drafts in SQLite under your user data directory. The mail database is not encrypted by Attn. OAuth tokens, your AI writing key, and your TypeSafe key for smart splits use Electron `safeStorage`, backed by the operating system. Each key has its own file.
 
-Attn has no hosted mail backend or telemetry. It connects to Google for mail. Signed release builds also contact their configured update feed.
+Attn has no hosted mail backend or telemetry. It connects to Google for mail. Signed release builds also contact their configured update feed. The [privacy policy](https://useattn.com/privacy.html) lists each case where data leaves your computer.
 
 Remote images load directly from senders by default. You can block them in settings and allow individual senders.
 
