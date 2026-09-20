@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Attn: your mail, at your pace</title>
+    <meta
+      name="description"
+      content="Attn is a fast, open-source Gmail client for macOS and Windows. It works offline, and your mail stays on your computer."
+    />
+    <meta property="og:title" content="Attn: your mail, at your pace" />
+    <meta
+      property="og:description"
+      content="A fast, open-source Gmail client for macOS and Windows. Your mail stays on your computer."
+    />
+    <!-- Open Graph needs absolute URLs. Change the origin to useattn.com in the CNAME change. -->
+    <meta property="og:url" content="https://stephenw310.github.io/attn/" />
+    <meta property="og:image" content="https://stephenw310.github.io/attn/images/inbox-light.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="images/icon.png" />
+    <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="fonts/newsreader-italic-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="wash" aria-hidden="true"></div>
+    <header class="page masthead">
+      <a class="wordmark" href="./" aria-current="page">Attn</a>
+    </header>
+
+    <main>
+      <section class="page hero">
+        <div class="hero-text">
+          <h1>Your mail, at your pace.</h1>
+          <p class="hero-lede">
+            A fast, open-source Gmail client for macOS and Windows. Your mail stays on your computer.
+          </p>
+        </div>
+        <div class="actions">
+          <a class="button" href="https://github.com/stephenw310/attn">Get Attn on GitHub</a>
+        </div>
+        <!-- Release build: point this button at /releases/latest and label it "Download Attn". -->
+
+        <div class="demo">
+          <div class="demo-window">
+            <div class="demo-bar" aria-hidden="true">
+              <span class="demo-lights"><i></i><i></i><i></i></span>
+              <span class="demo-write">Write</span>
+              <span class="demo-account"><i class="demo-live"></i>All changes synced</span>
+            </div>
+            <aside class="demo-sidebar" aria-hidden="true">
+              <div class="demo-brand">Attn</div>
+              <ul>
+                <li data-current><span>Inbox</span><span data-demo-count>6</span></li>
+                <li><span>Starred</span><span>2</span></li>
+                <li><span>Snoozed</span><span>0</span></li>
+                <li><span>Drafts</span><span>1</span></li>
+                <li><span>Sent</span><span></span></li>
+                <li><span>All Mail</span><span></span></li>
+              </ul>
+              <div class="demo-labels">Labels</div>
+              <ul>
+                <li><span><i class="demo-swatch" data-tone="1"></i>Work</span><span>12</span></li>
+                <li><span><i class="demo-swatch" data-tone="3"></i>Personal</span><span>4</span></li>
+                <li><span><i class="demo-swatch" data-tone="2"></i>Travel</span><span>2</span></li>
+              </ul>
+            </aside>
+            <div class="demo-main">
+              <div class="demo-title">Inbox</div>
+              <noscript>
+                <img src="images/inbox-light.png" alt="The Attn inbox" style="width: 100%; height: auto" />
+              </noscript>
+              <div
+                class="demo-list"
+                id="demo-list"
+                role="listbox"
+                tabindex="0"
+                aria-label="Sample inbox. Press J and K to move, E to mark done, Z to undo."
+              ></div>
+              <div class="demo-empty" id="demo-empty" hidden>
+                <strong>Inbox zero.</strong>
+                <span>Press <kbd>Z</kbd> to bring the last conversation back.</span>
+              </div>
+              <div class="demo-hints">
+                <button type="button" data-demo-key="j"><kbd>J</kbd> Next</button>
+                <button type="button" data-demo-key="k"><kbd>K</kbd> Previous</button>
+                <button type="button" data-demo-key="e"><kbd>E</kbd> Mark done</button>
+                <button type="button" data-demo-key="z"><kbd>Z</kbd> Undo</button>
+              </div>
+            </div>
+          </div>
+          <div class="demo-caption">
+            <span>This is a sample, not your mail. Press the keys, or select the buttons.</span>
+            <span class="demo-status" id="demo-status" role="status"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="page features" aria-labelledby="features-title">
+        <h2 id="features-title">What Attn does</h2>
+        <dl class="grid">
+          <div>
+            <dt>Mail stays on your computer</dt>
+            <dd>Your mail is in a SQLite file on your disk, so Attn works offline. There is no server and no telemetry.</dd>
+          </div>
+          <div>
+            <dt>Fast from the keyboard</dt>
+            <dd>Archive, snooze, reply, and undo with one key each. The command palette finds every other action.</dd>
+          </div>
+          <div>
+            <dt>AI with your own key</dt>
+            <dd>Draft a reply, complete a sentence, or describe an inbox split in plain words. AI is off until you add a key.</dd>
+          </div>
+          <div>
+            <dt>The rest of a mail client</dt>
+            <dd>Several Gmail accounts, inbox splits, snooze, follow-up reminders, and undo send.</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="closing" aria-labelledby="cta-title">
+        <div class="page cta">
+          <h2 id="cta-title">Try it with your own mail.</h2>
+          <p>Attn is a developer preview. You build it from source, and the README has the steps.</p>
+          <div class="actions">
+            <a class="button" href="https://github.com/stephenw310/attn#get-started">Read the setup guide</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="page footer">
+      <span>Attn is open source under the MIT license.</span>
+      <nav aria-label="Footer">
+        <a href="https://github.com/stephenw310/attn">GitHub</a>
+        <a href="privacy.html">Privacy</a>
+      </nav>
+    </footer>
+
+    <script src="demo.js" defer></script>
+  </body>
+</html>

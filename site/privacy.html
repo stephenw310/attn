@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy policy for Attn</title>
+    <meta name="description" content="What data Attn reads, where Attn stores it, and who receives it." />
+    <link rel="icon" href="images/icon.png" />
+    <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="fonts/newsreader-italic-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="page masthead">
+      <a class="wordmark" href="./">Attn</a>
+    </header>
+    <main class="page">
+      <div class="doc">
+      <h1>Privacy policy</h1>
+      <p class="updated">Last updated on September 19, 2026.</p>
+      <p class="lede">
+        Attn is a desktop application. It has no Attn server, no user accounts, and no telemetry. The
+        people who make Attn do not receive your mail, your address, or your usage data.
+      </p>
+
+      <h2>What Attn reads from Google</h2>
+      <p>
+        When you sign in, you give Attn the <code>gmail.modify</code>, <code>openid</code>, and
+        <code>email</code> permissions. Attn uses them to do the work of a mail client:
+      </p>
+      <ul>
+        <li>It reads your messages, labels, drafts, and Gmail signatures, and shows them to you.</li>
+        <li>It sends the mail you write, and it saves your drafts to Gmail.</li>
+        <li>It applies the changes you make, such as archive, label, star, snooze, and trash.</li>
+        <li>It reads your email address to show which account is signed in.</li>
+      </ul>
+
+      <h2>Where Attn stores the data</h2>
+      <ul>
+        <li>
+          Attn stores cached mail, drafts, and settings in a SQLite database in your user data directory
+          on your computer. Attn does not encrypt this database. Use full-disk encryption if other people
+          can reach your computer.
+        </li>
+        <li>
+          Attn stores your Google tokens, your AI provider key, and your TypeSafe key in separate files.
+          The operating system protects them through Electron safeStorage.
+        </li>
+        <li>Attn does not copy this data to a server that belongs to Attn. No such server exists.</li>
+      </ul>
+
+      <h2>Who receives your data</h2>
+      <p>Attn sends data to another party only in these cases:</p>
+      <ul>
+        <li><strong>Google.</strong> Attn connects to the Gmail API from your computer to sync and send mail.</li>
+        <li>
+          <strong>Mail senders, through remote images.</strong> Images in a message load from the sender's
+          server by default, which can tell the sender that you opened the message. You can block remote
+          images in settings and allow individual senders.
+        </li>
+        <li>
+          <strong>Your AI provider, only if you turn on AI.</strong> AI is off by default. If you add a key
+          and enable reply drafts, Attn sends the conversation text to the provider you chose when you
+          request a draft. Inline autocomplete has a separate setting and sends a short excerpt of your
+          unsent text.
+        </li>
+        <li>
+          <strong>TypeSafe, only if you turn on smart splits.</strong> Smart splits are off by default. If
+          you add a TypeSafe key and enable them, Attn sends a short summary of each Inbox conversation to
+          TypeSafe in the background. Remove the key to stop this.
+        </li>
+        <li>
+          <strong>GitHub, for updates.</strong> Signed release builds check the Attn release feed on
+          GitHub for a new version. The request contains no mail data.
+        </li>
+      </ul>
+      <p>
+        Your own provider's terms apply to the data that you send to an AI provider or to TypeSafe. Attn
+        does not use your Google data to train any AI model.
+      </p>
+
+      <h2>Google API Services User Data Policy</h2>
+      <p>
+        Attn's use and transfer to any other app of information received from Google APIs will adhere to
+        the
+        <a href="https://developers.google.com/terms/api-services-user-data-policy"
+          >Google API Services User Data Policy</a
+        >, including the Limited Use requirements.
+      </p>
+      <ul>
+        <li>Attn uses Google data only to provide the mail features that you see in the application.</li>
+        <li>Attn does not sell Google data, and does not use it for advertising.</li>
+        <li>No person who works on Attn can read your Google data, because it never leaves your computer for an Attn system.</li>
+      </ul>
+
+      <h2>How to remove your data</h2>
+      <ul>
+        <li>Remove an account in Attn settings. Attn deletes that account's cached mail and tokens.</li>
+        <li>
+          Revoke Attn's access in your
+          <a href="https://myaccount.google.com/permissions">Google Account permissions</a>.
+        </li>
+        <li>Delete the Attn user data directory to remove everything that Attn stored.</li>
+      </ul>
+
+      <h2>This website</h2>
+      <p>
+        This site has no analytics, no cookies, and no third-party scripts or fonts. GitHub Pages hosts it,
+        and GitHub can log your IP address when you visit.
+      </p>
+
+      <h2>Changes and contact</h2>
+      <p>
+        The history of this policy is public in the
+        <a href="https://github.com/stephenw310/attn/commits/main/site/privacy.html">Attn repository</a>.
+        For a question, <a href="https://github.com/stephenw310/attn/issues">open an issue</a>. For a
+        security problem, use the
+        <a href="https://github.com/stephenw310/attn/blob/main/SECURITY.md">security policy</a>.
+      </p>
+      </div>
+    </main>
+    <footer class="page footer">
+      <span>Attn is open source under the MIT license.</span>
+      <nav aria-label="Footer">
+        <a href="https://github.com/stephenw310/attn">GitHub</a>
+        <a href="privacy.html">Privacy</a>
+      </nav>
+    </footer>
+  </body>
+</html>
