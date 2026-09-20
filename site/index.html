@@ -24,6 +24,7 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <div class="wash" aria-hidden="true"></div>
     <header class="page masthead">
       <a class="wordmark" href="./" aria-current="page">Attn</a>
       <nav aria-label="Site">
@@ -56,6 +57,11 @@
 
         <div class="demo">
           <div class="demo-window">
+            <div class="demo-bar" aria-hidden="true">
+              <span class="demo-lights"><i></i><i></i><i></i></span>
+              <span class="demo-write">Write</span>
+              <span class="demo-account"><i class="demo-live"></i>All changes synced</span>
+            </div>
             <aside class="demo-sidebar" aria-hidden="true">
               <div class="demo-brand">Attn</div>
               <ul>
@@ -65,6 +71,12 @@
                 <li><span>Drafts</span><span>1</span></li>
                 <li><span>Sent</span><span></span></li>
                 <li><span>All Mail</span><span></span></li>
+              </ul>
+              <div class="demo-labels">Labels</div>
+              <ul>
+                <li><span><i class="demo-swatch" data-tone="1"></i>Work</span><span>12</span></li>
+                <li><span><i class="demo-swatch" data-tone="3"></i>Personal</span><span>4</span></li>
+                <li><span><i class="demo-swatch" data-tone="2"></i>Travel</span><span>2</span></li>
               </ul>
             </aside>
             <div class="demo-main">
@@ -140,7 +152,8 @@
         </p>
       </section>
 
-      <section class="page cta" id="install" aria-labelledby="cta-title">
+      <section class="band" id="install" aria-labelledby="cta-title">
+        <div class="page cta">
         <h2 id="cta-title">Build Attn from source.</h2>
         <p>
           Attn is a developer preview. Clone the repository, run <code>npm install</code>, and connect Gmail with
@@ -154,10 +167,9 @@
           You need Node.js 22.12 or later. Google expires the sign-in after seven days while your OAuth client
           is in Testing status.
         </p>
+        </div>
       </section>
     </main>
-
-    <div class="shore" role="img" aria-label="A painted tidal inlet at dawn, the image on the Attn sign-in screen"></div>
 
     <footer class="page footer">
       <span>Attn is open source under the MIT license.</span>

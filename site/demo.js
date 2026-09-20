@@ -6,14 +6,21 @@ const CONVERSATIONS = [
     subject: 'Q3 roadmap review',
     snippet: 'I added the launch milestones.',
     time: '10:12 AM',
-    unread: true
+    unread: true,
+    group: 'Today',
+    labels: [
+      ['Work', 1],
+      ['Projects', 4]
+    ]
   },
   {
     id: 'c2',
     sender: 'Northstar Books',
     subject: 'Your receipt',
     snippet: 'Thanks for your order.',
-    time: '8:55 AM'
+    time: '8:55 AM',
+    group: 'Today',
+    labels: [['Receipts', 2]]
   },
   {
     id: 'c3',
@@ -21,14 +28,19 @@ const CONVERSATIONS = [
     subject: 'Design notes',
     snippet: 'A few thoughts on the overlay.',
     time: 'Yesterday',
-    unread: true
+    unread: true,
+    starred: true,
+    group: 'Yesterday',
+    labels: [['Work', 1]]
   },
   {
     id: 'c4',
     sender: 'Amara Singh',
     subject: 'Lunch next week',
     snippet: 'Tuesday works for me.',
-    time: 'Yesterday'
+    time: 'Yesterday',
+    group: 'Yesterday',
+    labels: [['Personal', 3]]
   },
   {
     id: 'c5',
@@ -36,14 +48,18 @@ const CONVERSATIONS = [
     subject: 'August budget',
     snippet: 'Please review by Friday.',
     time: 'Wed',
-    unread: true
+    unread: true,
+    group: 'Last 7 days',
+    labels: [['Work', 1]]
   },
   {
     id: 'c6',
     sender: 'Travel Desk',
     subject: 'Flight options',
     snippet: 'Three routes are available.',
-    time: 'Mon'
+    time: 'Mon',
+    group: 'Last 7 days',
+    labels: [['Travel', 2]]
   }
 ]
 
@@ -77,13 +93,18 @@ function row(conversation) {
   item.setAttribute('aria-selected', String(conversation.id === selectedId))
   if (conversation.unread) item.dataset.unread = ''
   const text = span('demo-text', '')
-  text.append(span('demo-subject', conversation.subject), span('demo-snippet', conversation.snippet))
-  item.append(
-    span('demo-dot', ''),
-    span('demo-sender', conversation.sender),
-    text,
-    span('demo-time', conversation.time)
-  )
+  text.append(span('demo-subject', conversation.subject))
+  const meta = span('demo-meta', '')
+  for (const [name, tone] of conversation.labels) {
+    const chip = span('demo-chip', name)
+    chip.dataset.tone = String(tone)
+    meta.append(chip)
+  }
+  meta.append(span('demo-snippet', conversation.snippet))
+  text.append(meta)
+  const mark = span('demo-mark', '')
+  mark.append(span('demo-dot', ''), span('demo-star', conversation.starred ? '★' : ''))
+  item.append(mark, span('demo-sender', conversation.sender), text, span('demo-time', conversation.time))
   item.addEventListener('click', () => {
     selectedId = conversation.id
     render()
@@ -92,7 +113,18 @@ function row(conversation) {
 }
 
 function render() {
-  list.replaceChildren(...inbox.map(row))
+  const nodes = []
+  let group = null
+  for (const conversation of inbox) {
+    if (conversation.group !== group) {
+      group = conversation.group
+      const heading = span('demo-group', group)
+      heading.setAttribute('role', 'presentation')
+      nodes.push(heading)
+    }
+    nodes.push(row(conversation))
+  }
+  list.replaceChildren(...nodes)
   list.hidden = inbox.length === 0
   empty.hidden = inbox.length > 0
   if (inbox.length > 0) list.setAttribute('aria-activedescendant', `demo-${selectedId}`)
