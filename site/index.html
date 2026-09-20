@@ -34,127 +34,126 @@
 
     <main>
       <section class="page hero">
-        <div>
+        <div class="hero-text">
           <h1>Your Gmail, kept on your computer.</h1>
           <p class="hero-lede">
-            Attn is an open-source desktop Gmail client for macOS and Windows. It stores your mail in a SQLite
-            file on your computer, so you can read, write, and sort mail without a connection. There is no
-            Attn server.
+            An open-source desktop Gmail client for macOS and Windows. It works offline, and there is no Attn
+            server.
           </p>
         </div>
-        <div class="hero-aside">
-          <p class="hero-cost">
-            Developer preview. You build Attn from source and connect it with your own Google OAuth client.
-            Installers come later.
-          </p>
+        <div class="actions">
+          <a class="button" href="https://github.com/stephenw310/attn">View the source on GitHub</a>
+          <a href="#install">Build it from source</a>
+        </div>
+        <!--
+          Release build: when installers exist, replace the two links above with this block.
+
           <div class="actions">
-            <a class="button" href="https://github.com/stephenw310/attn">View the source on GitHub</a>
-            <a href="#install">See what setup takes</a>
+            <a class="button" href="https://github.com/stephenw310/attn/releases/latest">Download Attn</a>
+            <a href="unverified-app.html">About the Google sign-in warning</a>
           </div>
-          <!--
-            Release build: when installers exist, replace the two links above with this block.
+        -->
 
-            <div class="actions">
-              <a class="button" href="https://github.com/stephenw310/attn/releases/latest">Download Attn</a>
-              <a href="unverified-app.html">About the Google sign-in warning</a>
+        <div class="demo">
+          <div class="demo-window">
+            <aside class="demo-sidebar" aria-hidden="true">
+              <div class="demo-brand">Attn</div>
+              <ul>
+                <li data-current><span>Inbox</span><span data-demo-count>6</span></li>
+                <li><span>Starred</span><span>2</span></li>
+                <li><span>Snoozed</span><span>0</span></li>
+                <li><span>Drafts</span><span>1</span></li>
+                <li><span>Sent</span><span></span></li>
+                <li><span>All Mail</span><span></span></li>
+              </ul>
+            </aside>
+            <div class="demo-main">
+              <div class="demo-title">Inbox</div>
+              <noscript>
+                <img src="images/inbox-light.png" alt="The Attn inbox" style="width: 100%; height: auto" />
+              </noscript>
+              <div
+                class="demo-list"
+                id="demo-list"
+                role="listbox"
+                tabindex="0"
+                aria-label="Sample inbox. Press J and K to move, E to mark done, Z to undo."
+              ></div>
+              <div class="demo-empty" id="demo-empty" hidden>
+                <strong>Inbox zero.</strong>
+                <span>Press <kbd>Z</kbd> to bring the last conversation back.</span>
+              </div>
+              <div class="demo-hints">
+                <button type="button" data-demo-key="j"><kbd>J</kbd> Next</button>
+                <button type="button" data-demo-key="k"><kbd>K</kbd> Previous</button>
+                <button type="button" data-demo-key="e"><kbd>E</kbd> Mark done</button>
+                <button type="button" data-demo-key="z"><kbd>Z</kbd> Undo</button>
+              </div>
             </div>
-          -->
+          </div>
+          <div class="demo-caption">
+            <span>This is a sample, not your mail. Press the keys, or select the buttons.</span>
+            <span class="demo-status" id="demo-status" role="status"></span>
+          </div>
         </div>
       </section>
 
-      <figure class="page shot">
-        <img
-          src="images/inbox-light.png"
-          width="2880"
-          height="1800"
-          alt="The Attn inbox: a mailbox sidebar on the left, a conversation list grouped by day, and a shortcut bar at the bottom"
-        />
-        <figcaption>The inbox, with sample mail.</figcaption>
-      </figure>
-
-      <section class="page section" aria-labelledby="what">
-        <h2 id="what">What Attn is</h2>
-        <div class="section-body prose">
-          <p>
-            Attn is a mail client, not a service. You sign in to Google from the app, and Attn syncs your
-            mail into a database on your disk. It reads from that database first, so the inbox opens at once
-            and stays usable on a plane. Changes you make offline go to Gmail when the connection returns.
-          </p>
-          <p>
-            It covers the daily work of mail: several accounts with separate inboxes, archive, snooze, labels,
-            inbox splits with rules, follow-up reminders, and drafts that stay in step with Gmail. Most
-            actions have a keyboard shortcut, and a command palette holds the rest.
-          </p>
-          <p>
-            AI is optional and off by default. If you add your own provider key, Attn can draft a reply or
-            complete a sentence. If you add a TypeSafe key, it can sort mail into a split that you describe in
-            plain words.
-          </p>
-        </div>
+      <section class="page features" aria-labelledby="features-title">
+        <h2 id="features-title">What Attn does</h2>
+        <dl class="grid">
+          <div>
+            <dt>Mail stays on your computer</dt>
+            <dd>Cached mail and drafts are in a SQLite file in your user data directory. Attn has no server and no telemetry.</dd>
+          </div>
+          <div>
+            <dt>Works without a connection</dt>
+            <dd>Attn applies each change to the local database first, and sends it to Gmail when the connection returns.</dd>
+          </div>
+          <div>
+            <dt>Several Gmail accounts</dt>
+            <dd>Each account has a separate inbox. The accounts you are not looking at continue to sync and send.</dd>
+          </div>
+          <div>
+            <dt>A key for each action</dt>
+            <dd>Archive, snooze, reply, and undo each have a shortcut. The command palette finds the rest.</dd>
+          </div>
+          <div>
+            <dt>Inbox splits</dt>
+            <dd>Sort the inbox into tabs with rules. You can also describe a split in plain words, with your own TypeSafe key.</dd>
+          </div>
+          <div>
+            <dt>Snooze and follow-up</dt>
+            <dd>Send a conversation away until a time you choose, or ask for a reminder if nobody replies.</dd>
+          </div>
+          <div>
+            <dt>Drafts and undo send</dt>
+            <dd>Attn saves drafts locally and mirrors them to Gmail. You can cancel a send during the undo delay.</dd>
+          </div>
+          <div>
+            <dt>AI writing is optional</dt>
+            <dd>Reply drafts and inline autocomplete are off by default. They use your own provider key when you turn them on.</dd>
+          </div>
+        </dl>
+        <p class="after">
+          Keys use the system keychain, and the code is public under the MIT license.
+          <a href="privacy.html">Read the privacy policy</a>
+        </p>
       </section>
 
-      <section class="page section" aria-labelledby="data">
-        <h2 id="data">Where your mail goes</h2>
-        <div class="section-body">
-          <dl class="facts">
-            <div>
-              <dt>Mail stays on your computer</dt>
-              <dd>
-                Cached mail and drafts are in a SQLite file in your user data directory. Attn does not encrypt
-                that file.
-              </dd>
-            </div>
-            <div>
-              <dt>Attn talks to Google directly</dt>
-              <dd>There is no Attn server between you and Gmail, and no telemetry.</dd>
-            </div>
-            <div>
-              <dt>Keys use the system keychain</dt>
-              <dd>
-                The operating system protects your Google tokens and your AI keys through Electron safeStorage.
-              </dd>
-            </div>
-            <div>
-              <dt>You can read the code</dt>
-              <dd>Attn uses the MIT license. The source for every claim on this page is public.</dd>
-            </div>
-          </dl>
-          <p class="after"><a href="privacy.html">Read the privacy policy</a></p>
+      <section class="page cta" id="install" aria-labelledby="cta-title">
+        <h2 id="cta-title">Build Attn from source.</h2>
+        <p>
+          Attn is a developer preview. Clone the repository, run <code>npm install</code>, and connect Gmail with
+          your own Google OAuth client. The README has the steps.
+        </p>
+        <div class="actions">
+          <a class="button" href="https://github.com/stephenw310/attn#get-started">Read the setup guide</a>
+          <a href="https://github.com/stephenw310/attn">View the source on GitHub</a>
         </div>
-      </section>
-
-      <section class="page section" id="install" aria-labelledby="install-title">
-        <h2 id="install-title">What setup takes</h2>
-        <div class="section-body">
-          <ol class="steps">
-            <li>
-              <strong>Get the source</strong>
-              <span>Clone the repository and run npm install. You need Node.js 22.12 or later.</span>
-            </li>
-            <li>
-              <strong>Create a Google OAuth client</strong>
-              <span>
-                Make a Google Cloud project, enable the Gmail API, and create a Desktop app client. Add your
-                Gmail address as a test user.
-              </span>
-            </li>
-            <li>
-              <strong>Give Attn the client</strong>
-              <span>Put the client ID and secret in oauth.config.json. Git ignores this file.</span>
-            </li>
-            <li>
-              <strong>Start Attn</strong>
-              <span>Run npm run dev and sign in with Google in your browser.</span>
-            </li>
-          </ol>
-          <p class="note">
-            Google expires the sign-in after seven days while your client is in Testing status. Expect to sign
-            in again each week.
-          </p>
-          <p class="after">
-            <a href="https://github.com/stephenw310/attn#get-started">Follow the full instructions in the README</a>
-          </p>
-        </div>
+        <p class="cta-note">
+          You need Node.js 22.12 or later. Google expires the sign-in after seven days while your OAuth client
+          is in Testing status.
+        </p>
       </section>
     </main>
 
@@ -169,5 +168,7 @@
         <a href="https://github.com/stephenw310/attn/blob/main/SECURITY.md">Security</a>
       </nav>
     </footer>
+
+    <script src="demo.js" defer></script>
   </body>
 </html>
