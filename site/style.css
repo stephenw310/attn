@@ -581,15 +581,33 @@ body {
 
 /* Closing call to action */
 .closing {
+  display: flex;
+  align-items: center;
+  min-height: clamp(30rem, 50vw, 40rem);
   margin-top: clamp(4rem, 9vw, 7rem);
-  padding-top: clamp(2rem, 5vw, 4rem);
-  min-height: clamp(30rem, 52vw, 42rem);
+  padding: 4rem 0 9rem;
   background:
-    linear-gradient(180deg, var(--ground), rgb(242 245 244 / 0%) 38%),
-    url("images/tidal-inlet.jpg") center bottom / cover no-repeat;
+    linear-gradient(180deg, rgb(16 28 44 / 35%), rgb(16 28 44 / 0%) 60%),
+    url("images/coastal-dusk.jpg") center 60% / cover no-repeat;
+  color: var(--on-ink);
+}
+
+.closing .button {
+  background: var(--on-ink);
+  color: var(--ink);
+}
+
+.closing .button:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.closing :focus-visible {
+  outline-color: var(--on-ink);
 }
 
 .cta {
+  width: 100%;
   margin-top: 0;
   text-align: center;
 }
