@@ -128,22 +128,6 @@ kbd {
   text-decoration: none;
 }
 
-.masthead nav {
-  display: flex;
-  gap: 1.5rem;
-  font-size: 0.9375rem;
-}
-
-.masthead nav a {
-  color: var(--ink-dim);
-  text-decoration: none;
-}
-
-.masthead nav a:hover,
-.masthead nav a[aria-current="page"] {
-  color: var(--ink);
-}
-
 /* Hero */
 .wash {
   position: absolute;
@@ -151,7 +135,13 @@ kbd {
   z-index: -1;
   height: min(52rem, 88vh);
   background:
-    linear-gradient(180deg, rgb(242 245 244 / 45%), rgb(242 245 244 / 15%) 40%, var(--ground) 100%),
+    linear-gradient(
+      180deg,
+      rgb(242 245 244 / 20%),
+      rgb(242 245 244 / 0%) 35%,
+      rgb(242 245 244 / 35%) 75%,
+      var(--ground) 100%
+    ),
     url("images/tidal-inlet.jpg") center 30% / cover no-repeat;
 }
 
@@ -589,71 +579,38 @@ body {
   font-size: 0.9375rem;
 }
 
-.after {
-  margin-top: 2.5rem;
-  color: var(--ink-dim);
-}
-
 /* Closing call to action */
-.band {
+.closing {
   margin-top: clamp(4rem, 9vw, 7rem);
-  padding: clamp(3.5rem, 8vw, 6.5rem) 0;
-  background: var(--ink);
-  color: var(--on-ink);
+  padding-top: clamp(2rem, 5vw, 4rem);
+  min-height: clamp(30rem, 52vw, 42rem);
+  background:
+    linear-gradient(180deg, var(--ground), rgb(242 245 244 / 0%) 38%),
+    url("images/tidal-inlet.jpg") center bottom / cover no-repeat;
 }
 
 .cta {
-  max-width: 44rem;
   margin-top: 0;
   text-align: center;
 }
 
-.cta a {
-  color: var(--on-ink);
-}
-
-.cta .button {
-  background: var(--on-ink);
-  color: var(--ink);
-}
-
-.cta .button:hover {
-  background: var(--raised);
-  color: var(--ink);
-}
-
-.cta-note {
-  color: rgb(242 245 244 / 72%);
-}
-
-.band :focus-visible {
-  outline-color: var(--on-ink);
-}
-
 .cta h2 {
-  font-size: clamp(2.25rem, 5vw, 3.25rem);
+  font-size: clamp(2.5rem, 6vw, 4rem);
 }
 
 .cta p {
-  margin-top: 1.25rem;
+  margin-top: 1rem;
   font-size: 1.125rem;
-}
-
-.cta code {
-  font-size: 0.9375em;
 }
 
 .cta .actions {
   justify-content: center;
-  margin-top: 1.75rem;
-}
-
-.cta-note {
-  font-size: 0.9375rem;
+  margin-top: 1.5rem;
 }
 
 /* Footer */
 .footer {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;

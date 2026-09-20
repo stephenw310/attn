@@ -27,33 +27,18 @@
     <div class="wash" aria-hidden="true"></div>
     <header class="page masthead">
       <a class="wordmark" href="./" aria-current="page">Attn</a>
-      <nav aria-label="Site">
-        <a href="https://github.com/stephenw310/attn">GitHub</a>
-        <a href="privacy.html">Privacy</a>
-      </nav>
     </header>
 
     <main>
       <section class="page hero">
         <div class="hero-text">
           <h1>Your Gmail, kept on your computer.</h1>
-          <p class="hero-lede">
-            An open-source desktop Gmail client for macOS and Windows. It works offline, and there is no Attn
-            server.
-          </p>
+          <p class="hero-lede">An open-source desktop Gmail client for macOS and Windows. No server, and it works offline.</p>
         </div>
         <div class="actions">
-          <a class="button" href="https://github.com/stephenw310/attn">View the source on GitHub</a>
-          <a href="#install">Build it from source</a>
+          <a class="button" href="https://github.com/stephenw310/attn">Get Attn on GitHub</a>
         </div>
-        <!--
-          Release build: when installers exist, replace the two links above with this block.
-
-          <div class="actions">
-            <a class="button" href="https://github.com/stephenw310/attn/releases/latest">Download Attn</a>
-            <a href="unverified-app.html">About the Google sign-in warning</a>
-          </div>
-        -->
+        <!-- Release build: point this button at /releases/latest and label it "Download Attn". -->
 
         <div class="demo">
           <div class="demo-window">
@@ -115,58 +100,30 @@
         <dl class="grid">
           <div>
             <dt>Mail stays on your computer</dt>
-            <dd>Cached mail and drafts are in a SQLite file in your user data directory. Attn has no server and no telemetry.</dd>
+            <dd>Your mail is in a SQLite file on your disk. Attn has no server and no telemetry.</dd>
           </div>
           <div>
             <dt>Works without a connection</dt>
-            <dd>Attn applies each change to the local database first, and sends it to Gmail when the connection returns.</dd>
+            <dd>Read, write, and sort mail offline. Attn sends the changes to Gmail when you are back online.</dd>
           </div>
           <div>
             <dt>Several Gmail accounts</dt>
-            <dd>Each account has a separate inbox. The accounts you are not looking at continue to sync and send.</dd>
+            <dd>Each account has a separate inbox, and all of them continue to sync and send.</dd>
           </div>
           <div>
-            <dt>A key for each action</dt>
-            <dd>Archive, snooze, reply, and undo each have a shortcut. The command palette finds the rest.</dd>
-          </div>
-          <div>
-            <dt>Inbox splits</dt>
-            <dd>Sort the inbox into tabs with rules. You can also describe a split in plain words, with your own TypeSafe key.</dd>
-          </div>
-          <div>
-            <dt>Snooze and follow-up</dt>
-            <dd>Send a conversation away until a time you choose, or ask for a reminder if nobody replies.</dd>
-          </div>
-          <div>
-            <dt>Drafts and undo send</dt>
-            <dd>Attn saves drafts locally and mirrors them to Gmail. You can cancel a send during the undo delay.</dd>
-          </div>
-          <div>
-            <dt>AI writing is optional</dt>
-            <dd>Reply drafts and inline autocomplete are off by default. They use your own provider key when you turn them on.</dd>
+            <dt>Splits, snooze, and reminders</dt>
+            <dd>Sort the inbox into tabs with rules, send mail away until later, and get a reminder if nobody replies.</dd>
           </div>
         </dl>
-        <p class="after">
-          Keys use the system keychain, and the code is public under the MIT license.
-          <a href="privacy.html">Read the privacy policy</a>
-        </p>
       </section>
 
-      <section class="band" id="install" aria-labelledby="cta-title">
+      <section class="closing" id="install" aria-labelledby="cta-title">
         <div class="page cta">
-        <h2 id="cta-title">Build Attn from source.</h2>
-        <p>
-          Attn is a developer preview. Clone the repository, run <code>npm install</code>, and connect Gmail with
-          your own Google OAuth client. The README has the steps.
-        </p>
-        <div class="actions">
-          <a class="button" href="https://github.com/stephenw310/attn#get-started">Read the setup guide</a>
-          <a href="https://github.com/stephenw310/attn">View the source on GitHub</a>
-        </div>
-        <p class="cta-note">
-          You need Node.js 22.12 or later. Google expires the sign-in after seven days while your OAuth client
-          is in Testing status.
-        </p>
+          <h2 id="cta-title">Build it from source.</h2>
+          <p>Attn is a developer preview. The README has the setup steps.</p>
+          <div class="actions">
+            <a class="button" href="https://github.com/stephenw310/attn#get-started">Read the setup guide</a>
+          </div>
         </div>
       </section>
     </main>
@@ -176,8 +133,6 @@
       <nav aria-label="Footer">
         <a href="https://github.com/stephenw310/attn">GitHub</a>
         <a href="privacy.html">Privacy</a>
-        <a href="unverified-app.html">Google sign-in warning</a>
-        <a href="https://github.com/stephenw310/attn/blob/main/SECURITY.md">Security</a>
       </nav>
     </footer>
 
