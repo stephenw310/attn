@@ -82,7 +82,7 @@ export const LIFETIME_THREAD_CAP_ALL_MAIL = 0
  */
 /** The exact optional footer line and its only link target (F6). */
 export const ATTN_SIGNATURE_LINE = 'Sent with Attn'
-export const ATTN_SIGNATURE_URL = 'https://github.com/stephenw310/attn'
+export const ATTN_SIGNATURE_URL = 'https://useattn.com'
 
 export interface AccountSettings {
   /**

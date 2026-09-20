@@ -650,7 +650,7 @@ test.describe('"Sent with Attn" footer', () => {
     await expect(footer(page)).toHaveText('Sent with Attn')
     await expect(footer(page).getByRole('link', { name: 'Attn' })).toHaveAttribute(
       'href',
-      'https://github.com/stephenw310/attn'
+      'https://useattn.com'
     )
     await expect(footer(page)).toBeVisible()
 
