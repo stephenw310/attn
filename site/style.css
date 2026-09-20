@@ -33,7 +33,6 @@
   --tone-4: #b88fbb;
   --tone-4-bg: #f0e1f1;
   --tone-4-ink: #693b6d;
-  --measure: 38rem;
   --gutter: clamp(1.25rem, 5vw, 4rem);
   --serif: Newsreader, Georgia, "Times New Roman", serif;
   color-scheme: light;

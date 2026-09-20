@@ -17,6 +17,3 @@ e2e/.generated/
 # Per-user Google OAuth client (see README.md) — never commit
 oauth.config.json
 dist-resources/
-
-# Local preview server config for the Claude desktop app
-.claude/launch.json
