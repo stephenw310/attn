@@ -27,6 +27,7 @@ import type {
   ThreadListRequest,
   ThreadPage
 } from './mail'
+import type { DefaultMailClient, PendingComposeTarget } from './mailto'
 import type { PendingFocusTarget } from './notifications'
 import type { OutboxChanged, OutboxItem, QueueSendResult, ReopenOutboxResult } from './outbox'
 import type { SearchResponse, ServerSearchResponse } from './searchQuery'
@@ -95,6 +96,8 @@ export const IPC_CHANNELS = {
   appGetInfo: 'app:getInfo',
   appCloseWindow: 'app:closeWindow',
   appWindowShown: 'app:windowShown',
+  appGetDefaultMailClient: 'app:getDefaultMailClient',
+  appSetDefaultMailClient: 'app:setDefaultMailClient',
   updateGetState: 'update:getState',
   updateCheck: 'update:check',
   updateRestart: 'update:restart',
@@ -104,6 +107,8 @@ export const IPC_CHANNELS = {
   syncRetry: 'sync:retry',
   mailTakePendingFocus: 'mail:takePendingFocus',
   mailAcknowledgePendingFocus: 'mail:acknowledgePendingFocus',
+  mailTakePendingCompose: 'mail:takePendingCompose',
+  mailAcknowledgePendingCompose: 'mail:acknowledgePendingCompose',
   mailSearch: 'mail:search',
   mailSearchAll: 'mail:searchAll',
   mailCancelSearchAll: 'mail:cancelSearchAll',
@@ -141,6 +146,7 @@ export const IPC_CHANNELS = {
   mailActionsReverted: 'mail:actionsReverted',
   mailBodyHydrationFailed: 'mail:bodyHydrationFailed',
   mailFocusThreadAvailable: 'mail:focusThreadAvailable',
+  mailComposeAvailable: 'mail:composeAvailable',
   accountsStatusChanged: 'accounts:statusChanged',
   syncState: 'sync:state'
 } as const
@@ -161,6 +167,8 @@ export type MailChangeReason = (typeof MAIL_CHANGE_REASONS)[number]
  */
 export const TEST_CHANNELS = {
   focusThread: 'attn:test:focusThread',
+  openMailto: 'attn:test:openMailto',
+  setDefaultMailClient: 'attn:test:setDefaultMailClient',
   setSyncState: 'attn:test:setSyncState',
   reloadSeed: 'attn:test:reloadSeed',
   deleteThread: 'attn:test:deleteThread',
@@ -302,6 +310,11 @@ export interface InvokeChannels {
   // The About surface (F15): version, schema, and build kind, all main-owned.
   [IPC_CHANNELS.appGetInfo]: { args: []; result: AppInfo }
   [IPC_CHANNELS.appCloseWindow]: { args: []; result: undefined }
+  // The `mailto:` registration (F16): main-owned, and never asserted on its
+  // own. A development or test build answers `supported: false`, and setting
+  // is a no-op there, so no suite can change the developer's mail client.
+  [IPC_CHANNELS.appGetDefaultMailClient]: { args: []; result: DefaultMailClient }
+  [IPC_CHANNELS.appSetDefaultMailClient]: { args: []; result: DefaultMailClient }
   // T39 auto-update: main-owned; a personal, dev, or seeded build answers
   // idle, a check answers the same idle state, and restart resolves false —
   // there is no updater to talk to.
@@ -313,6 +326,10 @@ export interface InvokeChannels {
   [IPC_CHANNELS.syncRetry]: { args: []; result: undefined }
   [IPC_CHANNELS.mailTakePendingFocus]: { args: []; result: PendingFocusTarget | null }
   [IPC_CHANNELS.mailAcknowledgePendingFocus]: { args: [id: number]; result: undefined }
+  // A `mailto:` link the OS handed the app (F16). It names no account: the
+  // tree for whichever account is active opens the composer and acknowledges.
+  [IPC_CHANNELS.mailTakePendingCompose]: { args: []; result: PendingComposeTarget | null }
+  [IPC_CHANNELS.mailAcknowledgePendingCompose]: { args: [id: number]; result: undefined }
   [IPC_CHANNELS.mailSearch]: { args: [query: string]; result: SearchResponse }
   [IPC_CHANNELS.mailSearchAll]: {
     args: [requestId: string, query: string]
@@ -410,6 +427,7 @@ export interface BroadcastChannels {
   [IPC_CHANNELS.mailActionsReverted]: undefined
   [IPC_CHANNELS.mailBodyHydrationFailed]: { accountId: string; threadId: string }
   [IPC_CHANNELS.mailFocusThreadAvailable]: undefined
+  [IPC_CHANNELS.mailComposeAvailable]: undefined
   // B28: quit is imminent — commit any open composer while the document is
   // still alive, then answer on `draft:checkpointDone` with this id.
   [IPC_CHANNELS.draftCheckpointRequest]: { requestId: number }
@@ -431,6 +449,7 @@ const BROADCAST_CHANNELS = {
   [IPC_CHANNELS.mailActionsReverted]: true,
   [IPC_CHANNELS.mailBodyHydrationFailed]: true,
   [IPC_CHANNELS.mailFocusThreadAvailable]: true,
+  [IPC_CHANNELS.mailComposeAvailable]: true,
   [IPC_CHANNELS.draftCheckpointRequest]: true,
   [IPC_CHANNELS.accountsStatusChanged]: true,
   [IPC_CHANNELS.updateState]: true,

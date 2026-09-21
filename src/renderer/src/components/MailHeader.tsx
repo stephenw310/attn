@@ -361,7 +361,9 @@ export function MailHeader(props: MailHeaderProps): React.JSX.Element {
         <Button
           data-testid="write-button"
           className="app-no-drag app-write"
-          onClick={onWrite}
+          // Called through a wrapper: the handler must not pass its MouseEvent
+          // to a compose function whose first argument is a `mailto:` prefill.
+          onClick={() => onWrite()}
           disabled={writeDisabled}
           data-tooltip="Write (C)"
         >

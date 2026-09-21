@@ -161,6 +161,8 @@ export const COMMAND_SPECS = {
   'settings.autoAdvance': { title: 'Set auto-advance…', context: 'global' },
   'settings.unreadBadge': { title: 'Toggle unread app badge', context: 'global' },
   'settings.launchAtLogin': { title: 'Toggle launch at login', context: 'global' },
+  // F16: claims the `mailto:` registration, which Attn never takes on its own.
+  'settings.defaultMailClient': { title: 'Make Attn the default email app', context: 'global' },
   'app.closeWindow': {
     title: 'Close window and keep Attn running',
     context: 'global',

@@ -258,3 +258,49 @@ test('keeps one identity for every route while the draft and the list move', asy
     await harness.unmount()
   }
 })
+
+test('a mailto prefill rides the new draft and reports whether it opened', async () => {
+  const harness = await mount()
+  try {
+    let opened: boolean | undefined
+    await act(async () => {
+      opened = await harness.api().openComposer({
+        to: [{ name: 'Alex', email: 'alex@example.com' }],
+        cc: [{ name: 'Sam', email: 'sam@example.com' }],
+        bcc: [],
+        subject: 'Q3 plan',
+        bodyText: 'First line\n\nSecond line'
+      })
+    })
+    expect(opened).toBe(true)
+    expect(harness.draftBridge.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: null,
+        kind: 'new',
+        to: [{ name: 'Alex', email: 'alex@example.com' }],
+        cc: [{ name: 'Sam', email: 'sam@example.com' }],
+        subject: 'Q3 plan',
+        bodyText: 'First line\n\nSecond line',
+        bodyHtml: '<div dir="ltr"><div>First line</div><div><br></div><div>Second line</div></div>'
+      })
+    )
+    expect(harness.state.composerDraft?.id).toBe('new-1')
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('a refused compose answers false so the deep link stays pending', async () => {
+  const harness = await mount()
+  try {
+    harness.accountSwitchPendingRef.current = true
+    let opened: boolean | undefined
+    await act(async () => {
+      opened = await harness.api().openComposer()
+    })
+    expect(opened).toBe(false)
+    expect(harness.draftBridge.save).not.toHaveBeenCalled()
+  } finally {
+    await harness.unmount()
+  }
+})

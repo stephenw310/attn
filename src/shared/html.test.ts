@@ -1,9 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { escapeHtmlText, safeUrl } from './html'
+import { escapeHtmlText, plainTextToDraftHtml, safeUrl } from './html'
 
 describe('escapeHtmlText', () => {
   it('escapes the three text-node entities and nothing else', () => {
     expect(escapeHtmlText('a & b < c > d "e" \'f\'')).toBe('a &amp; b &lt; c &gt; d "e" \'f\'')
+  })
+})
+
+describe('plainTextToDraftHtml', () => {
+  it('writes the Gmail rows the composer serializes, blank lines included', () => {
+    expect(plainTextToDraftHtml('First\n\nSecond')).toBe(
+      '<div dir="ltr"><div>First</div><div><br></div><div>Second</div></div>'
+    )
+  })
+
+  it('keeps an empty body empty so signature insertion still applies', () => {
+    expect(plainTextToDraftHtml('')).toBe('')
+  })
+
+  it('renders markup in the text as characters, never as elements', () => {
+    expect(plainTextToDraftHtml('<img src=x onerror=alert(1)>')).toBe(
+      '<div dir="ltr"><div>&lt;img src=x onerror=alert(1)&gt;</div></div>'
+    )
+  })
+
+  it('treats a whitespace-only line as a blank row', () => {
+    expect(plainTextToDraftHtml('a\n \nb')).toContain('<div><br></div>')
   })
 })
 

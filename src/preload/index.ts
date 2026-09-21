@@ -38,6 +38,7 @@ import type {
   ThreadPage,
   ThreadPageCursor
 } from '../shared/mail'
+import type { DefaultMailClient, PendingComposeTarget } from '../shared/mailto'
 import type { PendingFocusTarget } from '../shared/notifications'
 import type {
   OutboxChanged,
@@ -296,7 +297,36 @@ const api = {
      * died in a torn-down subscription cannot lose the notification click.
      */
     acknowledgeFocusThread: (id: number): Promise<void> =>
-      invoke(IPC_CHANNELS.mailAcknowledgePendingFocus, id)
+      invoke(IPC_CHANNELS.mailAcknowledgePendingFocus, id),
+    /**
+     * A `mailto:` link the OS handed the app (F16). Same delivery contract as
+     * `onFocusThread`: subscribe, then pull once, because a renderer created
+     * by the link itself misses the availability signal while it is mounting.
+     */
+    onComposeRequest: (cb: (target: PendingComposeTarget) => void): (() => void) => {
+      let active = true
+      const takePendingCompose = async (): Promise<void> => {
+        let target: PendingComposeTarget | null = null
+        try {
+          target = await invoke(IPC_CHANNELS.mailTakePendingCompose)
+        } catch {
+          // App shutdown can race this best-effort pull after main removed
+          // its IPC handlers.
+          return
+        }
+        if (active && target) cb(target)
+      }
+      const listener = (): void => void takePendingCompose()
+      ipcRenderer.on(IPC_CHANNELS.mailComposeAvailable, listener)
+      void takePendingCompose()
+      return () => {
+        active = false
+        ipcRenderer.removeListener(IPC_CHANNELS.mailComposeAvailable, listener)
+      }
+    },
+    /** Clear a delivered link once its composer is open, so no later pull repeats it. */
+    acknowledgeComposeRequest: (id: number): Promise<void> =>
+      invoke(IPC_CHANNELS.mailAcknowledgePendingCompose, id)
   },
   splits: {
     getState: (): Promise<SplitState> => invoke(IPC_CHANNELS.splitsGetState),
@@ -380,6 +410,9 @@ const api = {
   app: {
     getInfo: (): Promise<AppInfo> => invoke(IPC_CHANNELS.appGetInfo),
     closeWindow: (): Promise<undefined> => invoke(IPC_CHANNELS.appCloseWindow),
+    getDefaultMailClient: (): Promise<DefaultMailClient> => invoke(IPC_CHANNELS.appGetDefaultMailClient),
+    /** Claim the `mailto:` registration. Only a user action calls this (F16). */
+    setDefaultMailClient: (): Promise<DefaultMailClient> => invoke(IPC_CHANNELS.appSetDefaultMailClient),
     onWindowShown: (cb: () => void): (() => void) => {
       const listener = (): void => cb()
       ipcRenderer.on(IPC_CHANNELS.appWindowShown, listener)

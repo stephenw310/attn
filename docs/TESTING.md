@@ -122,6 +122,7 @@ All `attn:test:*` controls live in `src/main/testIpc.ts`. `TestSeams` disables t
 | `runTriagePass` | Run the classifier to quiescence before a split assertion |
 | `installSendProvider`, `setUndoSendDelay` | Control sends without Gmail or a wall-clock delay |
 | `setSyncState`, `focusThread` | Set sync conditions or route notification focus |
+| `openMailto`, `setDefaultMailClient` | Deliver a `mailto:` link and fake the OS registration state |
 | `crashUtility`, `utilityState` | Test utility-process restart and recovery |
 | `delay*`, `failNextDraftSave`, `failOutbox` | Exercise delayed or failed persistence paths |
 | `remoteDraft`, `setSearchWindow`, `setUpdateState` | Set remote-draft, search, and updater conditions |

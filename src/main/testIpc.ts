@@ -3,6 +3,7 @@ import type { UpdateCheck, UpdateCheckOutcome, UpdatePhase, UpdateState } from '
 import { errorMessage } from '../shared/error'
 import { nonEmptyString } from '../shared/guards'
 import { TEST_CHANNELS } from '../shared/ipc'
+import type { DefaultMailClient } from '../shared/mailto'
 import { type FakeAiScript, FakeAiTransport } from './ai/fakeTransport'
 import type { ServiceSupervisor } from './service/supervisor'
 
@@ -11,6 +12,15 @@ export interface TestSeamDeps {
   focusInboxThread: (threadId: string | null, accountId?: string) => void
   /** T39: makes update:getState answer a fixed state (null clears the override). */
   setUpdateStateOverride: (state: UpdateState | null) => void
+  /** F16: feeds a `mailto:` URL through the production handler. */
+  openMailto: (url: string) => void
+  /**
+   * F16: stands in for the OS `mailto:` registration. The suite must never
+   * change a developer's default mail app, so the real registration reports
+   * itself unsupported under the seam and this override supplies the states
+   * the Settings row renders.
+   */
+  setDefaultMailClientOverride: (state: DefaultMailClient | null) => void
 }
 
 const UPDATE_PHASES: readonly UpdatePhase[] = ['idle', 'checking', 'downloading', 'ready']
@@ -112,6 +122,21 @@ export class TestSeams {
       const account = nonEmptyString(accountId) ? accountId : undefined
       if (nonEmptyString(threadId)) this.deps.focusInboxThread(threadId, account)
       else if (threadId === null && account) this.deps.focusInboxThread(null, account)
+    })
+    // F16: models the OS handing Attn a link, through the same handler
+    // `open-url`, `second-instance`, and a cold start all call.
+    ipcMain.on(TEST_CHANNELS.openMailto, (_event, url: unknown, done?: Done) => {
+      if (nonEmptyString(url)) this.deps.openMailto(url)
+      done?.()
+    })
+    ipcMain.on(TEST_CHANNELS.setDefaultMailClient, (_event, state: unknown, done?: Done) => {
+      const candidate = (state ?? null) as { supported?: unknown; isDefault?: unknown } | null
+      this.deps.setDefaultMailClientOverride(
+        candidate && typeof candidate.supported === 'boolean' && typeof candidate.isDefault === 'boolean'
+          ? { supported: candidate.supported, isDefault: candidate.isDefault }
+          : null
+      )
+      done?.()
     })
     ipcMain.on(TEST_CHANNELS.setSearchWindow, (_event, limit: unknown, done?: Done) => {
       this.forwardDone(TEST_CHANNELS.setSearchWindow, [limit], done)
@@ -322,6 +347,7 @@ export class TestSeams {
     this.releaseHeld = null
     this.observedInvokes.clear()
     this.failNextInvoke = null
+    this.deps.setDefaultMailClientOverride(null)
   }
 
   private forward(channel: string, args: unknown[]): Promise<unknown> {

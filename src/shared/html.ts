@@ -10,6 +10,26 @@ export function escapeHtmlText(value: string): string {
 }
 
 /**
+ * Turn plain text into the exact body markup the composer itself serializes:
+ * a `dir="ltr"` envelope of Gmail rows, with `<div><br></div>` for a blank
+ * line. Matching that shape is what makes a prefilled body round-trip — the
+ * editor's importer recognizes those rows (`preserveBlankLineBlocks`), so the
+ * text the user sees and the text that is sent are the text that arrived.
+ *
+ * The input is untrusted (a `mailto:` body comes from a web page), so every
+ * line goes through `escapeHtmlText` and lands in a text node. Markup in the
+ * body is shown as the characters it is, never parsed.
+ */
+export function plainTextToDraftHtml(text: string): string {
+  if (!text) return ''
+  const rows = text
+    .split('\n')
+    .map((line) => `<div>${line.trim() ? escapeHtmlText(line) : '<br>'}</div>`)
+    .join('')
+  return `<div dir="ltr">${rows}</div>`
+}
+
+/**
  * The one URL-scheme gate (review R8). Five callers used to spell this out
  * separately — two as a `^https?:|mailto:` prefix test, three through `URL` —
  * and they disagreed: a prefix test reads the raw text, while Chromium's

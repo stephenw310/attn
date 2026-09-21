@@ -104,6 +104,23 @@ export function emitFocusThread(app: ElectronApplication, threadId: string): Pro
   return fireSeam(app, TEST_CHANNELS.focusThread, threadId)
 }
 
+/** Model the OS handing Attn a `mailto:` link (F16). */
+export function openMailto(app: ElectronApplication, url: string): Promise<void> {
+  return emitSeam(app, TEST_CHANNELS.openMailto, url)
+}
+
+/**
+ * Stand in for the OS `mailto:` registration. The suite must never change a
+ * developer's default mail app, so the real registration reports itself
+ * unsupported under the seam; `null` restores that.
+ */
+export function setDefaultMailClient(
+  app: ElectronApplication,
+  state: { supported: boolean; isDefault: boolean } | null
+): Promise<void> {
+  return emitSeam(app, TEST_CHANNELS.setDefaultMailClient, state)
+}
+
 /** Production per-message mailbox membership, read straight from the store. */
 export function mailboxThreadIds(app: ElectronApplication, mailbox: MessageMailbox): Promise<string[]> {
   return app.evaluate(
