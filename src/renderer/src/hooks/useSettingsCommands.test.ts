@@ -14,13 +14,18 @@ afterEach(() => {
   else Reflect.deleteProperty(window, 'attn')
 })
 
-async function mount(settings: AppSettings | null) {
+async function mount(settings: AppSettings | null, mailClient = { supported: true, isDefault: true }) {
   const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+  const setDefaultMailClient = vi.fn(async () => mailClient)
   Object.defineProperty(window, 'attn', {
     configurable: true,
-    value: { ai: { setSetting: vi.fn(async () => {}) } } as unknown as Window['attn']
+    value: {
+      ai: { setSetting: vi.fn(async () => {}) },
+      app: { setDefaultMailClient }
+    } as unknown as Window['attn']
   })
+  const toasts: string[] = []
   const opened: Array<string | null> = []
   const splitRulesOpens: string[] = []
   const appWrites: Array<[string, unknown]> = []
@@ -37,7 +42,9 @@ async function mount(settings: AppSettings | null) {
       updateAppSetting: (key, value) => appWrites.push([key, value]),
       updateAccountSetting: (key, value) => accountWrites.push([key, value]),
       requestAiDraft: aiDraft,
-      showToast: async () => {}
+      showToast: async (message) => {
+        toasts.push(message)
+      }
     })
     return null
   }
@@ -48,6 +55,8 @@ async function mount(settings: AppSettings | null) {
     appWrites,
     accountWrites,
     aiDraft,
+    toasts,
+    setDefaultMailClient,
     setSettings: async (next: AppSettings | null) => {
       current = next
       await act(async () => root.render(createElement(Harness)))
@@ -107,6 +116,27 @@ test('a toggle reads the value it is flipping when it runs, not when it register
     await harness.setSettings(null)
     await harness.run('settings.unreadBadge')
     expect(harness.appWrites.at(-1)).toEqual(['unreadBadgeEnabled', false])
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('the default-mail-app command claims the registration and reports the answer', async () => {
+  const harness = await mount({} as AppSettings)
+  try {
+    await harness.run('settings.defaultMailClient')
+    expect(harness.setDefaultMailClient).toHaveBeenCalledTimes(1)
+    expect(harness.toasts.at(-1)).toBe('Attn is the default email app')
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('the default-mail-app command says so when the build cannot register', async () => {
+  const harness = await mount({} as AppSettings, { supported: false, isDefault: false })
+  try {
+    await harness.run('settings.defaultMailClient')
+    expect(harness.toasts.at(-1)).toContain('installed Attn')
   } finally {
     await harness.unmount()
   }

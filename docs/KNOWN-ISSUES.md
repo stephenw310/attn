@@ -18,3 +18,18 @@ Workaround: select the text and run Clear formatting. A selection splits the wra
 Affected symbol: `$clearSelectionFormatting` in `src/renderer/src/composer/bodyEditing.ts`. The wrapper lift runs only for a non-collapsed selection. A collapsed caret would need a caret position between two inline elements, which Lexical does not represent for a plain caret.
 
 Verified: 2026-09-16 on PR #131.
+
+### BUG-5: A second `mailto:` link is dropped while the first composer opens
+
+A `mailto:` link that arrives while another new-message open is in flight does not open a composer. The window lasts for one draft save, usually under 100 ms.
+
+Steps to reproduce:
+
+1. Select two `mailto:` links in quick succession, for example from a script.
+2. The first link opens its composer. The second link shows no composer and no toast.
+
+Workaround: select the second link again after the first draft is closed.
+
+Affected symbol: `useMailtoTarget` in `src/renderer/src/hooks/useMailtoTarget.ts`. `openComposer` refuses the open while `composerOpeningRef` is set. The request stays pending in main, but no tree pulls it again before `PENDING_COMPOSE_TTL_MS` expires.
+
+Verified: 2026-09-21 by code inspection. No test reproduces it.

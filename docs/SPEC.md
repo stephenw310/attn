@@ -669,7 +669,8 @@ Settings and the palette expose:
   Dock / Windows taskbar. Per-account split notification controls live in the Inbox header's split-rule
   manager.
 - Snippet manager and theme. The split-rule manager opens from its columns icon beside the Inbox splits.
-- Background behavior: launch at login and the macOS menu-bar icon while the window is open (F16).
+- Background behavior: launch at login, the macOS menu-bar icon while the window is open, and the default
+  email app for `mailto:` links (F16).
 - AI writing: enable, provider and key, voice profile, and separate autocomplete opt-in (F17).
 - Smart splits: Split rules holds their consent, their TypeSafe key, and their judgment model (F11, F17).
   The AI writing page contains no smart-splits controls or link.
@@ -690,6 +691,17 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - The command palette offers **Close window and keep Attn running** on both platforms.
 - **Launch at login** (default on) starts the app in the background — no window flash; the window appears on demand.
 - While backgrounded: polling at the 60s cadence, notifications fire, badges update.
+- **`mailto:` links:** a packaged Attn declares itself a `mailto:` handler. When the operating system hands
+  Attn a link — at a cold start, or while Attn is already running — Attn shows its main window and opens the
+  full-window composer with the link's `to`, `cc`, `bcc`, `subject`, and `body`. Attn honours only those
+  header fields; `attach` and every other field are ignored, so a link can never name a file. Recipients the
+  link repeats are merged, invalid addresses are dropped, and the subject and body are truncated to their
+  stored limits. A prefilled body counts as authored content, so the Gmail signature and the Attn footer are
+  not inserted (F6). A link that arrives while a composer is open never replaces that draft: Attn shows a
+  toast instead. A link that no composer accepts is dropped after one minute.
+- **Default email app:** Attn never claims the `mailto:` registration on its own. Background settings holds
+  **Default email app** with a **Make default** button, and the palette offers **Make Attn the default email
+  app**. A build that is not installed reports the choice unavailable and changes nothing.
 
 **Acceptance criteria**
 - Closing the window never stops snooze timers, polling, or notifications.
@@ -699,6 +711,9 @@ The app is present whenever the machine is awake, so snooze timers, polling, and
 - Disabling the macOS menu-bar setting never removes the reopen control while the window is closed.
 - Quitting (tray menu / `Cmd+Q`) stops everything — no orphaned background processes.
 - Login launch is windowless and adds < 1s to login.
+- A `mailto:` link opens one composer with its fields, whether Attn was running or started for the link.
+- A link body containing markup appears as literal text; no element from a link ever renders.
+- Attn's default-mail-app registration changes only after the user runs the setting or the palette command.
 
 ### F17 — AI reply drafting and inline autocomplete (opt-in, bring-your-own key)
 

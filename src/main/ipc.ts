@@ -10,6 +10,7 @@ import type { AiSettings } from '../shared/ai'
 import type { AuthSignInResult, AuthStatus } from '../shared/auth'
 import type { AppInfo, UpdateState } from '../shared/distribution'
 import { INVOKE_CHANNEL_NAMES, type InvokeChannel, type InvokeChannels, IPC_CHANNELS } from '../shared/ipc'
+import type { DefaultMailClient, PendingComposeTarget } from '../shared/mailto'
 import type { PendingFocusTarget } from '../shared/notifications'
 import { type AppSettingUpdate, validateAppSettingUpdate } from '../shared/settings'
 import type { SplitTriageStatus } from '../shared/splits'
@@ -31,6 +32,14 @@ export interface IpcContext {
   reorderAccounts: (accountIds: string[]) => Promise<AuthStatus>
   takePendingFocus: () => PendingFocusTarget | null
   acknowledgePendingFocus: (id: number) => void
+  /** The `mailto:` link waiting for a composer, and its acknowledgement (F16). */
+  takePendingCompose: () => PendingComposeTarget | null
+  acknowledgePendingCompose: (id: number) => void
+  /** The OS `mailto:` registration: read, and claim on a user action (F16). */
+  defaultMailClient: {
+    get: () => DefaultMailClient
+    set: () => DefaultMailClient
+  }
   /** A renderer finished its pre-quit composer checkpoint (B28). */
   acknowledgeComposerCheckpoint: (requestId: number) => void
   /**
@@ -161,6 +170,14 @@ export function registerIpc(context: IpcContext): () => void {
     context.acknowledgePendingFocus(id)
     return undefined
   })
+  handle(IPC_CHANNELS.mailTakePendingCompose, () => context.takePendingCompose())
+  handle(IPC_CHANNELS.mailAcknowledgePendingCompose, (_event, id) => {
+    if (typeof id !== 'number' || !Number.isFinite(id)) throw new Error('invalid compose id')
+    context.acknowledgePendingCompose(id)
+    return undefined
+  })
+  handle(IPC_CHANNELS.appGetDefaultMailClient, () => context.defaultMailClient.get())
+  handle(IPC_CHANNELS.appSetDefaultMailClient, () => context.defaultMailClient.set())
   const isFrameNonce = (value: unknown): value is string =>
     typeof value === 'string' && /^[a-z0-9-]{8,64}$/i.test(value)
   const isMessageId = (value: unknown): value is string =>

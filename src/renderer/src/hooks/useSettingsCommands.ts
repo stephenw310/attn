@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react'
 import { describeUpdateStatus } from '../../../shared/distribution'
+import { describeDefaultMailClient } from '../../../shared/mailto'
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import type { AccountSettingKey, AccountSettings, AppSettingKey, AppSettings } from '../../../shared/settings'
 import { createCommand, registerCommands } from '../commands'
@@ -67,6 +68,12 @@ export function useSettingsCommands(options: Options): void {
         createCommand('settings.launchAtLogin', () =>
           updateAppSetting('launchAtLogin', !(settingsRef.current?.launchAtLogin ?? true))
         ),
+        createCommand('settings.defaultMailClient', () => {
+          void window.attn?.app
+            .setDefaultMailClient()
+            .then((state) => showToast(describeDefaultMailClient(state)))
+            .catch(() => showToast('Could not make Attn the default email app'))
+        }),
         ...(isMacPlatform()
           ? [
               createCommand('settings.menuBarIcon', () =>

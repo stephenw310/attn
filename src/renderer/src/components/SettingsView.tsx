@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AccountSyncStatus, AuthStatus } from '../../../shared/auth'
+import { type DefaultMailClient, describeDefaultMailClient } from '../../../shared/mailto'
 import { oneHourFrom, tomorrowStart } from '../../../shared/notifications'
 import { ALLOWED_UNDO_SEND_SECONDS, DEFAULT_UNDO_SEND_SECONDS } from '../../../shared/outboxTuning'
 import {
@@ -41,6 +42,7 @@ export type SettingsControl =
   | 'unreadBadge'
   | 'launchAtLogin'
   | 'menuBarIcon'
+  | 'defaultMailClient'
 
 const SETTINGS_PAGES = [
   { id: 'appearance', title: 'Appearance', scope: 'app' },
@@ -68,7 +70,8 @@ const CONTROL_PAGE: Record<SettingsControl, SettingsPage> = {
   remoteImages: 'security',
   unreadBadge: 'notifications',
   launchAtLogin: 'background',
-  menuBarIcon: 'background'
+  menuBarIcon: 'background',
+  defaultMailClient: 'background'
 }
 
 type SyncLimitMode = 'default' | 'custom' | 'all'
@@ -191,6 +194,36 @@ export function SettingsView({
     },
     [onToast]
   )
+
+  // The OS `mailto:` registration (F16). Read on open; Attn never claims it
+  // without this button, and a development build reports it unsupported.
+  const [mailClient, setMailClient] = useState<DefaultMailClient | null>(null)
+  const [claimingMailClient, setClaimingMailClient] = useState(false)
+  useEffect(() => {
+    if (!window.attn) return
+    let stale = false
+    window.attn.app
+      .getDefaultMailClient()
+      .then((state) => {
+        if (!stale) setMailClient(state)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [])
+  const claimMailClient = useCallback(() => {
+    if (!window.attn) return
+    setClaimingMailClient(true)
+    window.attn.app
+      .setDefaultMailClient()
+      .then((state) => {
+        setMailClient(state)
+        if (!state.isDefault) onToast(describeDefaultMailClient(state))
+      })
+      .catch(() => onToast('Could not make Attn the default email app'))
+      .finally(() => setClaimingMailClient(false))
+  }, [onToast])
 
   // Historical sync limit (T32A). The stored override decides the resting
   // mode; a draft carries an in-progress choice (custom typing, the All-mail
@@ -769,6 +802,32 @@ export function SettingsView({
                     />
                   </label>
                 )}
+                <div className={ROW} data-testid="settings-default-mail-client">
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-sm text-ink">Default email app</span>
+                    <span data-testid="settings-default-mail-client-note" className={NOTE}>
+                      {mailClient && !mailClient.supported
+                        ? 'Open mailto: links in Attn. Available in the installed app.'
+                        : 'Open mailto: links from other apps in Attn.'}
+                    </span>
+                  </span>
+                  {mailClient?.supported && mailClient.isDefault ? (
+                    <span data-testid="settings-default-mail-client-state" className="text-xs text-ink-dim">
+                      Attn is the default email app
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid="settings-default-mail-client-set"
+                      data-settings-control="defaultMailClient"
+                      disabled={!mailClient?.supported || claimingMailClient}
+                      onClick={claimMailClient}
+                      className={ACTION_BUTTON}
+                    >
+                      Make default
+                    </button>
+                  )}
+                </div>
               </section>
 
               <section

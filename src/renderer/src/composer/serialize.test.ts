@@ -1,15 +1,34 @@
 // @vitest-environment jsdom
 
 import { createHeadlessEditor } from '@lexical/headless'
+import { $generateNodesFromDOM } from '@lexical/html'
 import { $createListItemNode, $createListNode } from '@lexical/list'
 import { $createQuoteNode } from '@lexical/rich-text'
 import { $createParagraphNode, $createTextNode, $getRoot, type SerializedEditorState } from 'lexical'
 import { describe, expect, it } from 'vitest'
+import { plainTextToDraftHtml } from '../../../shared/html'
 import { editorConfig } from './editorConfig'
 import { GmailSignatureNode } from './nodes/GmailSignatureNode'
 import { $createImageNode, ImageNode } from './nodes/ImageNode'
 import { prepareHtmlForEditor } from './preserve'
+import { preserveBlankLineBlocks, rootLevelNodes } from './rootNodes'
 import { editorStateToPlainText, serializeEditorState } from './serialize'
+
+/** Everything the composer does between a stored body and a mounted editor. */
+function loadDraftBody(bodyHtml: string): { bodyHtml: string; bodyText: string } {
+  const editor = createHeadlessEditor({ nodes: editorConfig.nodes })
+  const document = new DOMParser().parseFromString(prepareHtmlForEditor(bodyHtml).html, 'text/html')
+  preserveBlankLineBlocks(document)
+  editor.update(
+    () => {
+      const root = $getRoot()
+      root.clear()
+      root.append(...rootLevelNodes($generateNodesFromDOM(editor, document)))
+    },
+    { discrete: true }
+  )
+  return serializeEditorState(editor.getEditorState(), editor)
+}
 
 describe('plain-text alternative', () => {
   it('exports editor paragraphs as Gmail div rows', () => {
@@ -236,5 +255,32 @@ describe('plain-text alternative', () => {
         }
       } as unknown as SerializedEditorState)
     ).toBe('\nBest,\nAlex Morgan\nhttps://alexmorgan.example')
+  })
+})
+
+describe('mailto body prefill', () => {
+  it('round-trips a multi-line plain body through the editor unchanged', () => {
+    const text = 'First line\n\nSecond line\nThird line'
+    const loaded = loadDraftBody(plainTextToDraftHtml(text))
+    expect(loaded.bodyText).toBe(text)
+    // The editor adds its own `white-space` span around text, so the markup is
+    // compared by structure: one row per line, `<br>` for the blank one.
+    const root = new DOMParser().parseFromString(loaded.bodyHtml, 'text/html').body.firstElementChild
+    expect(root?.getAttribute('dir')).toBe('ltr')
+    expect([...(root?.children ?? [])].map((row) => row.textContent)).toEqual([
+      'First line',
+      '',
+      'Second line',
+      'Third line'
+    ])
+    // Saving the loaded body and opening it again changes nothing further.
+    expect(loadDraftBody(loaded.bodyHtml)).toEqual(loaded)
+  })
+
+  it('keeps markup in a link body as text on both sides of the round trip', () => {
+    const loaded = loadDraftBody(plainTextToDraftHtml('<img src=x onerror=alert(1)>'))
+    expect(loaded.bodyText).toBe('<img src=x onerror=alert(1)>')
+    expect(loaded.bodyHtml).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(new DOMParser().parseFromString(loaded.bodyHtml, 'text/html').querySelector('img')).toBeNull()
   })
 })

@@ -11,6 +11,7 @@ import {
 } from '../shared/distribution'
 import { errorMessage } from '../shared/error'
 import { type BroadcastChannel, type BroadcastChannels, IPC_CHANNELS } from '../shared/ipc'
+import { type DefaultMailClient, parseMailtoUrl } from '../shared/mailto'
 import type { AppSettingUpdate } from '../shared/settings'
 import type { PaletteId, ThemePreference } from '../shared/theme'
 import { AccountRoster } from './accountRoster'
@@ -31,6 +32,12 @@ import { applyLoginItemSetting } from './backgroundSettings'
 import { CURRENT_SCHEMA_VERSION } from './db/schema'
 import { isOpenableExternalUrl } from './externalLinks'
 import { registerIpc, registerWindowEvents } from './ipc'
+import {
+  acknowledgePendingCompose,
+  mailtoUrlFromArgv,
+  type PendingCompose,
+  takePendingCompose
+} from './mailtoLink'
 import { acknowledgePendingFocus, MailNotifier, type PendingFocus, takePendingFocus } from './notify'
 import {
   DEFAULT_REMOTE_IMAGE_POLICY,
@@ -66,6 +73,9 @@ if (testUserData) {
 let service: ServiceSupervisor | null = null
 let stopIpc: (() => void) | null = null
 let pendingFocus: PendingFocus | null = null
+// F16: a `mailto:` link waiting for a composer. Unlike a focus target it is
+// not bound to an account — whichever account is on screen writes the mail.
+let pendingCompose: PendingCompose | null = null
 let teardownPromise: Promise<void> | null = null
 let mailNotifier: MailNotifier | null = null
 let themePreference: ThemePreference = 'system'
@@ -84,6 +94,9 @@ let openedSchemaVersion: number | null = null
 // Test-only: lets the seeded harness stage a stored update state for the
 // renderer's mount-time read; always null outside ATTN_TEST_USER_DATA.
 let updateStateOverride: UpdateState | null = null
+// Test-only: stands in for the OS `mailto:` registration, which the suite must
+// never touch. Always null outside ATTN_TEST_USER_DATA.
+let defaultMailClientOverride: DefaultMailClient | null = null
 // B28: in-flight pre-quit composer checkpoints, keyed by request id.
 const pendingComposerCheckpoints = new Map<number, () => void>()
 let composerCheckpointId = 0
@@ -97,6 +110,10 @@ const testSeams = new TestSeams(Boolean(testUserData), {
   },
   setUpdateStateOverride: (state) => {
     updateStateOverride = state
+  },
+  openMailto: (url) => handleMailtoUrl(url),
+  setDefaultMailClientOverride: (state) => {
+    defaultMailClientOverride = state
   }
 })
 
@@ -129,6 +146,65 @@ function takePendingFocusTarget(): ReturnType<typeof takePendingFocus> {
 
 function acknowledgeFocusTarget(id: number): void {
   pendingFocus = acknowledgePendingFocus(pendingFocus, id)
+}
+
+/**
+ * The one entry point for a `mailto:` link, whatever route the OS used: the
+ * macOS `open-url` event, a second instance's command line, or this process's
+ * own launch arguments (F16). The window comes up either way — a link the
+ * parser refuses still raises Attn rather than looking like a dead click.
+ *
+ * Nothing is sent when no window exists yet: the renderer pulls the pending
+ * request when it mounts, which is exactly the cold-start case.
+ */
+function handleMailtoUrl(url: string): void {
+  const prefill = parseMailtoUrl(url)
+  if (!prefill) {
+    // The URL itself is untrusted content; only its length is logged.
+    console.warn(`[mailto] ignored an unusable link (${url.length} characters)`)
+    showMainWindow()
+    return
+  }
+  pendingCompose = { prefill, at: Date.now() }
+  const win = showMainWindow()
+  console.log(
+    `[mailto] compose requested for ${prefill.to.length} recipients (window ${win ? 'available' : 'pending'})`
+  )
+  win?.webContents.send(IPC_CHANNELS.mailComposeAvailable)
+}
+
+function takePendingComposeTarget(): ReturnType<typeof takePendingCompose> {
+  const target = takePendingCompose(pendingCompose)
+  if (target === null) pendingCompose = null
+  return target
+}
+
+function acknowledgeComposeTarget(id: number): void {
+  pendingCompose = acknowledgePendingCompose(pendingCompose, id)
+}
+
+/**
+ * Attn never claims the `mailto:` handler on its own — a mail client that
+ * takes the registration at startup is a mail client the user did not choose.
+ * The Settings row and its palette command are the only callers, and an
+ * unpackaged or test build reports the registration unsupported so no suite
+ * can rewrite a developer's default mail app.
+ */
+function defaultMailClient(): DefaultMailClient {
+  if (defaultMailClientOverride) return defaultMailClientOverride
+  if (!app.isPackaged || testUserData) return { supported: false, isDefault: false }
+  return { supported: true, isDefault: app.isDefaultProtocolClient('mailto') }
+}
+
+function claimDefaultMailClient(): DefaultMailClient {
+  const current = defaultMailClient()
+  if (!current.supported) return current
+  if (defaultMailClientOverride) {
+    defaultMailClientOverride = { ...defaultMailClientOverride, isDefault: true }
+    return defaultMailClientOverride
+  }
+  app.setAsDefaultProtocolClient('mailto')
+  return { supported: true, isDefault: app.isDefaultProtocolClient('mailto') }
 }
 
 /**
@@ -487,6 +563,9 @@ async function initialize(): Promise<void> {
     reorderAccounts: (accountIds) => roster.reorderAccounts(accountIds),
     takePendingFocus: takePendingFocusTarget,
     acknowledgePendingFocus: acknowledgeFocusTarget,
+    takePendingCompose: takePendingComposeTarget,
+    acknowledgePendingCompose: acknowledgeComposeTarget,
+    defaultMailClient: { get: defaultMailClient, set: claimDefaultMailClient },
     acknowledgeComposerCheckpoint: (requestId) => pendingComposerCheckpoints.get(requestId)?.(),
     applySettingEffects,
     appInfo,
@@ -663,9 +742,25 @@ else {
     if (quitPreparation) return
     void prepareQuit().finally(() => app.quit())
   })
-  app.on('second-instance', () => showMainWindow())
+  // F16: macOS delivers a `mailto:` link through this event, and can fire it
+  // before `whenReady` on a cold start — registering it here rather than in
+  // `initialize` is what keeps the launching link from being dropped.
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    if (/^mailto:/i.test(url)) handleMailtoUrl(url)
+  })
+  app.on('second-instance', (_event, argv) => {
+    // Windows and Linux hand the link to the second instance's command line.
+    const url = mailtoUrlFromArgv(argv)
+    if (url) handleMailtoUrl(url)
+    else showMainWindow()
+  })
   app.whenReady().then(async () => {
     try {
+      // A cold start from a link on Windows and Linux: the request is parked
+      // before the window exists, and the mounting renderer pulls it.
+      const launchUrl = mailtoUrlFromArgv(process.argv)
+      if (launchUrl) handleMailtoUrl(launchUrl)
       await initialize()
     } catch (error) {
       console.error(`[boot] failed: ${errorMessage(error)}`)

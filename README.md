@@ -138,6 +138,15 @@ For an installed app, put `oauth.config.json` in its user data directory:
 
 Restart Attn after you add the file. Keep the file outside the installed application.
 
+### Make Attn the default email app
+
+An installed Attn can open `mailto:` links from your browser and other apps. Open **Settings > Background** and select **Make default**. The command palette offers the same action.
+
+Each system also keeps its own choice:
+
+- macOS: open Mail, then select **Mail > Settings > General > Default email reader** and choose Attn.
+- Windows: open **Settings > Apps > Default apps**, select Attn, then set it for `mailto`.
+
 Personal macOS builds use an ad-hoc signature and are not notarized. Personal Windows builds are unsigned and can trigger a SmartScreen warning. Personal builds do not check for updates. Signing and the automatic-update feed are deferred. To update, get the new source and build the app again. The [release guide](docs/RELEASE.md) describes the procedure if signed releases are enabled later.
 
 ## Data and privacy

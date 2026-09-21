@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Draft, type DraftKind, emptyDraftInput } from '../../../shared/drafts'
+import { plainTextToDraftHtml } from '../../../shared/html'
 import type { SnoozedThreadRow, ThreadRow } from '../../../shared/mail'
+import type { MailtoPrefill } from '../../../shared/mailto'
 import type { OutboxItem } from '../../../shared/outbox'
 import { aiThreadContext } from '../aiContext'
 import type { MessageReplyTarget } from '../components/ConversationView'
@@ -75,7 +77,8 @@ export interface DraftOpening {
   /** Undo-send handed back a draft id; reopen it without a list row. */
   reopenUndoDraft: (id: string) => void
   openOutboxItem: (index: number) => void
-  openComposer: () => void
+  /** New mail, optionally prefilled from a `mailto:` link; true when it opened. */
+  openComposer: (prefill?: MailtoPrefill) => Promise<boolean>
   openReply: (kind: Exclude<DraftKind, 'new'>, sourceMessageId?: string) => void
   /** Enter expands the reader's focused message, or replies to all (F3). */
   openMessageOrReplyAll: () => void
@@ -304,21 +307,45 @@ export function useDraftOpening(options: Options): DraftOpening {
     [showDraft]
   )
 
-  const openComposer = useCallback(() => {
+  /**
+   * Plain Compose, and the `mailto:` link that carries fields with it (F16).
+   * The answer says whether the composer actually opened, so a deep link can
+   * stay pending in the main process when a settling account switch or an
+   * in-flight open refused it.
+   *
+   * `prefill` is a parsed link, never an event: every DOM handler must call
+   * this through a wrapper, because `() => void` silently accepts a direct
+   * `onClick={openComposer}` and would hand a MouseEvent to the draft.
+   */
+  const openComposer = useCallback((prefill?: MailtoPrefill): Promise<boolean> => {
     const options = latest.current
-    if (!window.attn || options.composerOpeningRef.current || options.accountSwitchPendingRef.current) {
-      return
+    const bridge = window.attn
+    if (!bridge || options.composerOpeningRef.current || options.accountSwitchPendingRef.current) {
+      return Promise.resolve(false)
     }
     options.composerOpeningRef.current = true
-    void window.attn.draft
-      .save(emptyDraftInput())
-      .then(({ draft }) => {
-        if (draft && !latest.current.accountSwitchPendingRef.current) {
-          latest.current.setComposerError(null)
-          latest.current.setComposerDraft(draft)
+    // A link with no body leaves the body empty on purpose: the account's
+    // signature and footer are inserted only into an empty draft (F6).
+    const input = prefill
+      ? {
+          ...emptyDraftInput(),
+          to: prefill.to,
+          cc: prefill.cc,
+          bcc: prefill.bcc,
+          subject: prefill.subject,
+          bodyText: prefill.bodyText,
+          bodyHtml: plainTextToDraftHtml(prefill.bodyText)
         }
+      : emptyDraftInput()
+    return bridge.draft
+      .save(input)
+      .then(({ draft }) => {
+        if (!draft || latest.current.accountSwitchPendingRef.current) return false
+        latest.current.setComposerError(null)
+        latest.current.setComposerDraft(draft)
+        return true
       })
-      .catch(() => {})
+      .catch(() => false)
       .finally(() => {
         latest.current.composerOpeningRef.current = false
       })

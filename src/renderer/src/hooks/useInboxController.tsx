@@ -35,6 +35,7 @@ import { useInboxCommands } from './useInboxCommands'
 import { isTextEntry, useKeyboardDispatch } from './useKeyboardDispatch'
 import { type MoveRequest, useListActions } from './useListActions'
 import { useMailData } from './useMailData'
+import { useMailtoTarget } from './useMailtoTarget'
 import { useSearchSession } from './useSearchSession'
 import { useSelectionState } from './useSelectionState'
 import { useAccountSettings, useSettings } from './useSettings'
@@ -661,6 +662,18 @@ export function useInboxController({
     setReaderOpen,
     setDetachedDraftThread,
     selectedThreadIdRef
+  })
+
+  const closeMailtoPreferences = useCallback(() => {
+    closeSettings()
+    closeSplitRules()
+  }, [closeSettings, closeSplitRules])
+  useMailtoTarget({
+    account: activeAccount,
+    composerOpen: composerDraft !== null,
+    openComposer,
+    closePreferences: closeMailtoPreferences,
+    showToast
   })
 
   // The inverse of 'Back to list' auto-advance, for a triage write that is
