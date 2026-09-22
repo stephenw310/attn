@@ -8,6 +8,10 @@ A desktop Gmail client built around keyboard shortcuts and offline mail. For mac
 
 Read cached mail, write drafts, and organize your inbox without a network connection. Changes save locally and sync with Gmail when you reconnect. Use the command palette to find actions without leaving the keyboard.
 
+The demo below shows keyboard triage, snooze, offline actions, the command palette, and undo-send. It uses fictional mail.
+
+https://github.com/user-attachments/assets/b25c6b19-3167-426b-a47b-5d72373083da
+
 > **Developer preview.** Build from source with your own Google OAuth client. No installer is published. Google shows an unverified-app warning when you sign in. See [Get started](#get-started).
 
 ## What you can do
