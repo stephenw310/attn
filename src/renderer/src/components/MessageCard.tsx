@@ -104,6 +104,7 @@ interface MessageCardProps {
   threadId: string
   message: DisplayMessage
   account: string | null
+  findEnabled?: boolean
   collapsed?: boolean
   active?: boolean
   onToggleCollapsed?: () => void
@@ -119,6 +120,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     message,
     account,
     collapsed = false,
+    findEnabled = false,
     active = false,
     onToggleCollapsed,
     trimExpanded = false,
@@ -162,176 +164,180 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     [message.id, message.pending, onToast]
   )
 
-  if (collapsed) {
-    return (
-      <article
-        data-testid="message-card"
-        data-collapsed="true"
-        data-pending={message.pending ? 'true' : undefined}
-      >
-        <button
-          type="button"
-          data-testid="older-message-toggle"
-          data-tooltip=""
-          aria-expanded="false"
-          aria-label={`Expand older message from ${message.fromName}`}
-          onClick={(event) => {
-            onToggleCollapsed?.()
-            event.currentTarget.blur()
-          }}
-          className="grid w-full cursor-pointer grid-cols-[28px_minmax(70px,100px)_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-4 text-left hover:bg-active/50"
-        >
-          <MessageAvatar name={message.fromName} active={active} />
-          <span className="min-w-0 truncate text-xs font-medium">{message.fromName}</span>
-          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
-            {message.text || 'HTML message'}
-          </span>
-          <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
-            {visibleAttachments.length > 0 && <MailIcon name="attachment" />}
-            {message.at}
-            <span aria-hidden>▾</span>
-          </span>
-        </button>
-      </article>
-    )
-  }
-
-  return (
+  const collapsedCard = collapsed ? (
     <article
       data-testid="message-card"
-      data-collapsed="false"
+      data-collapsed="true"
       data-pending={message.pending ? 'true' : undefined}
-      className="px-3 py-4"
     >
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
-      <div
-        data-testid="message-header"
-        className="mb-4 grid cursor-pointer grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3"
+      <button
+        type="button"
+        data-testid="older-message-toggle"
+        data-tooltip=""
+        aria-expanded="false"
+        aria-label={`Expand older message from ${message.fromName}`}
         onClick={(event) => {
-          const target = event.target
-          if (target instanceof Element && target.closest('button, a')) return
           onToggleCollapsed?.()
+          event.currentTarget.blur()
         }}
+        className="grid w-full cursor-pointer grid-cols-[28px_minmax(70px,100px)_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-4 text-left hover:bg-active/50"
       >
         <MessageAvatar name={message.fromName} active={active} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2.5">
-            <span className="truncate text-xs font-medium">{message.fromName}</span>
-          </div>
-        </div>
-        <span className="flex flex-none items-center gap-2 text-xs text-ink-faint tabular-nums">
-          {message.at}
-          {onToggleCollapsed && (
-            <button
-              type="button"
-              data-testid="older-message-toggle"
-              data-tooltip=""
-              aria-expanded="true"
-              aria-label={`Collapse older message from ${message.fromName}`}
-              onClick={(event) => {
-                onToggleCollapsed()
-                event.currentTarget.blur()
-              }}
-              className="cursor-pointer rounded px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
-            >
-              <span aria-hidden>▴</span>
-            </button>
-          )}
+        <span className="min-w-0 truncate text-xs font-medium">{message.fromName}</span>
+        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+          {message.text || 'HTML message'}
         </span>
-        <div className="col-start-2 col-span-2 min-w-0">
-          <RecipientLine message={message} account={account} />
-        </div>
-        {message.html && detectedPresentation.surface === 'native' && appearance === 'dark' && (
-          <button
-            type="button"
-            data-testid="mail-original-toggle"
-            onClick={(event) => {
-              setViewOriginal((current) => !current)
-              event.currentTarget.blur()
-            }}
-            className="col-start-2 col-span-2 mt-1 w-fit cursor-pointer text-[11px] text-ink-faint hover:text-ink-dim hover:underline"
-          >
-            {viewOriginal ? 'Use dark view' : 'View original'}
-          </button>
-        )}
-      </div>
-      <div
-        data-testid="message-content"
-        className={`ml-10 min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
+        <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
+          {visibleAttachments.length > 0 && <MailIcon name="attachment" />}
+          {message.at}
+          <span aria-hidden>▾</span>
+        </span>
+      </button>
+    </article>
+  ) : null
+  if (collapsedCard && !findEnabled) return collapsedCard
+
+  return (
+    <>
+      {collapsedCard}
+      <article
+        data-testid={collapsed ? undefined : 'message-card'}
+        hidden={collapsed}
+        data-collapsed="false"
+        data-pending={message.pending ? 'true' : undefined}
+        className="px-3 py-4"
       >
-        <MessageBody
-          bodyText={message.text}
-          bodyHtml={message.html}
-          surface={presentation.surface}
-          layout={presentation.layout}
-          appearance={appearance}
-          viewOriginal={viewOriginal}
-          parts={reading.parts}
-          threadId={threadId}
-          messageId={message.id}
-          attachments={message.attachments}
-          expanded={trimExpanded}
-          onToggleTrim={onToggleTrim}
-        />
-        <p
-          data-testid="body-hydration-status"
-          className={bodyHydrationMessage ? 'mt-3 text-xs text-ink-faint' : 'sr-only'}
-          aria-live="polite"
-          aria-atomic="true"
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: message keyboard control is app-level */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: nested controls remain independently interactive */}
+        <div
+          data-testid="message-header"
+          className="mb-4 grid cursor-pointer grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3"
+          onClick={(event) => {
+            const target = event.target
+            if (target instanceof Element && target.closest('button, a')) return
+            onToggleCollapsed?.()
+          }}
         >
-          {bodyHydrationMessage ?? ''}
-        </p>
-        {visibleAttachments.length > 0 && (
-          <div
-            data-testid="message-accessories"
-            className={htmlSurface ? 'bg-mail-light-ground px-3 pb-3' : ''}
-          >
-            <div className="mt-3 flex flex-wrap gap-2">
-              {visibleAttachments.map((attachment) => (
-                <button
-                  key={attachment.attachmentId}
-                  type="button"
-                  data-testid="attachment-chip"
-                  onClick={(event) => {
-                    download(attachment)
-                    event.currentTarget.blur()
-                  }}
-                  className={`inline-flex items-center cursor-pointer rounded border px-3 py-2 text-left text-xs ${
-                    htmlSurface
-                      ? 'border-mail-light-edge bg-mail-light-raised text-mail-light-ink-dim hover:border-mail-light-edge-hover hover:text-mail-light-ink'
-                      : 'border-edge bg-transparent text-ink-dim hover:border-accent hover:text-ink'
-                  }`}
-                  title={`Download ${attachment.filename}`}
-                >
-                  <span className="mr-2" aria-hidden>
-                    <MailIcon name="attachment" />
-                  </span>
-                  <span className="font-medium">{attachment.filename}</span>
-                  <span
-                    className={`ml-2 tabular-nums ${htmlSurface ? 'text-mail-light-ink-dim' : 'text-ink-faint'}`}
-                  >
-                    {formatBytes(attachment.sizeBytes)}
-                  </span>
-                </button>
-              ))}
+          <MessageAvatar name={message.fromName} active={active} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2.5">
+              <span className="truncate text-xs font-medium">{message.fromName}</span>
             </div>
           </div>
-        )}
-      </div>
-      {onReply && !message.pending && (
-        <div data-testid="message-actions" className="ml-10 mt-3 flex items-center gap-3">
-          <Button data-tooltip="Reply (R)" onClick={() => onReply('reply')}>
-            Reply
-          </Button>
-          <Button data-tooltip="Reply all (A)" onClick={() => onReply('replyAll')}>
-            Reply all
-          </Button>
-          <Button data-tooltip="Forward (F)" onClick={() => onReply('forward')}>
-            Forward
-          </Button>
+          <span className="flex flex-none items-center gap-2 text-xs text-ink-faint tabular-nums">
+            {message.at}
+            {onToggleCollapsed && (
+              <button
+                type="button"
+                data-testid="older-message-toggle"
+                data-tooltip=""
+                aria-expanded="true"
+                aria-label={`Collapse older message from ${message.fromName}`}
+                onClick={(event) => {
+                  onToggleCollapsed()
+                  event.currentTarget.blur()
+                }}
+                className="cursor-pointer rounded px-1 text-ink-faint hover:bg-active hover:text-ink-dim"
+              >
+                <span aria-hidden>▴</span>
+              </button>
+            )}
+          </span>
+          <div className="col-start-2 col-span-2 min-w-0">
+            <RecipientLine message={message} account={account} />
+          </div>
+          {message.html && detectedPresentation.surface === 'native' && appearance === 'dark' && (
+            <button
+              type="button"
+              data-testid="mail-original-toggle"
+              onClick={(event) => {
+                setViewOriginal((current) => !current)
+                event.currentTarget.blur()
+              }}
+              className="col-start-2 col-span-2 mt-1 w-fit cursor-pointer text-[11px] text-ink-faint hover:text-ink-dim hover:underline"
+            >
+              {viewOriginal ? 'Use dark view' : 'View original'}
+            </button>
+          )}
         </div>
-      )}
-    </article>
+        <div
+          data-testid="message-content"
+          className={`ml-10 min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
+        >
+          <MessageBody
+            findEnabled={findEnabled}
+            bodyText={message.text}
+            bodyHtml={message.html}
+            surface={presentation.surface}
+            layout={presentation.layout}
+            appearance={appearance}
+            viewOriginal={viewOriginal}
+            parts={reading.parts}
+            threadId={threadId}
+            messageId={message.id}
+            attachments={message.attachments}
+            expanded={trimExpanded}
+            onToggleTrim={onToggleTrim}
+          />
+          <p
+            data-testid="body-hydration-status"
+            className={bodyHydrationMessage ? 'mt-3 text-xs text-ink-faint' : 'sr-only'}
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {bodyHydrationMessage ?? ''}
+          </p>
+          {visibleAttachments.length > 0 && (
+            <div
+              data-testid="message-accessories"
+              className={htmlSurface ? 'bg-mail-light-ground px-3 pb-3' : ''}
+            >
+              <div className="mt-3 flex flex-wrap gap-2">
+                {visibleAttachments.map((attachment) => (
+                  <button
+                    key={attachment.attachmentId}
+                    type="button"
+                    data-testid="attachment-chip"
+                    onClick={(event) => {
+                      download(attachment)
+                      event.currentTarget.blur()
+                    }}
+                    className={`inline-flex items-center cursor-pointer rounded border px-3 py-2 text-left text-xs ${
+                      htmlSurface
+                        ? 'border-mail-light-edge bg-mail-light-raised text-mail-light-ink-dim hover:border-mail-light-edge-hover hover:text-mail-light-ink'
+                        : 'border-edge bg-transparent text-ink-dim hover:border-accent hover:text-ink'
+                    }`}
+                    title={`Download ${attachment.filename}`}
+                  >
+                    <span className="mr-2" aria-hidden>
+                      <MailIcon name="attachment" />
+                    </span>
+                    <span className="font-medium">{attachment.filename}</span>
+                    <span
+                      className={`ml-2 tabular-nums ${htmlSurface ? 'text-mail-light-ink-dim' : 'text-ink-faint'}`}
+                    >
+                      {formatBytes(attachment.sizeBytes)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {onReply && !message.pending && (
+          <div data-testid="message-actions" className="ml-10 mt-3 flex items-center gap-3">
+            <Button data-tooltip="Reply (R)" onClick={() => onReply('reply')}>
+              Reply
+            </Button>
+            <Button data-tooltip="Reply all (A)" onClick={() => onReply('replyAll')}>
+              Reply all
+            </Button>
+            <Button data-tooltip="Forward (F)" onClick={() => onReply('forward')}>
+              Forward
+            </Button>
+          </div>
+        )}
+      </article>
+    </>
   )
 }

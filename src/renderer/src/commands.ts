@@ -77,6 +77,7 @@ export const COMMAND_SPECS = {
     context: 'reader',
     footer: { reader: { id: 'back', label: 'back to list', order: 60 } }
   },
+  'conversation.find': { title: 'Find in conversation', shortcut: 'Mod+F', context: 'reader' },
   'message.next': {
     title: 'Next message in conversation',
     shortcut: 'n',
