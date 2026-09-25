@@ -827,7 +827,8 @@ test('discovers a provider-gated send through the pending readout and Go to Outb
   page
 }) => {
   await app.evaluate(({ ipcMain }, channel) => ipcMain.emit(channel, {}, 0), TEST_CHANNELS.setUndoSendDelay)
-  await page.getByTestId('thread-list').waitFor()
+  // The list shell appears before its rows; J needs the seeded page to be ready.
+  await expect(page.getByTestId('thread-row')).toHaveCount(8)
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.keyboard.press('j')
   await expect.poll(() => selectedIndex(page)).toBe(1)
