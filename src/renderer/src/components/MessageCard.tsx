@@ -6,6 +6,7 @@ import { formatBytes } from '../formatBytes'
 import type { DisplayMessage } from '../list/mailDisplay'
 import { MessageBody } from '../MessageBody'
 import { mailReadingForHtml } from '../mailReading'
+import { collapsedFindText } from '../readerFind'
 import { useTheme } from '../theme'
 import { useShowToast } from '../toastContext'
 import { Button } from './Button'
@@ -104,6 +105,7 @@ interface MessageCardProps {
   threadId: string
   message: DisplayMessage
   account: string | null
+  findEnabled?: boolean
   collapsed?: boolean
   active?: boolean
   onToggleCollapsed?: () => void
@@ -119,6 +121,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     message,
     account,
     collapsed = false,
+    findEnabled = false,
     active = false,
     onToggleCollapsed,
     trimExpanded = false,
@@ -130,6 +133,10 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
   const { appearance } = useTheme()
   const [viewOriginal, setViewOriginal] = useState(false)
   const reading = useMemo(() => mailReadingForHtml(message.html), [message.html])
+  const findText = useMemo(
+    () => (collapsed && findEnabled ? collapsedFindText(message.html, message.text) : ''),
+    [collapsed, findEnabled, message.html, message.text]
+  )
   const detectedPresentation = reading.presentation
   const presentation =
     viewOriginal && detectedPresentation.surface === 'native'
@@ -162,39 +169,48 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
     [message.id, message.pending, onToast]
   )
 
-  if (collapsed) {
-    return (
-      <article
-        data-testid="message-card"
-        data-collapsed="true"
-        data-pending={message.pending ? 'true' : undefined}
+  const collapsedCard = collapsed ? (
+    <article
+      data-testid="message-card"
+      data-collapsed="true"
+      data-pending={message.pending ? 'true' : undefined}
+    >
+      <button
+        type="button"
+        data-testid="older-message-toggle"
+        data-tooltip=""
+        aria-expanded="false"
+        aria-label={`Expand older message from ${message.fromName}`}
+        onClick={(event) => {
+          onToggleCollapsed?.()
+          event.currentTarget.blur()
+        }}
+        className="grid w-full cursor-pointer grid-cols-[28px_minmax(70px,100px)_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-4 text-left hover:bg-active/50"
       >
-        <button
-          type="button"
-          data-testid="older-message-toggle"
-          data-tooltip=""
-          aria-expanded="false"
-          aria-label={`Expand older message from ${message.fromName}`}
-          onClick={(event) => {
-            onToggleCollapsed?.()
-            event.currentTarget.blur()
-          }}
-          className="grid w-full cursor-pointer grid-cols-[28px_minmax(70px,100px)_minmax(0,1fr)_auto] items-center gap-x-3 px-3 py-4 text-left hover:bg-active/50"
-        >
-          <MessageAvatar name={message.fromName} active={active} />
-          <span className="min-w-0 truncate text-xs font-medium">{message.fromName}</span>
-          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
-            {message.text || 'HTML message'}
-          </span>
-          <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
-            {visibleAttachments.length > 0 && <MailIcon name="attachment" />}
-            {message.at}
-            <span aria-hidden>▾</span>
-          </span>
-        </button>
-      </article>
+        <MessageAvatar name={message.fromName} active={active} />
+        <span className="min-w-0 truncate text-xs font-medium">{message.fromName}</span>
+        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-ink-faint">
+          {message.text || 'HTML message'}
+        </span>
+        <span className="flex items-center gap-2 text-xs text-ink-faint tabular-nums">
+          {visibleAttachments.length > 0 && <MailIcon name="attachment" />}
+          {message.at}
+          <span aria-hidden>▾</span>
+        </span>
+      </button>
+    </article>
+  ) : null
+  if (collapsedCard)
+    return (
+      <>
+        {collapsedCard}
+        {findEnabled && (
+          <div hidden data-find-body="">
+            {findText}
+          </div>
+        )}
+      </>
     )
-  }
 
   return (
     <article
@@ -261,6 +277,7 @@ export function MessageCard(props: MessageCardProps): React.JSX.Element {
         className={`ml-10 min-w-0 ${htmlSurface ? 'overflow-hidden rounded-[10px] bg-mail-light-ground' : ''}`}
       >
         <MessageBody
+          findEnabled={findEnabled}
           bodyText={message.text}
           bodyHtml={message.html}
           surface={presentation.surface}

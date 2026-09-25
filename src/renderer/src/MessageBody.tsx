@@ -18,6 +18,7 @@ import { containsRemoteMailContent } from './mailRemoteContent'
 import type { MailLayout, MailSurface } from './mailSurface'
 
 interface MessageBodyProps {
+  findEnabled?: boolean
   bodyText: string
   bodyHtml: string | null
   surface: MailSurface
@@ -168,7 +169,8 @@ function SingleMessageBody({
   expanded = false,
   onToggleTrim,
   allowTrim = true,
-  hidden = false
+  hidden = false,
+  findEnabled = false
 }: MessageBodyProps & { allowTrim?: boolean; hidden?: boolean }): React.JSX.Element {
   const [measuredFrame, setMeasuredFrame] = useState<FrameMeasurement | null>(null)
   const [oversizedSrcDoc, setOversizedSrcDoc] = useState<string | null>(null)
@@ -300,6 +302,7 @@ function SingleMessageBody({
     if (trimIndex === null) {
       return (
         <div
+          data-find-body=""
           data-testid="plain-text-body"
           className={`whitespace-pre-wrap leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
         >
@@ -311,6 +314,7 @@ function SingleMessageBody({
     const trimmedText = bodyText.slice(trimIndex).trimStart()
     return (
       <div
+        data-find-body=""
         data-testid="plain-text-body"
         className={`leading-[1.6] [overflow-wrap:break-word] ${surfaceClass}`}
       >
@@ -323,8 +327,8 @@ function SingleMessageBody({
           onToggle={onToggleTrim}
           className="mt-1 block"
         />
-        {expanded && (
-          <div data-testid="plain-text-trimmed" className="whitespace-pre-wrap">
+        {(expanded || findEnabled) && (
+          <div hidden={!expanded} data-testid="plain-text-trimmed" className="whitespace-pre-wrap">
             <LinkedMailText text={trimmedText} lightSurface={lightSurface} />
           </div>
         )}

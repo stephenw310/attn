@@ -530,6 +530,24 @@ the reminder states affected by triage.
 - p95 < 100ms for local queries on a 50,000-message store.
 - Operators combine (e.g. `from:acme.com has:attachment after:2026-01-01`).
 
+### Find in conversation
+
+- `Cmd+F` on macOS or `Ctrl+F` on Windows opens the reader find bar. The command palette also offers Find in conversation.
+- Find matches literal body text without case sensitivity, including collapsed messages and quoted history. It excludes attachments, composer text, and unrevealed Trash messages.
+- Typing highlights all matches. The bar shows the current match and total count, or No matches.
+- Enter and Shift+Enter in the find field move forward and backward. Navigation wraps at either end.
+- Selecting a match expands its message, reveals its quoted text when needed, and scrolls the reader to the match.
+- Escape closes find, clears highlights, and keeps the reader open at its current position. The next Escape returns to the list.
+- Repeating the shortcut selects the existing query. Closing the conversation clears its find state.
+- Collapsed messages use inert text for find. Opening find does not resolve their inline images or load their remote resources.
+- Find uses loaded bodies. A notice identifies incomplete coverage when some bodies are unavailable or still loading.
+- Highlights preserve mail sanitization, the scriptless sandbox, links, and remote-image controls.
+
+**Acceptance criteria**
+- Find works in plain text and HTML, including phrases split across inline formatting.
+- Keyboard shortcuts work while focus is inside an email frame.
+- Match navigation and highlights work in light and dark themes.
+
 ### F11 — Split inbox
 
 The inbox is divided into **splits** — tabs above the list, each an independently triaged queue:

@@ -9,6 +9,7 @@ import { Button } from './Button'
 import { Kbd } from './Kbd'
 import { MailIcon } from './MailIcon'
 import { MessageCard } from './MessageCard'
+import { ReaderFind } from './ReaderFind'
 
 export interface MessageReplyTarget {
   threadId: string
@@ -58,6 +59,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
     replyTargetRef,
     onReply
   } = props
+  const [findOpen, setFindOpen] = useState(false)
   const newestIndex = newestReadableIndex(conversation.messages)
   const newestMessageId = conversation.messages[newestIndex]?.id
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => {
@@ -263,6 +265,13 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
   }, [allExpanded, readableMessages])
   useLayoutEffect(() => registerCommands([createCommand('message.toggleAll', toggleAll)]), [toggleAll])
 
+  const revealFindMatch = useCallback((messageId: string, revealTrim: boolean) => {
+    setExpandedMessageIds((current) => (current.has(messageId) ? current : new Set(current).add(messageId)))
+    if (revealTrim)
+      setExpandedTrimIds((current) => (current.has(messageId) ? current : new Set(current).add(messageId)))
+    setActiveMessageId(messageId)
+  }, [])
+
   const items = conversation.messages.map((message) => (
     <div
       key={`message:${message.id}`}
@@ -310,6 +319,7 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
         </div>
       ) : (
         <MessageCard
+          findEnabled={findOpen}
           threadId={conversation.threadId}
           message={message}
           account={account}
@@ -348,6 +358,13 @@ function ConversationMessages(props: ConversationMessagesProps): React.JSX.Eleme
   }
   return (
     <>
+      <ReaderFind
+        scrollRef={scrollRef}
+        open={findOpen}
+        onOpenChange={setFindOpen}
+        onReveal={revealFindMatch}
+        incomplete={conversation.messages.some((message) => message.bodyState !== 'complete')}
+      />
       <div
         data-testid="conversation-summary"
         className="mb-5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-ink-dim"
@@ -603,6 +620,9 @@ export const ConversationView = memo(function ConversationView(
             )}
           </span>
         </div>
+      </div>
+      <div className="overflow-y-hidden px-6 [scrollbar-gutter:stable]">
+        <div data-reader-find-host="" className="mx-auto w-full max-w-[896px]" />
       </div>
       <div
         ref={scrollRef}

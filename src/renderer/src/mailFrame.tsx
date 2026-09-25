@@ -467,12 +467,12 @@ export function MailFrame({
   const keyDocumentRef = useRef<Document | null>(null)
 
   const forwardKey = useCallback((event: KeyboardEvent) => {
-    const paletteShortcut =
+    const readerShortcut =
       (event.metaKey || event.ctrlKey) &&
       !event.altKey &&
       !event.shiftKey &&
-      event.key.toLocaleLowerCase() === 'k'
-    if ((event.metaKey || event.ctrlKey || event.altKey) && !paletteShortcut) return
+      ['k', 'f'].includes(event.key.toLocaleLowerCase())
+    if ((event.metaKey || event.ctrlKey || event.altKey) && !readerShortcut) return
     // Tab owns focus traversal inside the mail document. Forwarding it to the
     // app would prevent the browser from moving through links in the message.
     if (event.key === 'Tab') return
@@ -536,7 +536,9 @@ export function MailFrame({
       }
       frameId = requestAnimationFrame(waitForSrcDoc)
     }
-    frameId = requestAnimationFrame(waitForSrcDoc)
+    // Layout-only changes already have a loaded document. Reattach its keys
+    // synchronously so revealing a quote cannot drop the next keystroke.
+    waitForSrcDoc()
     return () => {
       cancelAnimationFrame(frameId)
       disconnect()
