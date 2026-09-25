@@ -539,6 +539,7 @@ the reminder states affected by triage.
 - Selecting a match expands its message, reveals its quoted text when needed, and scrolls the reader to the match.
 - Escape closes find, clears highlights, and keeps the reader open at its current position. The next Escape returns to the list.
 - Repeating the shortcut selects the existing query. Closing the conversation clears its find state.
+- Collapsed messages use inert text for find. Opening find does not resolve their inline images or load their remote resources.
 - Find uses loaded bodies. A notice identifies incomplete coverage when some bodies are unavailable or still loading.
 - Highlights preserve mail sanitization, the scriptless sandbox, links, and remote-image controls.
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { findTextRanges } from './readerFind'
+import { collapsedFindText, findTextRanges } from './readerFind'
 
 function body(html: string): HTMLElement {
   const root = document.createElement('div')
@@ -31,5 +31,16 @@ describe('reader find text ranges', () => {
     const before = root.innerHTML
     expect(findTextRanges(root, 'needle')).toHaveLength(1)
     expect(root.innerHTML).toBe(before)
+  })
+})
+
+describe('collapsed find text', () => {
+  it('extracts body text without mounting sender resources', () => {
+    const html =
+      '<style>p { background: url(https://example.test/bg.png) }</style><p>Find <b>this phrase</b></p><img src="cid:photo"><img src="https://example.test/image.png"><script>unsafe()</script>'
+    const text = collapsedFindText(html, 'different fallback')
+    expect(text.trim()).toBe('Find this phrase')
+    expect(document.querySelector('img, script')).toBeNull()
+    expect(collapsedFindText(null, 'Plain body')).toBe('Plain body')
   })
 })

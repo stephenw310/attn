@@ -1,6 +1,7 @@
-/** Find literal, case-insensitive phrases across inline markup without changing mail DOM. */
-export function findTextRanges(root: HTMLElement, query: string): Range[] {
-  if (!query.trim()) return []
+import DOMPurify from 'dompurify'
+import { sanitizeMailHtml } from '../../shared/mailSanitizer'
+
+function searchTextNodes(root: Node): { text: string; nodes: { node: Text; start: number; end: number }[] } {
   const nodes: { node: Text; start: number; end: number }[] = []
   let text = ''
   const visit = (node: Node): void => {
@@ -10,13 +11,17 @@ export function findTextRanges(root: HTMLElement, query: string): Range[] {
       nodes.push({ node: node as Text, start, end: text.length })
       return
     }
+    if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      for (const child of node.childNodes) visit(child)
+      return
+    }
     if (node.nodeType !== Node.ELEMENT_NODE) return
     const element = node as HTMLElement
     if (element.matches('script, style, noscript, button, [aria-hidden="true"]')) return
     // The reader may hide an entire body or quote until its match is selected.
     // Sender-hidden content within an HTML frame is not readable content.
     if (root.ownerDocument !== document && element !== root) {
-      const style = root.ownerDocument.defaultView?.getComputedStyle(element)
+      const style = root.ownerDocument?.defaultView?.getComputedStyle(element)
       if (style?.display === 'none' || style?.visibility === 'hidden') return
     }
     const block = /^(ADDRESS|ARTICLE|BLOCKQUOTE|BR|DIV|H[1-6]|HR|LI|P|PRE|SECTION|TD|TH|TR|UL|OL)$/.test(
@@ -27,6 +32,21 @@ export function findTextRanges(root: HTMLElement, query: string): Range[] {
     if (block) text += '\n'
   }
   visit(root)
+  return { text, nodes }
+}
+
+/** Keep sender markup inert: only text enters the hidden search representation. */
+export function collapsedFindText(html: string | null, plainText: string): string {
+  if (!html) return plainText
+  const template = document.createElement('template')
+  template.innerHTML = sanitizeMailHtml(DOMPurify, html)
+  return searchTextNodes(template.content).text
+}
+
+/** Find literal, case-insensitive phrases across inline markup without changing mail DOM. */
+export function findTextRanges(root: HTMLElement, query: string): Range[] {
+  if (!query.trim()) return []
+  const { text, nodes } = searchTextNodes(root)
   const pattern = query
     .trim()
     .split(/\s+/)

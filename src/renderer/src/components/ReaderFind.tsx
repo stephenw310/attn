@@ -83,6 +83,12 @@ export function ReaderFind({
     const styles = new Map<Document, HTMLStyleElement>()
     const scan = (): void => {
       scheduled = 0
+      // Expanding a text-only search result mounts its real mail frames.
+      // Keep its index until all replacement documents are ready to search.
+      for (const container of root.querySelectorAll('[data-testid="html-body-container"]')) {
+        const frame = container.querySelector('iframe')
+        if (!frame?.contentDocument?.body || frame.contentWindow?.location.href !== 'about:srcdoc') return
+      }
       const next: Match[] = []
       for (const message of root.querySelectorAll<HTMLElement>('[data-message-id]')) {
         for (const body of message.querySelectorAll<HTMLElement>('[data-find-body], iframe')) {

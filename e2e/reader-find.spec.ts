@@ -1,7 +1,9 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { IPC_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 import { runPaletteCommand, threadRow } from './nav'
+import { observeInvokes } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
 
@@ -138,4 +140,104 @@ test.describe('find across authored and quoted HTML', () => {
       }
     })
   }
+})
+
+test.describe('collapsed message resources', () => {
+  const seed = '.generated/reader-find-images.json'
+  test.use({ seed })
+  test.beforeEach(() => {
+    const message = (id: string, receivedDaysAgo: number) => ({
+      id,
+      receivedDaysAgo,
+      receivedAt: '09:00',
+      labelIds: ['INBOX'],
+      from: 'Sender <sender@example.test>',
+      to: 'seed@attn.test',
+      subject: 'Find without loading images'
+    })
+    mkdirSync(join(__dirname, '.generated'), { recursive: true })
+    writeFileSync(
+      join(__dirname, seed),
+      JSON.stringify({
+        account: 'seed@attn.test',
+        threads: [
+          {
+            id: 't-find-images',
+            messages: [
+              ...['older', 'middle'].map((id, index) => ({
+                ...message(id, 2 - index),
+                bodyHtml: `<p>${id} <b>needle</b> phrase</p><img src="cid:${id}@attn.test"><img src="https://find-images.attn.test/${id}.gif"><style>p { background-image: url(https://find-images.attn.test/${id}-background.gif) }</style>`,
+                attachments: [
+                  {
+                    attachmentId: `inline:${id}`,
+                    mimeType: 'image/gif',
+                    sizeBytes: 35,
+                    contentId: `${id}@attn.test`,
+                    dataBase64Url: 'R0lGODlhAQABAAD_ACwAAAAAAQABAAACADs'
+                  }
+                ]
+              })),
+              { ...message('newest', 0), bodyText: 'Current message' }
+            ]
+          }
+        ]
+      })
+    )
+  })
+
+  test('find loads images only after their collapsed message is expanded', async ({ app, page }) => {
+    const requests: string[] = []
+    await page.route('https://find-images.attn.test/**', async (route) => {
+      requests.push(route.request().url())
+      await route.fulfill({
+        contentType: 'image/gif',
+        body: Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')
+      })
+    })
+    const inlineCalls = await observeInvokes(app, IPC_CHANNELS.mailGetInlineImage)
+    await threadRow(page, 'Find without loading images').click()
+    await page.keyboard.press('ControlOrMeta+f')
+    const input = page.getByTestId('reader-find-input')
+    await expect(input).toBeFocused()
+    await expect(page.locator('[data-find-body][hidden]')).toHaveCount(2)
+    await input.fill('absent')
+    await expect(page.getByTestId('reader-find-count')).toHaveText('No matches')
+    // Give any mistakenly mounted frames time to issue their image requests.
+    await page.waitForTimeout(200)
+    expect(await inlineCalls()).toEqual([])
+    expect(requests).toEqual([])
+    await expect(page.getByTestId('html-body-frame')).toHaveCount(0)
+
+    await input.fill('needle phrase')
+    await expect(page.getByTestId('reader-find-count')).toHaveText('1 of 2')
+    await expect(page.getByTestId('html-body-frame')).toHaveCount(1)
+    await expect
+      .poll(async () => (await inlineCalls()).map((args) => (args[0] as { messageId: string }).messageId))
+      .toEqual(['older'])
+    await expect.poll(() => requests.length).toBe(2)
+    expect(requests.every((url) => url.includes('/older'))).toBe(true)
+    await expect(page.frameLocator('[data-testid="html-body-frame"]').locator('img').first()).toHaveAttribute(
+      'src',
+      /^data:image\/gif;base64,/
+    )
+
+    await input.press('Enter')
+    await expect(page.getByTestId('reader-find-count')).toHaveText('2 of 2')
+    await expect(page.getByTestId('html-body-frame')).toHaveCount(2)
+    await expect
+      .poll(async () => (await inlineCalls()).map((args) => (args[0] as { messageId: string }).messageId))
+      .toEqual(['older', 'middle'])
+    await expect.poll(() => requests.length).toBe(4)
+    await expect
+      .poll(() =>
+        page
+          .getByTestId('html-body-frame')
+          .nth(1)
+          .evaluate((frame: HTMLIFrameElement) => {
+            const view = frame.contentWindow as Window & typeof globalThis
+            return [...(view.CSS.highlights.get('attn-find-active') ?? [])].map((range) => range.toString())
+          })
+      )
+      .toEqual(['needle phrase'])
+  })
 })
