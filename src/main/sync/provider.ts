@@ -14,6 +14,8 @@ export interface ProviderSendAs {
   signature?: string
   isPrimary?: boolean
   isDefault?: boolean
+  replyToAddress?: string
+  verificationStatus?: string
 }
 
 export interface ProviderLabel {
@@ -146,6 +148,7 @@ export interface DraftProvider {
 export interface MailProvider extends MailActionProvider, DraftProvider {
   getProfile(options?: ProviderRequestOptions): Promise<ProviderProfile>
   /** Optional only for narrow test providers; production uses it to build the outgoing From header. */
+  listSendAs?(options?: ProviderRequestOptions): Promise<ProviderSendAs[]>
   getSendAs?(email: string, options?: ProviderRequestOptions): Promise<ProviderSendAs>
   listLabels(options?: ProviderRequestOptions): Promise<ProviderLabel[]>
   listThreadIds(options?: ListThreadIdsOptions): Promise<ThreadIdPage>

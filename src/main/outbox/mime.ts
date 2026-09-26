@@ -51,6 +51,7 @@ export interface MimeDraft {
 export interface BuildMimeOptions {
   accountEmail: string
   accountName?: string
+  replyToAddress?: string
   /** Stable, caller-owned id. The outbox persists this before any send attempt. */
   rfcMessageId: string
   date: Date
@@ -407,6 +408,9 @@ function buildMimeSegments<T extends AttachmentIdentity>(
       ...addressHeader('Bcc', draft.bcc ?? []),
       ...foldHeader('Subject', encodeSubject(draft.subject)),
       ...foldHeader('Message-ID', messageId),
+      ...(options.replyToAddress
+        ? addressHeader('Reply-To', [{ name: '', email: options.replyToAddress }], true)
+        : []),
       ...(draft.inReplyTo ? foldHeader('In-Reply-To', singleLine(draft.inReplyTo)) : []),
       ...(draft.references?.length
         ? foldHeader('References', draft.references.map(singleLine).filter(Boolean).join(' '))

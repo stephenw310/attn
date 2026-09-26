@@ -123,6 +123,7 @@ class FakeOutboxDb {
   }
 
   private get(query: string, args: unknown[]): unknown {
+    if (query.startsWith('SELECT value FROM settings')) return undefined
     if (query.startsWith('SELECT state, send_at FROM outbox')) {
       const accountId = String(args[0])
       const row = [...this.rows.values()].find(

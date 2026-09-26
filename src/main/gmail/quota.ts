@@ -22,6 +22,7 @@ export const GMAIL_QUOTA_UNITS = {
   'messages.get': 20,
   'messages.list': 5,
   'settings.sendAs.get': 1,
+  'settings.sendAs.list': 1,
   'threads.get': 40,
   'threads.list': 10,
   'threads.modify': 10
@@ -292,6 +293,7 @@ export function quotaMethod(method: string, path: string): GmailQuotaMethod {
   if (path === '/messages') return 'messages.list'
   if (/^\/messages\/[^/]+\/attachments\/[^/]+$/.test(path)) return 'messages.attachments.get'
   if (/^\/messages\/[^/]+$/.test(path)) return 'messages.get'
+  if (path === '/settings/sendAs') return 'settings.sendAs.list'
   if (/^\/settings\/sendAs\/[^/]+$/.test(path)) return 'settings.sendAs.get'
   if (path === '/threads') return 'threads.list'
   if (/^\/threads\/[^/]+\/modify$/.test(path)) return 'threads.modify'

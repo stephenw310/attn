@@ -29,13 +29,14 @@ interface DraftRow {
   created_at: number
   updated_at: number
   local_revision: number
+  sender_email?: string | null
   default_signature_fingerprint: string | null
 }
 
 const DRAFT_COLUMNS = `id, account_id, gmail_draft_id, state, kind, to_json, cc_json,
   bcc_json, subject, body_html, body_text, attachments_json, thread_id, source_message_id, in_reply_to,
   references_json, quote_html, quote_text, follow_up_at, created_at, updated_at, local_revision,
-  default_signature_fingerprint`
+  default_signature_fingerprint, sender_email`
 
 function toDraft(row: DraftRow): Draft {
   const content = outboxDraftContent(row)
@@ -315,6 +316,13 @@ export function saveDraft(
         isEffectivelyEmptyDraft(input, defaultSignatureFingerprint) ? 0 : 1,
         defaultSignatureFingerprint
       )
+      db.prepare('UPDATE outbox SET sender_email = ? WHERE account_id = ? AND id = ?').run(
+        input.senderEmail && normalizeEmailKey(input.senderEmail) !== normalizeEmailKey(accountId)
+          ? input.senderEmail
+          : null,
+        accountId,
+        id
+      )
       return
     }
 
@@ -348,6 +356,13 @@ export function saveDraft(
         id
       )
     if (result.changes === 0) throw new Error('draft is unavailable')
+    if (input.senderEmail !== undefined) {
+      db.prepare('UPDATE outbox SET sender_email = ? WHERE account_id = ? AND id = ?').run(
+        normalizeEmailKey(input.senderEmail) === normalizeEmailKey(accountId) ? null : input.senderEmail,
+        accountId,
+        id
+      )
+    }
   })()
   return id
 }

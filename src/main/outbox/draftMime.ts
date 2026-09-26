@@ -33,6 +33,7 @@ export interface DraftMimeStreamAttachment extends AttachmentIdentity {
 }
 
 export interface DraftMimeInput<TAttachment extends AttachmentIdentity = DraftMimeAttachment> {
+  senderEmail?: string
   to: readonly MailAddress[]
   cc: readonly MailAddress[]
   bcc: readonly MailAddress[]
@@ -83,6 +84,7 @@ function draftMimeSegments<T extends AttachmentIdentity>(input: DraftMimeInput<T
     headers: [
       // A checkpoint mirrors half-typed recipients, so addresses are sanitized
       // rather than validated; the send encoder is the boundary that rejects.
+      ...(input.senderEmail ? addressHeader('From', [{ name: '', email: input.senderEmail }], false) : []),
       ...addressHeader('To', input.to, false),
       ...addressHeader('Cc', input.cc, false),
       ...addressHeader('Bcc', input.bcc, false),

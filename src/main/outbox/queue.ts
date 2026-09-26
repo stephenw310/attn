@@ -15,10 +15,12 @@ import { getDraft } from './drafts'
 import { persistPlan, type StoredMachineRow } from './machine'
 import { validateMimeRecipients } from './mime'
 import { outboxAddresses } from './row'
+import { resolveSendAs } from './sendAs'
 
 interface QueueRow {
   id: string
   account_id: string
+  sender_email: string | null
   state: PendingOutboxState | 'composing'
   kind: DraftKind
   to_json: string
@@ -43,12 +45,13 @@ export function undoSendDelayMs(db: Db): number {
 export function queueSend(db: Db, accountId: string, draftId: string, now = Date.now()): QueueSendResult {
   const row = db
     .prepare(
-      `SELECT id, account_id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
+      `SELECT id, account_id, sender_email, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
               gmail_draft_id, rfc_message_id, send_at, attempts, verify_attempts, last_error
        FROM outbox WHERE account_id = ? AND id = ? AND state = 'composing'`
     )
     .get(accountId, draftId) as QueueRow | undefined
   if (!row) throw new Error('draft is unavailable')
+  resolveSendAs(db, accountId, row.sender_email ?? accountId)
 
   const accountSeparator = accountId.lastIndexOf('@')
   if (accountSeparator <= 0 || accountSeparator === accountId.length - 1) {
@@ -78,7 +81,7 @@ export function queueSend(db: Db, accountId: string, draftId: string, now = Date
 export function listPendingOutbox(db: Db, accountId: string): OutboxItem[] {
   const rows = db
     .prepare(
-      `SELECT id, account_id, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
+      `SELECT id, account_id, sender_email, state, kind, to_json, cc_json, bcc_json, subject, updated_at,
               gmail_draft_id, rfc_message_id, send_at, attempts, verify_attempts, last_error
        FROM outbox
        WHERE account_id = ? AND state IN ('queued', 'sending', 'failed', 'needs-review')

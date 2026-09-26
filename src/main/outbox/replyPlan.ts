@@ -10,6 +10,7 @@ export { sanitizeQuoteHtml } from './quoteSanitizer'
 export type ReplyKind = 'reply' | 'replyAll' | 'forward'
 
 export interface ReplyPlan {
+  senderEmail?: string
   to: MailAddress[]
   cc: MailAddress[]
   subject: string
@@ -52,10 +53,14 @@ function latestMessage(messages: readonly ConversationMsg[]): ConversationMsg {
   return messages.reduce((latest, message) => (message.at >= latest.at ? message : latest))
 }
 
-function latestReplyMessage(messages: readonly ConversationMsg[], accountEmail: string): ConversationMsg {
+function latestReplyMessage(
+  messages: readonly ConversationMsg[],
+  accountEmail: string,
+  aliases: readonly string[]
+): ConversationMsg {
   const latest = latestMessage(messages)
-  const self = normalizeEmailKey(accountEmail)
-  const nonSelf = messages.filter((message) => normalizeEmailKey(message.fromEmail) !== self)
+  const self = new Set([accountEmail, ...aliases].map(normalizeEmailKey))
+  const nonSelf = messages.filter((message) => !self.has(normalizeEmailKey(message.fromEmail)))
   return nonSelf.length > 0 ? latestMessage(nonSelf) : latest
 }
 
@@ -146,7 +151,8 @@ export function replySourceMessage(
   kind: ReplyKind,
   conversation: Conversation,
   accountEmail: string,
-  sourceMessageId?: string
+  sourceMessageId?: string,
+  aliases: readonly string[] = []
 ): ConversationMsg {
   if (sourceMessageId !== undefined) {
     const source = conversation.messages.find((message) => message.id === sourceMessageId)
@@ -155,27 +161,40 @@ export function replySourceMessage(
   }
   return kind === 'forward'
     ? latestMessage(conversation.messages)
-    : latestReplyMessage(conversation.messages, accountEmail)
+    : latestReplyMessage(conversation.messages, accountEmail, aliases)
 }
 
 export function planReply(
   kind: ReplyKind,
   conversation: Conversation,
   accountEmail: string,
-  sourceMessageId?: string
+  sourceMessageId?: string,
+  aliases: readonly string[] = []
 ): ReplyPlan {
-  const source = replySourceMessage(kind, conversation, accountEmail, sourceMessageId)
-  const self = new Set([normalizeEmailKey(accountEmail)])
-  const replyTargets =
-    normalizeEmailKey(source.fromEmail) === normalizeEmailKey(accountEmail)
-      ? source.recipients.to
-      : source.recipients.replyTo.length > 0
-        ? source.recipients.replyTo
-        : [{ name: source.fromName, email: source.fromEmail }]
+  const source = replySourceMessage(kind, conversation, accountEmail, sourceMessageId, aliases)
+  const identities = [accountEmail, ...aliases]
+  const self = new Set(identities.map(normalizeEmailKey))
+  // Preserve an outgoing identity; otherwise prefer the address that received this message.
+  const candidates = [
+    source.fromEmail,
+    ...source.recipients.to.map((address) => address.email),
+    ...source.recipients.cc.map((address) => address.email),
+    ...source.recipients.bcc.map((address) => address.email)
+  ]
+  const matched = candidates.find((email) => self.has(normalizeEmailKey(email)))
+  const senderEmail = identities.find(
+    (email) => matched && normalizeEmailKey(email) === normalizeEmailKey(matched)
+  )
+  const replyTargets = self.has(normalizeEmailKey(source.fromEmail))
+    ? source.recipients.to
+    : source.recipients.replyTo.length > 0
+      ? source.recipients.replyTo
+      : [{ name: source.fromName, email: source.fromEmail }]
 
   if (kind === 'forward') {
     const quote = forwardQuote(source, conversation.subject)
     return {
+      senderEmail,
       to: [],
       cc: [],
       subject: prefixedSubject(kind, conversation.subject),
@@ -196,6 +215,7 @@ export function planReply(
   const quote = replyQuote(source)
 
   return {
+    senderEmail,
     to,
     cc,
     subject: prefixedSubject(kind, conversation.subject),

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import type { DraftSaveInput } from '../../shared/drafts'
+import { isValidEmail, normalizeEmailKey } from '../../shared/address'
+import type { DraftSaveInput, SendAsIdentity } from '../../shared/drafts'
 import { ATTN_SIGNATURE_LINE, ATTN_SIGNATURE_URL } from '../../shared/settings'
 import type { Db } from '../db'
 import { textFromRaw } from '../gmail/parse'
@@ -106,9 +107,18 @@ export function cachePrimarySendAs(db: Db, accountId: string, sendAs: ProviderSe
 export async function syncPrimarySendAs(
   db: Db,
   accountId: string,
-  provider: Pick<MailProvider, 'getSendAs'>,
+  provider: Pick<MailProvider, 'getSendAs' | 'listSendAs'>,
   options?: ProviderRequestOptions
 ): Promise<ProviderSendAs | null> {
+  if (provider.listSendAs) {
+    const identities = await provider.listSendAs(options)
+    cacheSendAsIdentities(db, accountId, identities)
+    const primary = identities.find(
+      (identity) => normalizeEmailKey(identity.sendAsEmail) === normalizeEmailKey(accountId)
+    )
+    if (primary) cachePrimarySendAs(db, accountId, primary)
+    return primary ?? null
+  }
   if (!provider.getSendAs) return null
   const sendAs = await provider.getSendAs(accountId, options)
   cachePrimarySendAs(db, accountId, sendAs)
@@ -166,10 +176,20 @@ export function prepareDraftWithCachedPrimarySignature(
   accountId: string,
   draft: DraftSaveInput
 ): PreparedPrimarySignatureDraft {
+  const identities = cachedSendAsIdentities(db, accountId)
+  const identity =
+    identities.find((item) => item.sendAsEmail === draft.senderEmail) ??
+    identities.find((item) => item.isDefault) ??
+    identities[0]
+  draft = { ...draft, senderEmail: draft.senderEmail ?? identity.sendAsEmail }
   if (draft.bodyHtml.trim() || draft.bodyText.trim()) {
     return { draft, defaultSignatureFingerprint: null }
   }
-  const signature = cachedPrimarySignature(db, accountId)
+  const signature = identity.isPrimary
+    ? cachedPrimarySignature(db, accountId)
+    : identity.signature
+      ? signatureBody(identity.signature)
+      : null
   const footerWanted = attnSignatureEnabled(db, accountId)
   if (!signature && !footerWanted) return { draft, defaultSignatureFingerprint: null }
   const applied =
@@ -394,4 +414,64 @@ function rememberUntouchedSignature(key: string, untouched: boolean): void {
   if (untouchedSignatureCache.size <= UNTOUCHED_SIGNATURE_CACHE_LIMIT) return
   const oldest = untouchedSignatureCache.keys().next()
   if (!oldest.done) untouchedSignatureCache.delete(oldest.value)
+}
+
+const SEND_AS_IDENTITIES_SETTING = 'sendAsIdentities'
+
+export function cacheSendAsIdentities(db: Db, accountId: string, identities: ProviderSendAs[]): void {
+  const accepted = identities
+    .filter(
+      (identity) =>
+        isValidEmail(identity.sendAsEmail) &&
+        (normalizeEmailKey(identity.sendAsEmail) === normalizeEmailKey(accountId) ||
+          identity.verificationStatus === 'accepted')
+    )
+    .map((identity) => ({
+      sendAsEmail: identity.sendAsEmail,
+      displayName: identity.displayName ?? '',
+      replyToAddress:
+        identity.replyToAddress && isValidEmail(identity.replyToAddress)
+          ? identity.replyToAddress
+          : undefined,
+      isPrimary: normalizeEmailKey(identity.sendAsEmail) === normalizeEmailKey(accountId),
+      isDefault: identity.isDefault === true,
+      signature: sanitizeQuoteHtml(identity.signature ?? '')
+    }))
+  writeAccountSetting(db, accountId, SEND_AS_IDENTITIES_SETTING, JSON.stringify(accepted))
+}
+
+export function cachedSendAsIdentities(db: Db, accountId: string): ProviderSendAs[] {
+  const raw = readAccountSetting(db, accountId, SEND_AS_IDENTITIES_SETTING)
+  const identities: ProviderSendAs[] = raw ? JSON.parse(raw) : []
+  if (
+    !identities.some((identity) => normalizeEmailKey(identity.sendAsEmail) === normalizeEmailKey(accountId))
+  ) {
+    identities.unshift({
+      sendAsEmail: accountId,
+      isPrimary: true,
+      displayName: readAccountSetting(db, accountId, SEND_AS_DISPLAY_NAME_SETTING) ?? ''
+    })
+  }
+  return identities
+}
+
+export function publicSendAsIdentities(db: Db, accountId: string): SendAsIdentity[] {
+  return cachedSendAsIdentities(db, accountId).map(
+    ({ signature: _signature, verificationStatus: _status, ...identity }) => identity
+  )
+}
+
+export class SendAsUnavailableError extends Error {
+  constructor() {
+    super('This sender is no longer available. Choose a verified From address.')
+    this.name = 'SendAsUnavailableError'
+  }
+}
+
+export function resolveSendAs(db: Db, accountId: string, email: string): ProviderSendAs {
+  const identity = cachedSendAsIdentities(db, accountId).find(
+    (item) => normalizeEmailKey(item.sendAsEmail) === normalizeEmailKey(email)
+  )
+  if (!identity) throw new SendAsUnavailableError()
+  return identity
 }
