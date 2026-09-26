@@ -4,7 +4,7 @@ import { openDatabase } from '../db'
 import { fakeMailProvider } from '../testing/fakes'
 import { encodeDraftMessage } from './draftMime'
 import { draftContentFingerprint } from './draftSync'
-import { closeDraft, getDraft, reopenDraft, saveDraft } from './drafts'
+import { closeDraft, getDraft, reopenDraft, requestDraftMirror, saveDraft } from './drafts'
 import { queueSend, undoQueuedSend } from './queue'
 import {
   cacheSendAsIdentities,
@@ -284,6 +284,81 @@ it('mirrors sender edits through the production drain and reconciles the Gmail e
     expect(createDraft).toHaveBeenCalledOnce()
     expect(updateDraft).toHaveBeenCalledOnce()
     expect(db.prepare('SELECT count(*) AS total FROM outbox').get()).toEqual({ total: 1 })
+  } finally {
+    db.close()
+  }
+})
+
+it.each(['reply', 'replyAll'] as const)(
+  'keeps a sender-only %s edit eligible for sync and reopen',
+  (kind) => {
+    const db = openDatabase(':memory:')
+    try {
+      const input = {
+        ...emptyDraftInput(),
+        kind,
+        senderEmail: ACCOUNT,
+        to: [{ name: 'Maya', email: 'maya@example.com' }],
+        subject: 'Re: Project',
+        threadId: 'thread',
+        quoteText: '> Original'
+      }
+      const untouched = saveDraft(db, ACCOUNT, input)
+      expect(requestDraftMirror(db, ACCOUNT, untouched)).toBe(false)
+      expect(closeDraft(db, ACCOUNT, untouched)).toBe('discarded')
+      const id = saveDraft(db, ACCOUNT, input)
+      saveDraft(db, ACCOUNT, { ...input, id, senderEmail: ALIAS })
+      expect(requestDraftMirror(db, ACCOUNT, id)).toBe(true)
+      expect(closeDraft(db, ACCOUNT, id)).toBe('saved')
+      expect(reopenDraft(db, ACCOUNT, id)?.senderEmail).toBe(ALIAS)
+      saveDraft(db, ACCOUNT, { ...input, id })
+      expect(closeDraft(db, ACCOUNT, id)).toBe('saved')
+      expect(reopenDraft(db, ACCOUNT, id)?.senderEmail ?? ACCOUNT).toBe(ACCOUNT)
+    } finally {
+      db.close()
+    }
+  }
+)
+
+it('uses the refreshed primary Reply-To on the first send without an identity cache', async () => {
+  const db = openDatabase(':memory:')
+  try {
+    const id = saveDraft(db, ACCOUNT, {
+      ...emptyDraftInput(),
+      to: [{ name: '', email: 'you@example.com' }],
+      bodyText: 'hello'
+    })
+    db.prepare(
+      "UPDATE outbox SET state = 'queued', rfc_message_id = '<first-primary@example.com>', send_at = 0 WHERE id = ?"
+    ).run(id)
+    const primary = {
+      sendAsEmail: ACCOUNT,
+      isPrimary: true,
+      displayName: 'Primary Name',
+      replyToAddress: 'reply@example.org'
+    }
+    const createDraft = vi.fn(async ({ raw }: { raw: string }) => {
+      const mime = Buffer.from(raw, 'base64url').toString()
+      expect(mime).toContain(`From: Primary Name <${ACCOUNT}>`)
+      expect(mime).toContain('Reply-To: reply@example.org')
+      return 'primary-draft'
+    })
+    const provider = fakeMailProvider({
+      getSendAs: async () => primary,
+      listSendAs: async () => [primary],
+      createDraft,
+      sendDraft: async () => ({ id: 'sent', threadId: '' })
+    })
+    const sender = new OutboxSender(
+      db,
+      () => ACCOUNT,
+      () => provider,
+      () => {}
+    )
+    await sender.trigger()
+    await sender.stop()
+    expect(createDraft).toHaveBeenCalledOnce()
+    expect(db.prepare('SELECT state FROM outbox WHERE id = ?').get(id)).toEqual({ state: 'sent' })
   } finally {
     db.close()
   }

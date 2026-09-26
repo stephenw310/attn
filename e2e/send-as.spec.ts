@@ -114,3 +114,20 @@ test.describe('source message identity', () => {
     })
   }
 })
+
+test('a sender-only reply edit survives close and relaunch', async ({ app, page, boot }) => {
+  await page.getByTestId('thread-list').waitFor()
+  await emitSeam(app, TEST_CHANNELS.setSendAsIdentities, [
+    { sendAsEmail: 'work@example.org', verificationStatus: 'accepted' }
+  ])
+  await threadRow(page, 'Q3 roadmap review').click()
+  const composer = new ComposerPage(page)
+  await composer.openReply()
+  await page.getByTestId('composer-from-select').click()
+  await page.getByTestId('composer-from-option').filter({ hasText: 'work@example.org' }).click()
+  await page.getByTestId('composer-close').click()
+  const relaunched = await boot.relaunch()
+  await runPaletteCommand(relaunched.page, 'Go to Drafts')
+  await relaunched.page.getByTestId('draft-row').filter({ hasText: 'Q3 roadmap review' }).click()
+  await expect(relaunched.page.getByTestId('composer-from')).toHaveAttribute('data-email', 'work@example.org')
+})

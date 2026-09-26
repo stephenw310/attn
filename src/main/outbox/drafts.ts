@@ -235,12 +235,12 @@ function isEffectivelyEmptyDraft(
  */
 export function isUntouchedThreadDraft(
   draft: DraftSaveInput,
-  forwardEditedSincePlan = false,
+  editedSincePlan = false,
   defaultSignatureFingerprint?: string | null
 ): boolean {
   if (draft.kind === 'new') return false
   return (
-    !forwardEditedSincePlan &&
+    !editedSincePlan &&
     (!hasAuthoredBody(draft) || hasOnlyDefaultPrimarySignature(draft, defaultSignatureFingerprint)) &&
     !draft.attachments.some(
       (attachment) => !attachment.inline && !('planned' in attachment && attachment.planned === true)
@@ -264,14 +264,12 @@ export function shouldMirrorDraft(
   localRevision: number,
   defaultSignatureFingerprint: string | null
 ): boolean {
-  // Forward planning is the only system path that creates a removable regular
-  // attachment, and it writes revision 1. Any later revision therefore means
-  // the user changed the forward even if the final fields alone cannot show it
-  // (most importantly, when they removed every forwarded file).
-  const forwardEditedSincePlan = input.kind === 'forward' && localRevision > 1
+  // Planning writes revision 1. Later checkpoints represent deliberate edits,
+  // including a sender change that leaves the body and recipients untouched.
+  const editedSincePlan = localRevision > 1
   return (
     !isEffectivelyEmptyDraft(input, defaultSignatureFingerprint) &&
-    !isUntouchedThreadDraft(input, forwardEditedSincePlan, defaultSignatureFingerprint)
+    !isUntouchedThreadDraft(input, editedSincePlan, defaultSignatureFingerprint)
   )
 }
 

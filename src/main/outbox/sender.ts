@@ -515,11 +515,13 @@ export class OutboxSender {
     if (senderEmail !== row.account_id && provider.listSendAs) {
       await syncPrimarySendAs(this.db, row.account_id, provider, { signal, priority: 'send' })
     }
-    const identity = resolveSendAs(this.db, row.account_id, senderEmail)
-    const accountName =
+    const primaryName =
       senderEmail === row.account_id
         ? await this.senderDisplayName(row.account_id, provider, signal)
-        : (identity.displayName ?? '')
+        : undefined
+    // The first primary-name lookup can refresh the identity's Reply-To as well.
+    const identity = resolveSendAs(this.db, row.account_id, senderEmail)
+    const accountName = primaryName ?? identity.displayName ?? ''
     const { attachments: storedAttachments, threadId: _threadId, ...draft } = outboxDraftContent(row)
     const options = {
       accountEmail: senderEmail,

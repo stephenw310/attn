@@ -418,6 +418,7 @@ return to this same inline context whenever the parent conversation is locally a
   Matching ignores case. If no identity matches, use the cached Gmail default identity.
   Existing drafts retain their selected identity, including when upgrading a reply to reply-all.
   Choose sender address in the command palette focuses the selector in full and inline composers.
+  A sender-only edit keeps a reply draft when saved and closed.
   Changing From preserves the body and signature. The selected address survives autosave, restart,
   Gmail draft sync, undo-send, and retry. Imported drafts retain their From address. A removed identity
   remains visible on its saved draft but cannot send until the user chooses an available identity.
