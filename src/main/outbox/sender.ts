@@ -23,7 +23,13 @@ import { machineRow, persistPlan, planTransition } from './machine'
 import { buildMime, mimeByteLength, streamMime } from './mime'
 import { DraftAttachmentSourceError, prepareDraftMimeAttachments } from './mirror'
 import { outboxDraftContent } from './row'
-import { primarySenderDisplayName, SEND_AS_DISPLAY_NAME_SETTING, syncPrimarySendAs } from './sendAs'
+import {
+  primarySenderDisplayName,
+  resolveSendAs,
+  SEND_AS_DISPLAY_NAME_SETTING,
+  SendAsUnavailableError,
+  syncPrimarySendAs
+} from './sendAs'
 import { validateAttachmentCap } from './spool'
 
 interface SendRow {
@@ -33,6 +39,7 @@ interface SendRow {
   gmail_draft_id: string | null
   gmail_message_id: string | null
   rfc_message_id: string
+  sender_email?: string | null
   to_json: string
   cc_json: string
   bcc_json: string
@@ -69,6 +76,7 @@ function permanentSendError(error: unknown): boolean {
 }
 
 function userFacingSendError(error: unknown): string {
+  if (error instanceof SendAsUnavailableError) return error.message
   if (error instanceof DraftAttachmentSourceError) {
     return error.retryable
       ? 'An attachment is temporarily unavailable — Attn will retry'
@@ -310,7 +318,7 @@ export class OutboxSender {
     return this.db
       .prepare(
         `SELECT id, account_id, state, gmail_draft_id, gmail_message_id, rfc_message_id,
-                to_json, cc_json,
+                sender_email, to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
                 attempts, verify_attempts
@@ -379,7 +387,7 @@ export class OutboxSender {
     return this.db
       .prepare(
         `SELECT id, account_id, state, gmail_draft_id, gmail_message_id, rfc_message_id,
-                to_json, cc_json,
+                sender_email, to_json, cc_json,
                 bcc_json, subject, body_html, body_text, attachments_json, thread_id, in_reply_to,
                 references_json, quote_html, quote_text, created_at, updated_at, follow_up_at, send_at,
                 attempts, verify_attempts
@@ -502,10 +510,22 @@ export class OutboxSender {
     provider: MailProvider,
     signal?: AbortSignal
   ): Promise<{ raw: string; updateMime?: ProviderMimeUpload }> {
-    const accountName = await this.senderDisplayName(row.account_id, provider, signal)
+    const senderEmail = row.sender_email ?? row.account_id
+    // Revalidate external identities before preparing a remote send. Never substitute the primary sender.
+    if (senderEmail !== row.account_id && provider.listSendAs) {
+      await syncPrimarySendAs(this.db, row.account_id, provider, { signal, priority: 'send' })
+    }
+    const primaryName =
+      senderEmail === row.account_id
+        ? await this.senderDisplayName(row.account_id, provider, signal)
+        : undefined
+    // The first primary-name lookup can refresh the identity's Reply-To as well.
+    const identity = resolveSendAs(this.db, row.account_id, senderEmail)
+    const accountName = primaryName ?? identity.displayName ?? ''
     const { attachments: storedAttachments, threadId: _threadId, ...draft } = outboxDraftContent(row)
     const options = {
-      accountEmail: row.account_id,
+      accountEmail: senderEmail,
+      replyToAddress: identity.replyToAddress,
       accountName,
       rfcMessageId: row.rfc_message_id,
       date: new Date(row.send_at ?? row.updated_at)

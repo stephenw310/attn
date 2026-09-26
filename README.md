@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/b25c6b19-3167-426b-a47b-5d72373083da
 
 - Work from the keyboard. Navigate conversations, archive, snooze, label, and undo actions, including bulk changes.
 - Keep accounts separate. Switch between Gmail inboxes while your other accounts continue to sync.
-- Write and send. Use rich text, attachments, saved snippets, Gmail signatures, and an undo-send delay. Drafts save locally and sync with Gmail.
+- Write and send. Use rich text, attachments, saved snippets, verified Gmail send-as identities, Gmail signatures, and an undo-send delay. Drafts save locally and sync with Gmail.
 - Find and organize mail. Search cached messages, search Gmail for older mail, create inbox splits with rules, and set follow-up reminders.
 - Make it your own. Choose light or dark themes, desktop notifications, and unread badges.
 - Add optional AI. Use your own provider for reply drafts and inline autocomplete. Smart splits use a separate TypeSafe key to sort mail from a description you write.

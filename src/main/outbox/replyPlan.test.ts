@@ -311,3 +311,69 @@ describe('quote HTML sanitizer', () => {
     expect(sanitized).not.toContain('Cell ACell B')
   })
 })
+
+it('treats verified send-as addresses as self when choosing a reply source and recipients', () => {
+  const alias = 'work@example.org'
+  const source = message({
+    recipients: {
+      ...EMPTY_RECIPIENTS,
+      to: [address('Work', alias), address('Me', SELF)],
+      cc: [address('Other', 'other@example.com')]
+    }
+  })
+  const sent = message({ id: 'sent', fromEmail: alias, at: source.at + 1000 })
+  const plan = planReply('replyAll', conversation([source, sent]), SELF, undefined, [alias])
+  expect(plan.sourceMessageId).toBe(source.id)
+  expect(plan.to.map((item) => item.email)).toEqual(['maya@example.com'])
+  expect(plan.cc.map((item) => item.email)).toEqual(['other@example.com'])
+})
+
+describe('reply sender identity', () => {
+  const alias = 'work@example.org'
+  it.each<ReplyKind>(['reply', 'replyAll', 'forward'])('matches received aliases for %s', (kind) => {
+    const source = message({ recipients: { ...EMPTY_RECIPIENTS, to: [address('', 'WORK@example.org')] } })
+    expect(planReply(kind, conversation([source]), SELF, undefined, [alias]).senderEmail).toBe(alias)
+  })
+
+  it.each<ReplyKind>(['reply', 'replyAll', 'forward'])('preserves an owned From for %s', (kind) => {
+    const source = message({ fromEmail: alias, recipients: { ...EMPTY_RECIPIENTS, to: [address('', SELF)] } })
+    expect(planReply(kind, conversation([source]), SELF, source.id, [alias]).senderEmail).toBe(alias)
+  })
+
+  it('prefers To over Cc and Bcc, then uses their first matching address', () => {
+    const source = message({
+      recipients: {
+        to: [address('', SELF)],
+        cc: [address('', alias)],
+        bcc: [address('', 'hidden@example.org')],
+        replyTo: []
+      }
+    })
+    const aliases = [alias, 'hidden@example.org']
+    expect(planReply('reply', conversation([source]), SELF, undefined, aliases).senderEmail).toBe(SELF)
+    source.recipients.to = []
+    expect(planReply('reply', conversation([source]), SELF, undefined, aliases).senderEmail).toBe(alias)
+    source.recipients.cc = []
+    expect(planReply('reply', conversation([source]), SELF, undefined, aliases).senderEmail).toBe(
+      'hidden@example.org'
+    )
+  })
+
+  it('leaves unmatched identities to the default and ignores Reply-To for sender selection', () => {
+    const source = message({
+      recipients: { ...EMPTY_RECIPIENTS, to: [address('', alias)], replyTo: [address('', SELF)] }
+    })
+    expect(planReply('reply', conversation([source]), SELF).senderEmail).toBeUndefined()
+  })
+
+  it('uses the selected source instead of an identity elsewhere in the thread', () => {
+    const older = message({ recipients: { ...EMPTY_RECIPIENTS, to: [address('', alias)] } })
+    const newer = message({
+      id: 'newer',
+      at: older.at + 1000,
+      recipients: { ...EMPTY_RECIPIENTS, to: [address('', SELF)] }
+    })
+    expect(planReply('reply', conversation([older, newer]), SELF, older.id, [alias]).senderEmail).toBe(alias)
+    expect(planReply('reply', conversation([older, newer]), SELF, undefined, [alias]).senderEmail).toBe(SELF)
+  })
+})

@@ -213,6 +213,15 @@ export class GmailMailProvider implements MailProvider {
     return this.client.get(`/settings/sendAs/${encodeURIComponent(email)}`, undefined, options)
   }
 
+  async listSendAs(options?: ProviderRequestOptions): Promise<ProviderSendAs[]> {
+    const result = await this.client.get<{ sendAs?: ProviderSendAs[] }>(
+      '/settings/sendAs',
+      undefined,
+      options
+    )
+    return result.sendAs ?? []
+  }
+
   async listLabels(options?: ProviderRequestOptions): Promise<ProviderLabel[]> {
     const result = await this.client.get<{ labels?: ProviderLabel[] }>('/labels', undefined, options)
     return result.labels ?? []

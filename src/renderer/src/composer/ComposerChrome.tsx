@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { MailAddress } from '../../../shared/address'
-import type { Draft, DraftSaveInput } from '../../../shared/drafts'
+import type { Draft, DraftSaveInput, SendAsIdentity } from '../../../shared/drafts'
+import { createCommand, registerCommands } from '../commands'
 import { Button } from '../components/Button'
 import { Kbd } from '../components/Kbd'
 import { RecipientField, type RecipientFieldHandle } from './RecipientField'
+import { SenderMenu } from './SenderMenu'
 import type { ComposerDraftController } from './useComposerDraft'
 
 interface ComposerHeaderProps {
@@ -36,7 +38,9 @@ interface ComposerEnvelopeProps {
   setShowCopies: React.Dispatch<React.SetStateAction<boolean>>
   subject: string
   setSubject: React.Dispatch<React.SetStateAction<string>>
-  updateFields: (patch: Partial<Pick<DraftSaveInput, 'to' | 'cc' | 'bcc' | 'subject'>>) => void
+  updateFields: (
+    patch: Partial<Pick<DraftSaveInput, 'senderEmail' | 'to' | 'cc' | 'bcc' | 'subject'>>
+  ) => void
   notePendingRecipientChange: () => void
   sendError: string | null
   hasPreservedContent: boolean
@@ -123,6 +127,45 @@ export function ComposerHeader(props: ComposerHeaderProps): React.JSX.Element {
 export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Element | null {
   const { draft, mode } = props
   const [editingRecipients, setEditingRecipients] = useState(draft.kind === 'forward')
+  const senderRef = useRef<HTMLButtonElement>(null)
+  useLayoutEffect(
+    () => registerCommands([createCommand('composer.from', () => senderRef.current?.focus())]),
+    []
+  )
+  const [senderEmail, setSenderEmail] = useState(draft.senderEmail ?? draft.accountId)
+  const [identities, setIdentities] = useState<SendAsIdentity[]>([])
+  useEffect(() => {
+    let active = true
+    void window.attn?.draft
+      .sendAs(draft.accountId)
+      .then((items) => {
+        if (active) setIdentities(items)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [draft.accountId])
+  const sender = (
+    <div
+      className="flex min-h-10 shrink-0 items-center border-b border-edge"
+      data-testid="composer-from"
+      data-email={senderEmail}
+    >
+      <span className="w-10 shrink-0 text-xs font-normal text-ink-dim">From</span>
+      <SenderMenu
+        identities={identities}
+        email={senderEmail}
+        triggerRef={senderRef}
+        disabled={props.closing}
+        onChange={(email) => {
+          setSenderEmail(email)
+          props.updateFields({ senderEmail: email })
+        }}
+      />
+    </div>
+  )
+
   const inline = mode === 'inline'
   const context = inline ? (
     <div className="flex min-h-9 flex-wrap items-center gap-2 text-xs text-ink-dim">
@@ -197,22 +240,14 @@ export function ComposerEnvelope(props: ComposerEnvelopeProps): React.JSX.Elemen
     return (
       <>
         {context}
+        {sender}
         {notices}
       </>
     )
   return (
     <>
       {context}
-      {
-        <div
-          className="flex min-h-10 shrink-0 items-center border-b border-edge"
-          data-testid="composer-from"
-          data-email={draft.accountId}
-        >
-          <span className="w-12 shrink-0 text-xs font-normal text-ink-dim">From</span>
-          <span className="min-w-0 truncate text-xs text-ink-dim">{draft.accountId}</span>
-        </div>
-      }
+      {sender}
       <div className="relative">
         <RecipientField
           ref={props.toFieldRef}

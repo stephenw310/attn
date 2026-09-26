@@ -79,7 +79,13 @@ import {
 import { addInlineImage, isSupportedInlineImageMimeType } from '../outbox/inlineImages'
 import { listPendingOutbox, queueSend, reopenPendingOutbox, undoQueuedSend } from '../outbox/queue'
 import { planReply, replySourceMessage } from '../outbox/replyPlan'
-import { ATTN_SIGNATURE_SETTING, prepareDraftWithCachedPrimarySignature } from '../outbox/sendAs'
+import {
+  ATTN_SIGNATURE_SETTING,
+  cachedSendAsIdentities,
+  prepareDraftWithCachedPrimarySignature,
+  publicSendAsIdentities,
+  resolveSendAs
+} from '../outbox/sendAs'
 import { cleanOutboxSpool, removeDraftAttachment, spoolDraftAttachments } from '../outbox/spool'
 import { isPathInside } from '../pathSafety'
 import {
@@ -350,6 +356,8 @@ function isDraftSaveInput(value: unknown): value is DraftSaveInput {
       )
     })
   return (
+    (draft.senderEmail === undefined ||
+      (typeof draft.senderEmail === 'string' && isValidEmail(draft.senderEmail))) &&
     (draft.id === null || typeof draft.id === 'string') &&
     (draft.kind === 'new' ||
       draft.kind === 'reply' ||
@@ -517,11 +525,23 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (!nonEmptyString(id)) throw new Error('invalid snippet id')
     return deleteSnippet(context.db, id)
   })
+  handle(IPC_CHANNELS.draftSendAs, (_event, accountId) => {
+    const account = requireAccount(context)
+    if (accountId !== account) throw new Error('Account changed')
+    return publicSendAsIdentities(context.db, account)
+  })
   handle(IPC_CHANNELS.draftSave, (_event, draft) => {
     if (!isDraftSaveInput(draft)) throw new Error('invalid draft')
     if (context.test?.consumeDraftSaveFailure()) throw new Error('injected draft save failure')
     const account = requireAccount(context)
     const canonical = canonicalizeRendererDraft(context.db, account, draft)
+    if (
+      canonical.senderEmail &&
+      canonical.senderEmail !==
+        (canonical.id ? getDraft(context.db, account, canonical.id)?.senderEmail : undefined)
+    ) {
+      canonical.senderEmail = resolveSendAs(context.db, account, canonical.senderEmail).sendAsEmail
+    }
     const prepared =
       canonical.id === null
         ? prepareDraftWithCachedPrimarySignature(context.db, account, canonical)
@@ -600,12 +620,26 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       if (originalSourceId && !conversation.messages.some((message) => message.id === originalSourceId)) {
         return existing
       }
-      const plan = planReply('replyAll', conversation, account, originalSourceId)
+      const plan = planReply(
+        'replyAll',
+        conversation,
+        account,
+        originalSourceId,
+        cachedSendAsIdentities(context.db, account).map((identity) => identity.sendAsEmail)
+      )
       const upgraded = upgradeReplyToReplyAll(context.db, account, existing.id, plan.to, plan.cc)
       context.broadcastMailChanged()
       return upgraded
     }
-    if (replySourceMessage(kind, conversation, account, sourceMessageId).bodyState !== 'complete') {
+    if (
+      replySourceMessage(
+        kind,
+        conversation,
+        account,
+        sourceMessageId,
+        cachedSendAsIdentities(context.db, account).map((identity) => identity.sendAsEmail)
+      ).bodyState !== 'complete'
+    ) {
       const provider = context.makeProvider()
       if (provider) {
         await bodyHydrator.request(account, threadId, provider)
@@ -624,11 +658,23 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
       conversation.messages.length === 0 ||
       (sourceMessageId !== undefined &&
         !conversation.messages.some((message) => message.id === sourceMessageId)) ||
-      replySourceMessage(kind, conversation, account, sourceMessageId).bodyState !== 'complete'
+      replySourceMessage(
+        kind,
+        conversation,
+        account,
+        sourceMessageId,
+        cachedSendAsIdentities(context.db, account).map((identity) => identity.sendAsEmail)
+      ).bodyState !== 'complete'
     ) {
       return null
     }
-    const plan = planReply(kind, conversation, account, sourceMessageId)
+    const plan = planReply(
+      kind,
+      conversation,
+      account,
+      sourceMessageId,
+      cachedSendAsIdentities(context.db, account).map((identity) => identity.sendAsEmail)
+    )
     const source = conversation.messages.find((message) => message.id === plan.sourceMessageId)
     const quotedAttachments: StoredDraftAttachment[] = (source?.attachments ?? [])
       .filter(
@@ -659,6 +705,7 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const input: DraftSaveInput = {
       ...emptyDraftInput(),
       kind,
+      senderEmail: plan.senderEmail,
       to: plan.to,
       cc: plan.cc,
       subject: plan.subject,

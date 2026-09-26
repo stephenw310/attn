@@ -116,6 +116,11 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
     from: 28,
     to: 29,
     sql: 'ALTER TABLE split_rules ADD COLUMN description TEXT;'
+  },
+  {
+    from: 29,
+    to: 30,
+    sql: 'ALTER TABLE outbox ADD COLUMN sender_email TEXT;'
   }
 ]
 

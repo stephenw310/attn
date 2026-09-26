@@ -9,6 +9,7 @@ import { parseStoredDraftAttachments, type StoredDraftAttachment } from './draft
  * drifted apart in the first place.
  */
 export interface OutboxContentRow {
+  sender_email?: string | null
   to_json: string
   cc_json: string
   bcc_json: string
@@ -32,6 +33,7 @@ export interface OutboxDraftRow extends OutboxContentRow {
 
 /** Authored content, with attachments as the main-process-owned stored shape. */
 export interface OutboxDraftContent {
+  senderEmail?: string
   to: MailAddress[]
   cc: MailAddress[]
   bcc: MailAddress[]
@@ -56,6 +58,7 @@ export function outboxReferences(value: string): string[] {
 
 export function outboxDraftContent(row: OutboxContentRow): OutboxDraftContent {
   return {
+    ...(row.sender_email ? { senderEmail: row.sender_email } : {}),
     to: outboxAddresses(row.to_json),
     cc: outboxAddresses(row.cc_json),
     bcc: outboxAddresses(row.bcc_json),

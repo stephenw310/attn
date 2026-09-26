@@ -1,7 +1,7 @@
 // Current schema snapshot for new profiles. Every change bumps this version and
 // adds the matching ordered step in migrations.ts; the registry test makes a
 // version-only bump fail.
-export const CURRENT_SCHEMA_VERSION = 29
+export const CURRENT_SCHEMA_VERSION = 30
 
 // The oldest profile this build can upgrade in place. Keep the complete path
 // from this version to CURRENT_SCHEMA_VERSION in migrations.ts.
@@ -287,6 +287,7 @@ CREATE TABLE outbox (
   local_revision    INTEGER NOT NULL DEFAULT 0,
   mirror_revision   INTEGER NOT NULL DEFAULT 0,
   default_signature_fingerprint TEXT,
+  sender_email TEXT,
   remote_fingerprint TEXT,
   rfc_message_id   TEXT,
   -- "Remind me if no reply" deadline chosen at compose (T35/F9); the reminder

@@ -731,6 +731,7 @@ function readConversation(
 }
 
 interface OutboxConversationRow {
+  sender_email: string | null
   id: string
   state: 'queued' | 'sending' | 'sent'
   to_json: string
@@ -788,7 +789,7 @@ export function getConversationForDisplay(
   )
   const rows = db
     .prepare(
-      `SELECT id, state, to_json, cc_json, bcc_json, body_html, body_text, attachments_json,
+      `SELECT id, state, sender_email, to_json, cc_json, bcc_json, body_html, body_text, attachments_json,
               quote_html, quote_text, references_json, rfc_message_id, gmail_message_id, updated_at
        FROM outbox
        WHERE account_id = ? AND thread_id = ?
@@ -822,7 +823,7 @@ export function getConversationForDisplay(
           (message) =>
             canonicalBody.length > 0 &&
             !claimedConfirmedIds.has(message.id) &&
-            normalizeEmailKey(message.fromEmail) === normalizeEmailKey(account) &&
+            normalizeEmailKey(message.fromEmail) === normalizeEmailKey(row.sender_email ?? account) &&
             Math.abs(message.at - row.updated_at) <= LEGACY_SENT_MATCH_WINDOW_MS &&
             canonicalSentBody(message.bodyText) === canonicalBody
         )
@@ -842,7 +843,7 @@ export function getConversationForDisplay(
         rfcMessageId: row.rfc_message_id,
         references: parseJson(row.references_json, []),
         fromName: 'Me',
-        fromEmail: account ?? accountId,
+        fromEmail: row.sender_email ?? account ?? accountId,
         at: row.updated_at,
         recipients: {
           to: parseJson(row.to_json, []),

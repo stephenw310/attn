@@ -27,7 +27,7 @@ import { GmailApiError, GmailClient } from '../gmail/client'
 import type { GmailThread } from '../gmail/parse'
 import { GmailMailProvider } from '../gmail/provider'
 import { reconcileRemoteDraft } from '../outbox/draftSync'
-import { cachePrimarySendAs } from '../outbox/sendAs'
+import { cachePrimarySendAs, cacheSendAsIdentities } from '../outbox/sendAs'
 import { writeSetting } from '../settings'
 import { reconcileThreadExistence } from '../sync/existenceSweep'
 import { refreshMessageBodyFromStore, removeAccountFromIndex, searchMessageIndex } from '../sync/fts'
@@ -228,6 +228,11 @@ export class TestOperations implements TestHooks {
         )
       }
       return pending.count
+    }
+    if (channel === TEST_CHANNELS.setSendAsIdentities) {
+      if (!accountId || !Array.isArray(args[0])) throw new Error('invalid identities')
+      cacheSendAsIdentities(db, accountId, args[0])
+      return undefined
     }
     if (channel === TEST_CHANNELS.setSendAsSignature) {
       const signature = args[0]

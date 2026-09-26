@@ -25,6 +25,7 @@ interface DraftMirrorRow {
   state: 'composing' | 'drafted' | 'discarding'
   kind: DraftKind
   gmail_draft_id: string | null
+  sender_email?: string | null
   to_json: string
   cc_json: string
   bcc_json: string
@@ -59,7 +60,7 @@ function nextPending(
 ): DraftMirrorRow | undefined {
   const rows = db
     .prepare(
-      `SELECT id, state, kind, gmail_draft_id, to_json, cc_json, bcc_json, subject, body_html,
+      `SELECT id, state, kind, gmail_draft_id, sender_email, to_json, cc_json, bcc_json, subject, body_html,
               body_text, attachments_json, thread_id, in_reply_to, references_json, quote_html,
               quote_text, source_message_id, local_revision, default_signature_fingerprint
        FROM outbox
@@ -246,7 +247,8 @@ async function mirrorComposing(
   const content = outboxDraftContent(row)
   // The MIME body carries authored content only: attachments are prepared
   // separately below, and the thread id rides on the Gmail request instead.
-  const { attachments: _attachments, threadId: _threadId, ...body } = content
+  const { attachments: _attachments, threadId: _threadId, ...fields } = content
+  const body = { ...fields, senderEmail: content.senderEmail ?? accountId }
   const onRemoteMissing = (): boolean => {
     db.prepare(
       `UPDATE outbox SET gmail_draft_id = NULL, mirror_revision = 0

@@ -345,6 +345,7 @@ const api = {
     search: (query: string): Promise<ContactSearchResult[]> => invoke(IPC_CHANNELS.contactsSearch, query)
   },
   draft: {
+    sendAs: (accountId: string) => invoke(IPC_CHANNELS.draftSendAs, accountId),
     save: (draft: DraftSaveInput): Promise<{ id: string; draft: Draft | null }> =>
       invoke(IPC_CHANNELS.draftSave, draft),
     get: (id: string): Promise<Draft | null> => invoke(IPC_CHANNELS.draftGet, id),

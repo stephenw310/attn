@@ -332,6 +332,7 @@ it('openDatabase migrates an existing profile before returning it', () => {
   try {
     const old = openDatabase(path)
     old.exec(`
+      ALTER TABLE outbox DROP COLUMN sender_email;
       ALTER TABLE split_rules DROP COLUMN description;
       DROP TABLE split_judgments;
       ALTER TABLE accounts ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
@@ -370,6 +371,7 @@ it('upgrades a populated v21 profile through every retained migration', () => {
     // Reverse only the recorded v21..v28 changes to build a complete v21
     // profile from the authoritative current snapshot.
     db.exec(`
+      ALTER TABLE outbox DROP COLUMN sender_email;
       ALTER TABLE split_rules DROP COLUMN description;
       DROP TABLE split_judgments;
       DROP TABLE thread_mailboxes;
@@ -458,5 +460,32 @@ it('rejects databases older than the retained migration history', () => {
     )
   } finally {
     db.close()
+  }
+})
+
+it('upgrades v29 outbox rows without changing their contents or owning account', () => {
+  const db = new Database(':memory:')
+  const fresh = openDatabase(':memory:')
+  try {
+    db.exec(`CREATE TABLE outbox (id TEXT PRIMARY KEY, account_id TEXT, body_text TEXT, state TEXT);
+      INSERT INTO outbox VALUES ('saved', 'me@example.com', 'Keep this draft', 'drafted');
+      PRAGMA user_version = 29;`)
+    migrateSchema(db, 29)
+    expect(db.prepare('SELECT * FROM outbox').get()).toEqual({
+      id: 'saved',
+      account_id: 'me@example.com',
+      body_text: 'Keep this draft',
+      state: 'drafted',
+      sender_email: null
+    })
+    expect(db.pragma('user_version', { simple: true })).toBe(CURRENT_SCHEMA_VERSION)
+    expect(
+      (fresh.pragma('table_info(outbox)') as { name: string }[]).some(
+        (column) => column.name === 'sender_email'
+      )
+    ).toBe(true)
+  } finally {
+    db.close()
+    fresh.close()
   }
 })

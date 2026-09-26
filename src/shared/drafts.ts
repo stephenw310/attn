@@ -1,5 +1,13 @@
 import type { MailAddress } from './address'
 
+export interface SendAsIdentity {
+  sendAsEmail: string
+  displayName?: string
+  replyToAddress?: string
+  isPrimary?: boolean
+  isDefault?: boolean
+}
+
 export type DraftKind = 'new' | 'reply' | 'replyAll' | 'forward'
 
 export interface Draft {
@@ -7,10 +15,11 @@ export interface Draft {
   /**
    * The owning account (F18/F6): bound at open — the account active when a
    * new draft was created, the source thread's owner for replies/forwards —
-   * and never rebound. The composer's From renders this, not whatever account
-   * happens to be active.
+   * and never rebound. The selected sender is one of this account's Gmail identities.
    */
   accountId: string
+  /** Selected Gmail send-as address. Absent on legacy drafts means the owning account. */
+  senderEmail?: string
   kind: DraftKind
   to: MailAddress[]
   cc: MailAddress[]

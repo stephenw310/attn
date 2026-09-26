@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { normalizeEmailKey } from '../../shared/address'
 import type { DraftKind, DraftSaveInput } from '../../shared/drafts'
 import type { Db } from '../db'
 import type { GmailMessage } from '../gmail/parse'
@@ -43,6 +44,7 @@ export function planDraftConflict(input: DraftConflictInput): DraftConflictDecis
 
 type FingerprintDraft = Pick<
   DraftSaveInput,
+  | 'senderEmail'
   | 'to'
   | 'cc'
   | 'bcc'
@@ -59,6 +61,7 @@ type FingerprintDraft = Pick<
 
 export function draftContentFingerprint(draft: FingerprintDraft): string {
   const semantic = {
+    ...(draft.senderEmail ? { senderEmail: draft.senderEmail.toLowerCase() } : {}),
     to: draft.to,
     cc: draft.cc,
     bcc: draft.bcc,
@@ -244,9 +247,11 @@ export async function parseRemoteDraft(
     kind === 'new'
       ? { bodyHtml: bodies.bodyHtml, bodyText: bodies.bodyText, quoteHtml: '', quoteText: '' }
       : splitQuotedTrail(bodies.bodyHtml, bodies.bodyText)
+  const sender = parseAddressList(header(message, 'From'))[0]?.email
   const input: DraftSaveInput = {
     id: null,
     followUpAt: null,
+    ...(sender && normalizeEmailKey(sender) !== normalizeEmailKey(accountId) ? { senderEmail: sender } : {}),
     kind,
     to: parseAddressList(header(message, 'To')),
     cc: parseAddressList(header(message, 'Cc')),
@@ -285,7 +290,7 @@ function findLocalRow(db: Db, accountId: string, remote: ParsedRemoteDraft): Loc
   const candidates = db
     .prepare(
       `SELECT id, state, kind, local_revision, mirror_revision, updated_at, remote_fingerprint,
-              to_json, cc_json, bcc_json, subject, body_html, body_text, attachments_json, thread_id,
+              sender_email, to_json, cc_json, bcc_json, subject, body_html, body_text, attachments_json, thread_id,
               in_reply_to, references_json, quote_html, quote_text
        FROM outbox WHERE account_id = ? AND thread_id = ? AND kind IN (${kinds.map(() => '?').join(', ')})
          AND gmail_draft_id IS NULL AND state IN ('composing', 'drafted') ORDER BY updated_at DESC`
@@ -369,9 +374,10 @@ function writeRemoteDraft(
        id, account_id, gmail_draft_id, gmail_message_id, state, kind, to_json, cc_json, bcc_json,
        subject, body_html, body_text, attachments_json, thread_id, source_message_id, in_reply_to,
        references_json, quote_html, quote_text, created_at, updated_at, local_revision, mirror_revision,
-       remote_fingerprint
-     ) VALUES (?, ?, ?, ?, 'drafted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       remote_fingerprint, sender_email
+     ) VALUES (?, ?, ?, ?, 'drafted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
+       sender_email = excluded.sender_email,
        gmail_draft_id = excluded.gmail_draft_id,
        gmail_message_id = excluded.gmail_message_id,
        state = 'drafted', kind = excluded.kind, to_json = excluded.to_json, cc_json = excluded.cc_json,
@@ -405,7 +411,8 @@ function writeRemoteDraft(
     remote.updatedAt,
     revision,
     revision,
-    remote.fingerprint
+    remote.fingerprint,
+    input.senderEmail ?? null
   )
 }
 

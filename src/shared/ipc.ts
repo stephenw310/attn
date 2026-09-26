@@ -71,6 +71,7 @@ export const IPC_CHANNELS = {
   aiStyleExamples: 'ai:styleExamples',
   aiStreamEvent: 'ai:streamEvent',
   contactsSearch: 'contacts:search',
+  draftSendAs: 'draft:sendAs',
   draftSave: 'draft:save',
   draftGet: 'draft:get',
   draftList: 'draft:list',
@@ -176,6 +177,7 @@ export const TEST_CHANNELS = {
   delayDraftReopen: 'attn:test:delayDraftReopen',
   delayDraftInlineImage: 'attn:test:delayDraftInlineImage',
   updateMessageBody: 'attn:test:updateMessageBody',
+  setSendAsIdentities: 'attn:test:setSendAsIdentities',
   setSendAsSignature: 'attn:test:setSendAsSignature',
   failNextDraftSave: 'attn:test:failNextDraftSave',
   markDraftMirrored: 'attn:test:markDraftMirrored',
@@ -260,6 +262,7 @@ export interface InvokeChannels {
   // toggle is on, and the transport strips them again when it is off.
   [IPC_CHANNELS.aiStyleExamples]: { args: [excludeThreadId: string]; result: string[] }
   [IPC_CHANNELS.contactsSearch]: { args: [query: string]; result: ContactSearchResult[] }
+  [IPC_CHANNELS.draftSendAs]: { args: [accountId: string]; result: import('./drafts').SendAsIdentity[] }
   [IPC_CHANNELS.draftSave]: {
     args: [draft: DraftSaveInput]
     result: { id: string; draft: Draft | null }

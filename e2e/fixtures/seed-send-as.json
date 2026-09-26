@@ -1,0 +1,51 @@
+{
+  "account": "seed@attn.test",
+  "labels": [],
+  "threads": [
+    {
+      "id": "t-received",
+      "messages": [
+        {
+          "id": "m-received",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:00",
+          "from": "Maya <maya@example.com>",
+          "to": "WORK@example.org",
+          "subject": "received identity",
+          "bodyText": "Message for sender selection."
+        }
+      ]
+    },
+    {
+      "id": "t-sent",
+      "messages": [
+        {
+          "id": "m-sent",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:00",
+          "from": "Work <work@example.org>",
+          "to": "Maya <maya@example.com>",
+          "subject": "sent identity",
+          "bodyText": "Message for sender selection."
+        }
+      ]
+    },
+    {
+      "id": "t-unmatched",
+      "messages": [
+        {
+          "id": "m-unmatched",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:00",
+          "from": "Maya <maya@example.com>",
+          "to": "list@example.com",
+          "subject": "unmatched identity",
+          "bodyText": "Message for sender selection."
+        }
+      ]
+    }
+  ]
+}
