@@ -1,0 +1,20 @@
+{
+  "account": "seed@attn.test",
+  "threads": [
+    {
+      "id": "t-image-sizing",
+      "messages": [
+        {
+          "id": "m-image-sizing",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:00",
+          "from": "Alert Sender <alert@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Alert with a thin image header",
+          "bodyHtml": "<style>#stylesheet-ratio{aspect-ratio:2 / 1}</style><div id=alert-canvas style=\"width:600px;max-width:100%;background:#005eb8;padding:16px;box-sizing:border-box\"><div style=\"background:white;padding:16px\"><img id=header-image src=\"https://sizing.attn.test/header.gif\" width=600 height=24 style=\"display:block;width:100%\"><img id=spacer-image src=\"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=\" width=600 height=1 style=\"display:block;width:100%\"><p id=alert-copy>Your account alert is ready to read.</p><img id=natural-image src=\"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=\" style=\"width:24px\"><img id=authored-ratio src=\"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=\" width=600 height=1 style=\"width:24px;aspect-ratio:2 / 1\"><img id=stylesheet-ratio src=\"data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=\" width=600 height=1 style=\"width:24px\"></div></div>"
+        }
+      ]
+    }
+  ]
+}
