@@ -116,7 +116,7 @@ function frameReset({ surface, layout, appearance, scrollable }: MailFramePresen
     color: #60a5fa !important;
   }`
   }
-  img { max-width: 100%; height: auto; }
+  img { max-width: 100%; height: auto; aspect-ratio: var(--attn-mail-image-ratio, auto); }
   img[${MAIL_IMAGE_PENDING_MARKER}] { visibility: hidden !important; }
   img[data-remote-blocked="true"] { visibility: hidden !important; }
   table { max-width: 100%; }
@@ -267,6 +267,13 @@ export function mailFrameDocument({
   if (blockRemoteImages) suppressBlockedRemoteImages(template.content, TRANSPARENT_IMAGE)
   replaceCidSources(template.content, inlineImages)
   template.content.querySelectorAll('img').forEach((image) => {
+    // The responsive height reset must use the sender's dimensions. Using a
+    // spacer's intrinsic 1:1 ratio can turn a wide, thin header into a square.
+    const width = Number(image.getAttribute('width'))
+    const height = Number(image.getAttribute('height'))
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      image.style.setProperty('--attn-mail-image-ratio', `${width} / ${height}`)
+    }
     image.setAttribute(MAIL_IMAGE_PENDING_MARKER, '')
   })
   const trimMatch = allowTrim ? findHtmlTrimStart(template.content) : null
