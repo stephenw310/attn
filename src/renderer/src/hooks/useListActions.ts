@@ -107,6 +107,16 @@ export function useListActions(options: Options): ListActions {
     })
   }, [])
 
+  const pinOpenedThread = useCallback((threadId: string) => {
+    const { records, selectedThreadIdRef } = latest.current
+    // Cached rows can be opened before a mailbox or split restore finishes.
+    // The user's choice supersedes that saved cursor, including when a
+    // mark-read refresh is still revalidating the list behind the reader.
+    records.pendingViewRestore.current = null
+    records.pendingSplitRestore.current = null
+    selectedThreadIdRef.current = threadId
+  }, [])
+
   const openSelected = useCallback(() => {
     const options = latest.current
     const { searchOpen, view, selectedIndex, threads } = options
@@ -129,10 +139,10 @@ export function useListActions(options: Options): ListActions {
     const thread = threads[selectedIndex]
     if (!thread) return
     if (!searchOpen) noteRowOpened(thread.id, selectedIndex)
-    options.selectedThreadIdRef.current = thread.id
+    pinOpenedThread(thread.id)
     options.setReaderOpen(true)
     options.reopenDraftForThread(thread.id)
-  }, [noteRowOpened])
+  }, [noteRowOpened, pinOpenedThread])
 
   const closeReader = useCallback(() => {
     const options = latest.current
@@ -201,14 +211,14 @@ export function useListActions(options: Options): ListActions {
       // Opening unread mail can immediately broadcast a mark-read refresh. Pin
       // the identity before that refresh starts; the effect that mirrors index
       // changes is deliberately too late for this transition.
-      options.selectedThreadIdRef.current = thread.id
+      pinOpenedThread(thread.id)
       if (!options.searchOpen) noteRowOpened(thread.id, index)
       options.setDetachedDraftThread(null)
       options.setSelectedIndex(index)
       options.setReaderOpen(true)
       options.reopenDraftForThread(thread.id)
     },
-    [noteRowOpened]
+    [noteRowOpened, pinOpenedThread]
   )
 
   const openThreadFromList = useCallback(
@@ -256,15 +266,18 @@ export function useListActions(options: Options): ListActions {
   // While reading, J/K opens the next/previous conversation at its newest
   // message or restored draft (SPEC §5) — the same entry point Enter and a row
   // click use, so a Draft chip behaves identically however the row is reached.
-  const readNextThread = useCallback((index: number) => {
-    const options = latest.current
-    const { view, searchOpen } = options
-    if (!options.readerOpen || (!searchOpen && (view === 'drafts' || view === 'outbox'))) return
-    const thread = options.threads[index]
-    if (!thread) return
-    options.selectedThreadIdRef.current = thread.id
-    options.reopenDraftForThread(thread.id)
-  }, [])
+  const readNextThread = useCallback(
+    (index: number) => {
+      const options = latest.current
+      const { view, searchOpen } = options
+      if (!options.readerOpen || (!searchOpen && (view === 'drafts' || view === 'outbox'))) return
+      const thread = options.threads[index]
+      if (!thread) return
+      pinOpenedThread(thread.id)
+      options.reopenDraftForThread(thread.id)
+    },
+    [pinOpenedThread]
+  )
 
   const visibleRowCount = useCallback((): number => {
     const { searchDraftMode, searchDrafts, searchOpen, threads, view, realDrafts, realOutbox } =

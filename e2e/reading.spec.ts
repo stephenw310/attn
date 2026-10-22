@@ -1,9 +1,54 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { TEST_CHANNELS } from '../src/shared/ipc'
+import { IPC_CHANNELS, TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
+import { threadRow } from './nav'
+import { expectResponseHeld, flushRendererIpc, holdNextResponse } from './seams'
 
 test.use({ seed: 'fixtures/seed-inbox.json' })
+
+test.describe('reader selection during a list refresh', () => {
+  test.use({ seed: 'fixtures/seed-splits.json' })
+
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`keeps the clicked conversation when a pending list restore finishes in ${colorScheme}`, async ({
+      app,
+      page
+    }) => {
+      await page.emulateMedia({ colorScheme })
+      await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
+      await page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]').click()
+      await expect(page.getByTestId('thread-row')).toHaveCount(2)
+      await flushRendererIpc(page)
+
+      // Opening unread mail starts a refresh. Return to the list while its old
+      // rows are visible, then choose another conversation before it finishes.
+      const release = await holdNextResponse(app, IPC_CHANNELS.mailListThreads)
+      try {
+        await threadRow(page, 'Dinner Friday?').click()
+        await expect(page.getByTestId('conversation-subject')).toHaveText('Dinner Friday?')
+        await expectResponseHeld(app)
+        await page
+          .getByTestId('sidebar-mailbox')
+          .filter({ hasText: /^Inbox/ })
+          .click()
+        await threadRow(page, 'Weekend walk').click()
+        await expect(page.getByTestId('conversation-subject')).toHaveText('Weekend walk')
+      } finally {
+        await release()
+      }
+      await flushRendererIpc(page)
+      await expect(page.getByTestId('conversation-subject')).toHaveText('Weekend walk')
+      await expect(page.getByTestId('plain-text-body')).toHaveText('The trail should be quiet this weekend.')
+      mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+      await page.screenshot({
+        path: join(__dirname, `.artifacts/reader-selection-${colorScheme}.png`)
+      })
+      await page.getByTestId('conversation-back').click()
+      await expect(threadRow(page, 'Weekend walk')).toHaveAttribute('data-selected', 'true')
+    })
+  }
+})
 
 test('moves between messages with N and P and toggles the active message with O', async ({
   page

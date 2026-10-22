@@ -184,6 +184,39 @@ test('opening a row records where the list was, so returning restores it', async
   }
 })
 
+test.each(['click', 'Enter', 'next', 'previous'] as const)(
+  'opening a conversation with %s supersedes pending mailbox and split restores',
+  async (action) => {
+    const harness = await mount()
+    try {
+      harness.store.pendingViewRestore.current = {
+        view: 'inbox',
+        record: { rowId: 'thread-1', index: 0, scrollTop: 0 }
+      }
+      harness.store.pendingSplitRestore.current = {
+        id: 'other',
+        record: { rowId: 'thread-1', index: 0, scrollTop: 0 }
+      }
+      harness.state.readerOpen = action === 'next' || action === 'previous'
+      await harness.render()
+      await act(async () => {
+        const actions = harness.actions()
+        if (action === 'click') actions.openThreadFromList(2)
+        else if (action === 'Enter') actions.openSelected()
+        else if (action === 'next') actions.navigateNext()
+        else actions.navigatePrevious()
+      })
+      expect(harness.store.pendingViewRestore.current).toBeNull()
+      expect(harness.store.pendingSplitRestore.current).toBeNull()
+      expect(harness.state.opened).toEqual([
+        action === 'previous' ? 'thread-1' : action === 'Enter' ? 'thread-2' : 'thread-3'
+      ])
+    } finally {
+      await harness.unmount()
+    }
+  }
+)
+
 test('the triage verbs act on the whole selection when there is one', async () => {
   const harness = await mount()
   try {
