@@ -1,0 +1,53 @@
+{
+  "account": "seed@attn.test",
+  "threads": [
+    {
+      "id": "t-height-0",
+      "messages": [
+        {
+          "id": "m-height-0",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "09:00",
+          "from": "Customer care <care@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Percentage-height letter",
+          "bodyText": "Thank you for contacting us. Your inquiry has been received. Customer care",
+          "bodyHtml": "<style>@layer sender{html,body{height:100%!important}html{min-height:100%!important}body{margin:20px!important;padding:16px!important;background:#e5e7eb!important}p{margin:0}}</style><table id=\"letter\" width=\"100%\" height=\"100%\" style=\"background:white;border-collapse:collapse\"><tr><td style=\"padding:24px\"><p>Thank you for contacting us.</p><div id=\"changing-content\" style=\"height:240px\">Your inquiry has been received.</div><p id=\"letter-end\">Customer care</p></td></tr></table>"
+        }
+      ]
+    },
+    {
+      "id": "t-height-1",
+      "messages": [
+        {
+          "id": "m-height-1",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "10:00",
+          "from": "Customer care <care@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Logical-height wide letter",
+          "bodyText": "Thank you for contacting us. Your inquiry has been received. Customer care",
+          "bodyHtml": "<style>@layer sender{html{block-size:100%!important;min-block-size:100%!important}body{block-size:100%!important;box-sizing:content-box!important}body{margin:20px!important;padding:16px!important;background:#e5e7eb!important}p{margin:0}}</style><table id=\"letter\" width=\"100%\" height=\"100%\" style=\"background:white;border-collapse:collapse\"><tr><td style=\"padding:24px\"><p>Thank you for contacting us.</p><div id=\"changing-content\" style=\"height:240px\">Your inquiry has been received.</div><div id=\"wide-copy\" style=\"width:1200px\">Wide details remain reachable by horizontal scrolling.</div><p id=\"letter-end\">Customer care</p></td></tr></table>"
+        }
+      ]
+    },
+    {
+      "id": "t-height-2",
+      "messages": [
+        {
+          "id": "m-height-2",
+          "labelIds": ["INBOX"],
+          "receivedDaysAgo": 0,
+          "receivedAt": "11:00",
+          "from": "Customer care <care@example.com>",
+          "to": "seed@attn.test",
+          "subject": "Fixed-height letter",
+          "bodyText": "Thank you for contacting us. Your inquiry has been received. Customer care",
+          "bodyHtml": "<style>@layer sender{body{height:500px!important}body{margin:20px!important;padding:16px!important;background:#e5e7eb!important}p{margin:0}}</style><table id=\"letter\" width=\"100%\" height=\"100%\" style=\"background:white;border-collapse:collapse\"><tr><td style=\"padding:24px\"><p>Thank you for contacting us.</p><div id=\"changing-content\" style=\"height:240px\">Your inquiry has been received.</div><p id=\"letter-end\">Customer care</p></td></tr></table>"
+        }
+      ]
+    }
+  ]
+}

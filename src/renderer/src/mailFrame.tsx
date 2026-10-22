@@ -139,10 +139,23 @@ const protectedScrollbarCss = `@layer {
   ::-webkit-scrollbar { display: block !important; }
 }`
 
+// Auto-sized reader frames cannot use their own viewport as a height constraint.
+// Keep sender body padding and margins, but break percentage-height inheritance
+// at the root. The first layer also wins over sender !important declarations.
+const protectedReaderSizingCss = `@layer {
+  :root {
+    height: auto !important;
+    min-height: 0 !important;
+    block-size: auto !important;
+    min-block-size: 0 !important;
+  }
+}`
+
 /** Wrap prepared body markup in the one scriptless `about:srcdoc` shell. */
 export function mailFrameShell(body: string, presentation: MailFramePresentation): string {
   const renderedAppearance = presentation.surface === 'light' ? 'light' : presentation.appearance
-  return `<!doctype html><html id="attn-mail-root" data-theme-appearance="${renderedAppearance}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${MAIL_FRAME_CSP}"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${protectedScrollbarCss}${frameReset(presentation)}</style></head><body id="attn-mail-body">${body}</body></html>`
+  const sizingCss = presentation.scrollable ? '' : protectedReaderSizingCss
+  return `<!doctype html><html id="attn-mail-root" data-theme-appearance="${renderedAppearance}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${MAIL_FRAME_CSP}"><meta name="color-scheme" content="${renderedAppearance}"><base target="_blank"><style>${sizingCss}${protectedScrollbarCss}${frameReset(presentation)}</style></head><body id="attn-mail-body">${body}</body></html>`
 }
 
 function freezeViewportHeightUnits(css: string): string {
