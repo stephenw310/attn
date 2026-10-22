@@ -266,7 +266,17 @@ function SingleMessageBody({
         doc.documentElement.scrollWidth > doc.documentElement.clientWidth ? HORIZONTAL_SCROLLBAR_HEIGHT : 0
       doc.documentElement.style.setProperty('--attn-trim-scrollbar-height', `${scrollbarHeight}px`)
       doc.documentElement.toggleAttribute(TRIM_COLLAPSED_ATTRIBUTE, !expanded)
-      const scrollHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight, 1)
+      const root = doc.documentElement
+      const scrollY = doc.defaultView?.scrollY ?? 0
+      // Root scrollHeight is at least the viewport height, even after content
+      // shrinks. Adding a scrollbar allowance to that floor grows the frame.
+      // Use the root's content box, retaining scroll overflow for positioned mail.
+      const scrollHeight = Math.max(
+        root.getBoundingClientRect().bottom + scrollY,
+        doc.body.getBoundingClientRect().top + scrollY + doc.body.scrollHeight,
+        root.scrollHeight > root.clientHeight ? root.scrollHeight : 0,
+        1
+      )
       if (scrollHeight > MAX_SAFE_BODY_HEIGHT) {
         setOversizedSrcDoc(srcDoc)
         return
