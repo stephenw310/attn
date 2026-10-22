@@ -251,6 +251,7 @@ Conflict rule: server state wins, except locally-pending actions replay on top o
 - 60fps scroll while progressively loading through the 10,000-thread performance profile; initial mailbox reads return no more than 100 rows.
 - Unloaded mailboxes show a loading state rather than an empty state. Spam and Trash paging reads matching mailbox metadata without scanning all account messages or materializing message bodies.
 - Opening a cached conversation renders in < 50ms; `Esc` returns instantly with scroll + selection intact.
+- Opening a conversation cancels pending mailbox and split selection restores. A delayed list refresh preserves the newly opened conversation.
 - Auto-advance never lands on a stale (just-triaged) row.
 - Every message's full recipient set is inspectable in two interactions or fewer; attachments download to the OS Downloads folder and are revealed on completion.
 - Quote/signature collapsing never reduces an all-quote/all-signature message to a blank card, never hides content without a visible expander, and expanding/collapsing is instant (no network) without moving the control or remounting the HTML document.
