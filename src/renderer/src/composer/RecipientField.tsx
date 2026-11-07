@@ -28,6 +28,62 @@ export interface RecipientFieldHandle {
   hasRecipients: () => boolean
 }
 
+function RecipientChip({
+  recipient,
+  onRemove
+}: {
+  recipient: MailAddress
+  onRemove: () => void
+}): React.JSX.Element {
+  const [selected, setSelected] = useState(false)
+  const select = (element: HTMLButtonElement): void => {
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    setSelected(true)
+  }
+
+  return (
+    <span
+      className={`inline-flex max-w-full items-center rounded bg-active text-xs text-ink ${selected ? 'ring-1 ring-accent' : ''}`}
+      data-email={recipient.email}
+      data-testid="recipient-chip"
+      data-selected={selected ? 'true' : 'false'}
+    >
+      <button
+        type="button"
+        className="flex min-w-0 select-all items-center gap-1 rounded-l py-1 pl-2 pr-1 text-left outline-none"
+        aria-label={`Select ${recipient.email}`}
+        title={recipient.email}
+        data-tooltip=""
+        data-testid="recipient-select"
+        onFocus={(event) => select(event.currentTarget)}
+        onClick={(event) => select(event.currentTarget)}
+        onBlur={() => setSelected(false)}
+        onCopy={(event) => {
+          event.clipboardData.setData('text/plain', recipient.email)
+          event.preventDefault()
+        }}
+      >
+        {recipient.name && <span className="truncate">{recipient.name}</span>}
+        <span className={`truncate ${recipient.name ? 'max-w-40 text-[10px] text-ink-dim' : ''}`}>
+          {recipient.name ? `<${recipient.email}>` : recipient.email}
+        </span>
+      </button>
+      <button
+        type="button"
+        className="shrink-0 select-none rounded-r py-1 pr-2 text-ink-faint hover:text-ink"
+        aria-label={`Remove ${recipient.email}`}
+        onClick={onRemove}
+      >
+        ×
+      </button>
+    </span>
+  )
+}
+
 export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldProps>(function RecipientField(
   { field, label, recipients, autoFocus = false, onChange, onPendingChange },
   ref
@@ -97,25 +153,11 @@ export const RecipientField = forwardRef<RecipientFieldHandle, RecipientFieldPro
         className={`flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-1.5 ${field === 'to' ? 'pr-16' : ''}`}
       >
         {recipients.map((recipient) => (
-          <span
+          <RecipientChip
             key={recipient.email}
-            className="inline-flex max-w-full items-center gap-1 rounded bg-active px-2 py-1 text-xs text-ink"
-            data-email={recipient.email}
-            data-testid="recipient-chip"
-          >
-            <span className="truncate">{recipient.name || recipient.email}</span>
-            {recipient.name && (
-              <span className="max-w-40 truncate text-[10px] text-ink-dim">&lt;{recipient.email}&gt;</span>
-            )}
-            <button
-              type="button"
-              className="text-ink-faint hover:text-ink"
-              aria-label={`Remove ${recipient.email}`}
-              onClick={() => onChange(recipients.filter((candidate) => candidate.email !== recipient.email))}
-            >
-              ×
-            </button>
-          </span>
+            recipient={recipient}
+            onRemove={() => onChange(recipients.filter((candidate) => candidate.email !== recipient.email))}
+          />
         ))}
         <input
           ref={inputRef}

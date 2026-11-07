@@ -1192,6 +1192,75 @@ test('discards a draft with Mod+Shift+D from the composer and Drafts list', asyn
   await expect(rows.first()).toHaveAttribute('data-selected', 'true')
 })
 
+for (const mode of ['full', 'inline'] as const) {
+  test(`selects whole recipient chips and copies their addresses in the ${mode} composer`, async ({
+    page
+  }) => {
+    const composer = new ComposerPage(page)
+    if (mode === 'full') {
+      await composer.openNew()
+    } else {
+      await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
+      await composer.openReply()
+    }
+    await page.getByTestId('composer-show-copies').click()
+    const recipients = [
+      { field: 'to', email: 'recipient@example.com', name: 'Recipient' },
+      { field: 'cc', email: 'named@example.com', name: 'Named Recipient' },
+      {
+        field: 'bcc',
+        email: 'a.long.recipient.address.that.is.truncated@example.com',
+        name: 'confabulation-corporation/ai-workflows'
+      }
+    ] as const
+    for (const { field, email, name } of recipients) {
+      await composer.addRecipient(name ? `${name} <${email}>` : email, field)
+    }
+    for (const { field, email, name } of recipients) {
+      const chip = composer.recipientChip(email, field)
+      // Select the visible name, not the small, potentially truncated address.
+      await chip.getByText(name, { exact: true }).click()
+      await expect(chip).toHaveAttribute('data-selected', 'true')
+      await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toContain(email)
+      // Paste into a native input to verify the system clipboard, without mocking copy.
+      const input = composer.recipientField(field).locator('input')
+      const checkCopy = async (): Promise<void> => {
+        await page.keyboard.press('ControlOrMeta+c')
+        await input.focus()
+        await input.press('ControlOrMeta+v')
+        await expect(input).toHaveValue(email)
+        await input.fill('')
+        await expect(chip).toHaveAttribute('data-selected', 'false')
+      }
+      await checkCopy()
+      // The chip padding and keyboard focus select the same complete recipient.
+      await chip.click({ position: { x: 2, y: 2 } })
+      await expect(chip).toHaveAttribute('data-selected', 'true')
+      await checkCopy()
+      await chip.getByRole('button', { name: `Remove ${email}`, exact: true }).focus()
+      await page.keyboard.press('Shift+Tab')
+      await expect(chip.getByTestId('recipient-select')).toBeFocused()
+      await checkCopy()
+    }
+    await composer.expectRecipients(
+      mode === 'inline' ? ['maya+roadmap@example.com', 'recipient@example.com'] : ['recipient@example.com']
+    )
+    await composer.expectRecipients(['named@example.com'], 'cc')
+    await composer.expectRecipients([recipients[2].email], 'bcc')
+    const artifactDirectory = join(__dirname, '.artifacts')
+    mkdirSync(artifactDirectory, { recursive: true })
+    await composer.recipientChip(recipients[2].email, 'bcc').getByTestId('recipient-select').click()
+    await page.evaluate(() => window.getSelection()?.removeAllRanges())
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      await expect(page.locator('html')).toHaveAttribute('data-theme', new RegExp(`${colorScheme}$`))
+      await page.screenshot({ path: join(artifactDirectory, `recipient-copy-${mode}-${colorScheme}.png`) })
+    }
+    await composer.chips('cc').getByRole('button', { name: 'Remove named@example.com' }).click()
+    await composer.expectRecipients([], 'cc')
+  })
+}
+
 test('keeps pending inline recipients when collapsing the envelope', async ({ page }) => {
   await page.getByTestId('thread-subject').getByText('Q3 roadmap review', { exact: true }).click()
   const composer = new ComposerPage(page)
