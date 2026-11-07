@@ -215,9 +215,11 @@ function isThreadListRequest(value: unknown): value is ThreadListRequest {
     splitId?: unknown
     cursor?: unknown
     threadId?: unknown
+    unreadOnly?: unknown
   }
   if (request.cursor !== undefined && !isThreadPageCursor(request.cursor)) return false
   if (request.threadId !== undefined && !nonEmptyString(request.threadId)) return false
+  if (request.unreadOnly !== undefined && typeof request.unreadOnly !== 'boolean') return false
   if (request.view === 'label') return nonEmptyString(request.labelId)
   if (request.splitId !== undefined && (request.view !== 'inbox' || !nonEmptyString(request.splitId))) {
     return false
@@ -973,25 +975,42 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     const cursor = input.cursor ?? null
     const limit = input.threadId ? 1 : THREAD_PAGE_SIZE + 1
     if (input.view === 'label') {
-      return threadPage(listLabelThreads(context.db, account, input.labelId, limit, cursor, input.threadId))
+      return threadPage(
+        listLabelThreads(context.db, account, input.labelId, limit, cursor, input.threadId, input.unreadOnly)
+      )
     }
     if (input.view === 'inbox') {
       if (!input.splitId) {
-        return threadPage(listInboxThreads(context.db, account, limit, cursor, undefined, input.threadId))
+        return threadPage(
+          listInboxThreads(context.db, account, limit, cursor, undefined, input.threadId, input.unreadOnly)
+        )
       }
       return context.db.transaction(() => {
         const revision = splitRevision(context.db, account)
         return threadPage(
-          listInboxThreads(context.db, account, limit, cursor, input.splitId, input.threadId),
+          listInboxThreads(
+            context.db,
+            account,
+            limit,
+            cursor,
+            input.splitId,
+            input.threadId,
+            input.unreadOnly
+          ),
           false,
           revision
         )
       })()
     }
     if (input.view === 'snoozed') {
-      return threadPage(listSnoozedThreads(context.db, account, limit, cursor, input.threadId), true)
+      return threadPage(
+        listSnoozedThreads(context.db, account, limit, cursor, input.threadId, input.unreadOnly),
+        true
+      )
     }
-    return threadPage(listMailboxThreads(context.db, account, input.view, limit, cursor, input.threadId))
+    return threadPage(
+      listMailboxThreads(context.db, account, input.view, limit, cursor, input.threadId, input.unreadOnly)
+    )
   })
   handle(IPC_CHANNELS.mailListLabels, () => {
     const account = context.currentAccountId()

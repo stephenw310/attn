@@ -97,6 +97,7 @@ interface ThreadListProps {
   hasMore?: boolean
   loadingMore?: boolean
   loadingInitial?: boolean
+  emptyText?: string
   syncing: boolean
   readerOpen: boolean
   selectedIndex: number
@@ -194,6 +195,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
     hasMore = false,
     loadingMore = false,
     loadingInitial = false,
+    emptyText,
     syncing,
     readerOpen,
     selectedIndex,
@@ -536,7 +538,7 @@ export const ThreadList = memo(function ThreadList(props: ThreadListProps): Reac
           ) : syncing ? (
             'Syncing your inbox…'
           ) : (
-            EMPTY_TEXT[view]
+            (emptyText ?? EMPTY_TEXT[view])
           )}
         </div>
       )}

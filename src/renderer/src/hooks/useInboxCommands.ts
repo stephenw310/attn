@@ -16,6 +16,8 @@ type SelectedTriage =
   | { kind: 'star' | 'markUnread'; on: boolean }
 
 interface Options {
+  unreadOnly: boolean
+  toggleUnreadOnly: () => void
   /** Whether a row is focused at all — the commands' registration condition. */
   hasSelection: boolean
   /** Which row, read when a command runs: it moves on every J/K (P1). */
@@ -81,6 +83,8 @@ interface Options {
 
 export function useInboxCommands(options: Options): void {
   const {
+    unreadOnly,
+    toggleUnreadOnly,
     hasSelection,
     selectedRef,
     selectedCount,
@@ -139,6 +143,13 @@ export function useInboxCommands(options: Options): void {
     () =>
       registerCommands([
         createCommand('search.open', openSearch),
+        ...(!readerOpen && !searchOpen && view !== 'drafts' && view !== 'outbox'
+          ? [
+              createCommand('inbox.filterUnread', toggleUnreadOnly, {
+                title: unreadOnly ? 'Show all conversations' : 'Show unread conversations'
+              })
+            ]
+          : []),
         ...(searchOpen && !readerOpen && !searchBrowsing
           ? [createCommand('search.submit', submitSearch)]
           : []),
@@ -290,6 +301,8 @@ export function useInboxCommands(options: Options): void {
         })
       ]),
     [
+      unreadOnly,
+      toggleUnreadOnly,
       accountCommands,
       clearSelection,
       clearSearch,

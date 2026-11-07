@@ -21,6 +21,8 @@ const noop = (): void => {}
 // One base object, so a re-render only changes what the override names — the
 // shell memoizes `splitCommands` and `accountCommands` for the same reason.
 const BASE = (() => ({
+  unreadOnly: false,
+  toggleUnreadOnly: noop,
   hasSelection: true,
   selectedRef: { current: { id: 'thread-1' } as { id: string } | undefined },
   selectedCount: 0,

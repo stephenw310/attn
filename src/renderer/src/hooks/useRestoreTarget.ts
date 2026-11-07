@@ -14,9 +14,10 @@ export function useRestoreTarget(
   cursor: ThreadPageCursor | null,
   splitId: string | null,
   splitRevision: number | undefined,
-  mailRevision: number
+  mailRevision: number,
+  unreadOnly = false
 ): boolean | null {
-  const key = JSON.stringify([view, threadId, cursor, splitId, splitRevision, mailRevision])
+  const key = JSON.stringify([view, threadId, cursor, splitId, splitRevision, mailRevision, unreadOnly])
   const [result, setResult] = useState<{ key: string; present: boolean } | null>(null)
   useEffect(() => {
     if (!view || !threadId || !window.attn) return
@@ -29,7 +30,7 @@ export function useRestoreTarget(
           : { view: 'label', labelId: userLabelId(view) ?? '' }
     let canceled = false
     void window.attn.mail
-      .findThreadInView(request, threadId)
+      .findThreadInView({ ...request, ...(unreadOnly ? { unreadOnly } : {}) }, threadId)
       .then((page) => {
         if (canceled) return
         // The list waits for the same rule revision before restoring a split.
@@ -42,7 +43,7 @@ export function useRestoreTarget(
     return () => {
       canceled = true
     }
-  }, [key, splitId, splitRevision, threadId, view])
+  }, [key, splitId, splitRevision, threadId, view, unreadOnly])
   if (!threadId || !window.attn) return false
   return result?.key === key ? result.present : null
 }

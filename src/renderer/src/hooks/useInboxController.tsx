@@ -88,6 +88,7 @@ export function useInboxController({
     setView(next)
   }, [])
   const [pendingChord, setPendingChord] = useState<string | null>(null)
+  const [unreadOnly, setUnreadOnly] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [footerCollapsed, setFooterCollapsed] = useState(() => readFooterCollapsed())
@@ -212,7 +213,9 @@ export function useInboxController({
     selectedDraftIdRef,
     setMailboxSelectedIndex,
     splits.state !== null,
-    inboxListOnScreen
+    inboxListOnScreen,
+    unreadOnly,
+    view !== 'drafts' && view !== 'outbox' && readerOpen && !searchOpen
   )
   const records = useViewRecords({
     account: activeAccount,
@@ -276,6 +279,7 @@ export function useInboxController({
   const activeInboxSelectionReady = activeInboxRowsReady && !loadedInboxSplitStale
   const showInboxZero = Boolean(
     !searchOpen &&
+      !unreadOnly &&
       view === 'inbox' &&
       !readerOpen &&
       activeInboxRowsResolved &&
@@ -351,8 +355,9 @@ export function useInboxController({
   const pagedView = searchOpen || view === 'drafts' || view === 'outbox' ? null : (view as PagedThreadView)
   const activePageState = pagedView ? threadPagination[pagedView] : undefined
   const systemPagedView = pagedView && !userLabelId(pagedView) ? (pagedView as ThreadListView) : null
-  const exactSystemThreadCount =
-    systemPagedView === 'inbox' && splits.activeSplitId
+  const exactSystemThreadCount = unreadOnly
+    ? null
+    : systemPagedView === 'inbox' && splits.activeSplitId
       ? (splits.state?.splits.find((split) => split.id === splits.activeSplitId)?.total ?? null)
       : systemPagedView
         ? (realMailboxCounts?.[systemPagedView] ?? null)
@@ -627,6 +632,7 @@ export function useInboxController({
     loadedInboxSplitStale,
     activateInboxSplitCache,
     inboxSplitRevision,
+    unreadOnly,
     mailRevision,
     selectedIndex,
     readerOpen,
@@ -647,6 +653,16 @@ export function useInboxController({
     selectedDraftIdRef
   })
   const { switchView, switchSplit, moveSplit, openOutbox, closeOutbox } = navigation
+  const toggleUnreadOnly = useCallback(() => {
+    navigation.cancelPendingRestores()
+    records.splitRecords.current.clear()
+    records.viewRecords.current.clear()
+    clearSelection()
+    selectedThreadIdRef.current = null
+    setSelectedIndex(0)
+    if (listElRef.current) listElRef.current.scrollTop = 0
+    setUnreadOnly((value) => !value)
+  }, [clearSelection, navigation.cancelPendingRestores, records.splitRecords, records.viewRecords])
 
   useFocusThreadTarget({
     account: activeAccount,
@@ -656,7 +672,10 @@ export function useInboxController({
     focusMailboxThread,
     switchView,
     switchAccount: accounts.switchAccount,
-    clearSelection,
+    clearSelection: () => {
+      clearSelection()
+      setUnreadOnly(false)
+    },
     cancelPendingRestores: navigation.cancelPendingRestores,
     setSelectedIndex,
     setReaderOpen,
@@ -797,6 +816,8 @@ export function useInboxController({
   }, [moveSplit, splits.state, switchSplit])
 
   useInboxCommands({
+    unreadOnly,
+    toggleUnreadOnly,
     hasSelection: selected !== undefined,
     selectedRef,
     selectedCount: selectedIds.size,
@@ -902,6 +923,8 @@ export function useInboxController({
   }, [accountSwitchPendingRef])
 
   return {
+    unreadOnly,
+    toggleUnreadOnly,
     clearSelection,
     openSnooze,
     undoFromToast,

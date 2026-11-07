@@ -138,6 +138,7 @@ export const COMMAND_SPECS = {
     shortcutAliases: ['ArrowRight'],
     context: 'list'
   },
+  'inbox.filterUnread': { title: 'Show unread conversations', shortcut: 'Shift+U', context: 'list' },
   'split.manage': { title: 'Manage inbox splits', shortcut: 'Mod+Shift+S', context: 'global' },
   'account.add': { title: 'Add account…', context: 'global' },
   'account.remove': { title: 'Sign out', context: 'global' },

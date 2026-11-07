@@ -138,6 +138,7 @@ export type ThreadListRequest = (
   | { view: Exclude<ThreadListView, 'inbox'>; cursor?: ThreadPageCursor }
   | { view: 'label'; labelId: string; cursor?: ThreadPageCursor }
 ) & {
+  unreadOnly?: boolean
   /** Check one thread's membership without paging through the mailbox. */
   threadId?: string
 }

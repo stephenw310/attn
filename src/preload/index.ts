@@ -171,19 +171,32 @@ const api = {
     listThreadPage: (
       view: Exclude<ThreadListView, 'snoozed'>,
       cursor?: ThreadPageCursor,
-      splitId?: string
+      splitId?: string,
+      unreadOnly = false
     ): Promise<ThreadPage> =>
       listThreadPage({
         view,
         ...(cursor ? { cursor } : {}),
-        ...(view === 'inbox' && splitId ? { splitId } : {})
+        ...(view === 'inbox' && splitId ? { splitId } : {}),
+        ...(unreadOnly ? { unreadOnly } : {})
       }),
-    listLabelThreadPage: (labelId: string, cursor?: ThreadPageCursor): Promise<ThreadPage> =>
-      listThreadPage({ view: 'label', labelId, ...(cursor ? { cursor } : {}) }),
-    listSnoozedPage: (cursor?: ThreadPageCursor): Promise<ThreadPage<SnoozedThreadRow>> =>
-      listThreadPage({ view: 'snoozed', ...(cursor ? { cursor } : {}) }) as Promise<
-        ThreadPage<SnoozedThreadRow>
-      >,
+    listLabelThreadPage: (
+      labelId: string,
+      cursor?: ThreadPageCursor,
+      unreadOnly = false
+    ): Promise<ThreadPage> =>
+      listThreadPage({
+        view: 'label',
+        labelId,
+        ...(cursor ? { cursor } : {}),
+        ...(unreadOnly ? { unreadOnly } : {})
+      }),
+    listSnoozedPage: (cursor?: ThreadPageCursor, unreadOnly = false): Promise<ThreadPage<SnoozedThreadRow>> =>
+      listThreadPage({
+        view: 'snoozed',
+        ...(cursor ? { cursor } : {}),
+        ...(unreadOnly ? { unreadOnly } : {})
+      }) as Promise<ThreadPage<SnoozedThreadRow>>,
     listLabels: (): Promise<MailLabel[]> => invoke(IPC_CHANNELS.mailListLabels),
     getMailboxCounts: (): Promise<SystemMailboxCounts> => invoke(IPC_CHANNELS.mailGetMailboxCounts),
     getUnreadCount: (): Promise<number> => invoke(IPC_CHANNELS.mailGetUnreadCount),

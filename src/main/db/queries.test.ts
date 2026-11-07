@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { ThreadPageCursor } from '../../shared/mail'
 import { ensureSplitSetup } from '../splits'
 import { type Db, openDatabase } from '.'
 import {
@@ -88,6 +89,38 @@ describe('thread list queries', () => {
       })
     ])
     expect(listInboxThreads(db, 'account').map((thread) => thread.id)).toEqual(['newest', 'older'])
+  })
+
+  it('filters unread inbox rows before paging, including follow-ups, splits, and undated mail', () => {
+    ensureSplitSetup(db, 'account')
+    const insertThread = db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at, is_unread)
+       VALUES ('account', ?, ?, ?, ?)`
+    )
+    const insertLabel = db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES ('account', ?, 'INBOX')"
+    )
+    for (const [id, at, unread] of [
+      ['read-newer', 1000, 0],
+      ['unread-older', 50, 1],
+      ['unread-undated', null, 1]
+    ] as const) {
+      insertThread.run(id, id, at, unread)
+      insertLabel.run(id)
+    }
+    db.prepare(
+      `INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+       VALUES ('account', 'older', 'follow_up', 1000, 'returned'),
+              ('account', 'newest', 'follow_up', 500, 'returned')`
+    ).run()
+    const read = (cursor: ThreadPageCursor | null = null) =>
+      listInboxThreads(db, 'account', 1, cursor, 'fallback:other', undefined, true)
+    expect(read().map((row) => row.id)).toEqual(['newest'])
+    expect(read({ at: 500, id: 'newest', tier: 'followUp' }).map((row) => row.id)).toEqual(['unread-older'])
+    expect(read({ at: 50, id: 'unread-older' }).map((row) => row.id)).toEqual(['unread-undated'])
+    expect(read({ at: 0, id: 'unread-undated' })).toEqual([])
+    expect(listInboxThreads(db, 'account', 1, null, undefined, 'older', true)).toEqual([])
+    expect(listInboxThreads(db, 'account', 1, null, 'base:important', undefined, true)).toEqual([])
   })
 
   it('continues inbox pages after a timestamp and thread-id cursor', () => {
@@ -192,6 +225,71 @@ describe('thread list queries', () => {
       ])
     }
   )
+
+  it('filters every mailbox and user label before applying the page limit', () => {
+    db.prepare(
+      "INSERT INTO labels (account_id, id, name, type) VALUES ('account', 'Label_Filter', 'Filter', 'user')"
+    ).run()
+    const insertThread = db.prepare(
+      "INSERT INTO threads (account_id, id, last_msg_at, is_unread) VALUES ('account', ?, ?, ?)"
+    )
+    const insertLabel = db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES ('account', ?, ?)"
+    )
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (account_id, id, thread_id, internal_date, labels_json)
+       VALUES ('account', ?, ?, ?, ?)`
+    )
+    for (const group of ['normal', 'spam', 'trash', 'snoozed']) {
+      for (let index = 0; index < 3; index++) {
+        const id = `${group}-${index}`
+        const unread = index > 0
+        const labels =
+          group === 'spam' ? ['SPAM'] : group === 'trash' ? ['TRASH'] : ['SENT', 'STARRED', 'Label_Filter']
+        insertThread.run(id, 1000 - index, unread ? 1 : 0)
+        for (const label of labels) insertLabel.run(id, label)
+        insertMessage.run(
+          `m-${id}`,
+          id,
+          1000 - index,
+          JSON.stringify([...labels, ...(unread ? ['UNREAD'] : [])])
+        )
+        if (group === 'snoozed') {
+          db.prepare(`INSERT INTO reminders (account_id, thread_id, kind, due_at, state)
+            VALUES ('account', ?, 'snooze', ?, 'pending')`).run(id, index)
+        }
+      }
+    }
+    fillMembership(db)
+    for (const view of ['allMail', 'sent', 'starred', 'spam', 'trash'] as const) {
+      const page = listMailboxThreads(db, 'account', view, 1, null, undefined, true)
+      expect(page).toHaveLength(1)
+      expect(page[0].unread).toBe(true)
+      const next = listMailboxThreads(
+        db,
+        'account',
+        view,
+        1,
+        { at: page[0].lastMsgAt, id: page[0].id },
+        undefined,
+        true
+      )
+      expect(next).toHaveLength(1)
+      expect(next[0].unread).toBe(true)
+      expect(next[0].id).not.toBe(page[0].id)
+    }
+    expect(listLabelThreads(db, 'account', 'Label_Filter', 1, null, undefined, true)[0].unread).toBe(true)
+    expect(listSnoozedThreads(db, 'account', 1, null, undefined, true)[0].id).toBe('snoozed-1')
+    expect(listSnoozedThreads(db, 'account', 1, { at: 1, id: 'snoozed-1' }, undefined, true)[0].id).toBe(
+      'snoozed-2'
+    )
+    // Junk unread state comes from matching messages, even when the normal thread summary is read.
+    db.prepare("UPDATE threads SET is_unread = 0 WHERE id = 'spam-1'").run()
+    expect(listMailboxThreads(db, 'account', 'spam', 1, null, undefined, true)[0]).toMatchObject({
+      id: 'spam-1',
+      unread: true
+    })
+  })
 
   it('returns pending snoozes with their labels', () => {
     expect(listSnoozedThreads(db, 'account')).toEqual([
