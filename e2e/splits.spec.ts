@@ -4,7 +4,7 @@ import type { ElectronApplication, Page } from '@playwright/test'
 import { TEST_CHANNELS } from '../src/shared/ipc'
 import { expect, test } from './electron'
 import { runPaletteCommand } from './nav'
-import { emitFocusThread } from './seams'
+import { emitFocusThread, flushRendererIpc } from './seams'
 
 test.use({ seed: 'fixtures/seed-splits.json' })
 
@@ -531,3 +531,93 @@ test('places splits below the title and remembers the hidden hint bar', async ({
   await expect(relaunched.page.getByTestId('mail-footer')).toBeVisible()
   await expect(relaunched.page.getByTestId('footer-toggle')).toHaveAttribute('aria-expanded', 'true')
 })
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`filters unread conversations across splits in ${theme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: theme })
+    await expect(page.locator('html')).toHaveAttribute('data-theme-appearance', theme)
+    const rows = page.getByTestId('thread-row')
+    const filter = page.getByTestId('mail-unread-filter')
+    const calendar = page.locator('[data-testid="split-tab"][data-split-id="preset:calendar"]')
+    const other = page.locator('[data-testid="split-tab"][data-split-id="fallback:other"]')
+    await calendar.click()
+    await expect(rows).toHaveCount(2)
+    await expect(filter).toHaveAttribute('aria-pressed', 'false')
+    await expect(filter).toHaveText('')
+    await expect(filter).toHaveAccessibleName('Show unread conversations')
+    await expect(filter).toHaveAttribute('aria-keyshortcuts', 'Shift+U')
+    await filter.focus()
+    await expect(page.getByRole('tooltip')).toHaveText('Show unread conversations (⇧U)')
+    await filter.click()
+    await expect(filter).toHaveAttribute('aria-pressed', 'true')
+    await expect(filter).toHaveAccessibleName('Show all conversations')
+    await expect(rows).toHaveCount(1)
+    await expect(rows).toContainText('Planning check-in tomorrow')
+    await page.keyboard.press('Shift+U')
+    await expect(filter).toHaveAttribute('aria-pressed', 'false')
+    await expect(rows).toHaveCount(2)
+    await page.keyboard.press('Shift+U')
+    await expect(filter).toHaveAttribute('aria-pressed', 'true')
+    await expect(rows).toHaveCount(1)
+    mkdirSync(join(__dirname, '.artifacts'), { recursive: true })
+    await page.screenshot({
+      path: join(__dirname, `.artifacts/unread-filter-${theme}.png`),
+      animations: 'disabled'
+    })
+
+    await other.click()
+    await expect(filter).toHaveAttribute('aria-pressed', 'true')
+    await expect(rows).toHaveCount(1)
+    await expect(rows).toContainText('Dinner Friday?')
+    await calendar.click()
+    await expect(rows).toContainText('Planning check-in tomorrow')
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('conversation-subject')).toHaveText('Planning check-in tomorrow')
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const result = await window.attn.mail.findThreadInView(
+            { view: 'inbox', unreadOnly: true },
+            't-calendar-sender'
+          )
+          return result.rows.length
+        })
+      )
+      .toBe(0)
+    await flushRendererIpc(page)
+    await expect(page.getByTestId('conversation-subject')).toHaveText('Planning check-in tomorrow')
+    await runPaletteCommand(page, 'Mark unread')
+    await page.keyboard.press('Escape')
+    await expect(rows).toHaveCount(1)
+    await expect(rows).toContainText('Planning check-in tomorrow')
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('conversation-subject')).toHaveText('Planning check-in tomorrow')
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const result = await window.attn.mail.findThreadInView(
+            { view: 'inbox', unreadOnly: true },
+            't-calendar-sender'
+          )
+          return result.rows.length
+        })
+      )
+      .toBe(0)
+    await flushRendererIpc(page)
+    await page.keyboard.press('Escape')
+    await expect(rows).toHaveCount(0)
+    await expect(page.getByTestId('thread-list')).toContainText('No unread conversations')
+    await expect(page.getByTestId('inbox-zero')).toHaveCount(0)
+    await page.screenshot({
+      path: join(__dirname, `.artifacts/unread-filter-empty-${theme}.png`),
+      animations: 'disabled'
+    })
+
+    await runPaletteCommand(page, 'Show all conversations')
+    await expect(filter).toHaveAttribute('aria-pressed', 'false')
+    await expect(rows).toHaveCount(2)
+    await runPaletteCommand(page, 'Show unread conversations')
+    await expect(filter).toHaveAttribute('aria-pressed', 'true')
+    await expect(rows).toHaveCount(0)
+  })
+}

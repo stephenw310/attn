@@ -493,3 +493,76 @@ describe('split save validation and triage status', () => {
     }
   })
 })
+
+describe('Inbox unread filter', () => {
+  it('pages unread matches past newer read conversations', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    const insertThread = db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at, is_unread)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    const insertLabel = db.prepare(
+      "INSERT INTO thread_labels (account_id, thread_id, label_id) VALUES (?, ?, 'INBOX')"
+    )
+    for (let index = 0; index < 215; index++) {
+      const id = `thread-${String(index).padStart(3, '0')}`
+      insertThread.run(ACCOUNT, id, id, 1000 - index, index >= 110 ? 1 : 0)
+      insertLabel.run(ACCOUNT, id)
+    }
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+    try {
+      const first = await handlers.invoke(IPC_CHANNELS.mailListThreads, [{ view: 'inbox', unreadOnly: true }])
+      expect(first.rows).toHaveLength(100)
+      expect(first.rows[0].id).toBe('thread-110')
+      expect(first.rows.every((row) => row.unread)).toBe(true)
+      const second = await handlers.invoke(IPC_CHANNELS.mailListThreads, [
+        { view: 'inbox', unreadOnly: true, cursor: first.nextCursor ?? undefined }
+      ])
+      expect(second.rows.map((row) => row.id)).toEqual([
+        'thread-210',
+        'thread-211',
+        'thread-212',
+        'thread-213',
+        'thread-214'
+      ])
+      expect(second.nextCursor).toBeNull()
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+
+  it('validates the Inbox unread filter at the service boundary', async () => {
+    const db = openDatabase(':memory:')
+    ensureAccount(db, ACCOUNT, ACCOUNT)
+    db.prepare(
+      `INSERT INTO threads (account_id, id, subject, last_msg_at, is_unread)
+       VALUES (?, 'read', 'Read', 200, 0), (?, 'unread', 'Unread', 100, 1)`
+    ).run(ACCOUNT, ACCOUNT)
+    db.prepare(
+      `INSERT INTO thread_labels (account_id, thread_id, label_id)
+       VALUES (?, 'read', 'INBOX'), (?, 'unread', 'INBOX')`
+    ).run(ACCOUNT, ACCOUNT)
+    const handlers = createServiceHandlers(handlerContext(db, emptyProvider))
+    try {
+      const filtered = await handlers.invoke(IPC_CHANNELS.mailListThreads, [
+        { view: 'inbox', unreadOnly: true }
+      ])
+      expect(filtered.rows.map((row) => row.id)).toEqual(['unread'])
+      for (const request of [
+        { view: 'inbox', unreadOnly: 'true' },
+        { view: 'allMail', unreadOnly: 'true' },
+        { view: 'label', labelId: 'label', unreadOnly: 1 }
+      ]) {
+        expect(await handlers.invoke(IPC_CHANNELS.mailListThreads, [request as never])).toEqual({
+          rows: [],
+          nextCursor: null
+        })
+      }
+    } finally {
+      handlers.stop()
+      db.close()
+    }
+  })
+})

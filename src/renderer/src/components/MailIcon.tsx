@@ -1,4 +1,5 @@
 const paths = {
+  unread: 'M21 12v8H3V6h10 M3 6l9 7 4-3',
   sidebar: 'M4 4h16v16H4z M9 4v16',
   splits: 'M4 4h16v16H4z M9 4v16M15 4v16',
   inbox: 'M3 4h18v16H3z M3 13h5l2 3h4l2-3h5',
@@ -27,6 +28,7 @@ export function MailIcon({ name }: { name: keyof typeof paths }): React.JSX.Elem
       strokeLinejoin="round"
     >
       <path d={paths[name]} />
+      {name === 'unread' && <circle cx="20" cy="5" r="3" className="fill-current stroke-none" />}
     </svg>
   )
 }

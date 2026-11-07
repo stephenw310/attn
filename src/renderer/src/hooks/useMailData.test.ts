@@ -203,7 +203,7 @@ describe('useMailData mailbox refreshes', () => {
     const heldPreload = deferred<ThreadPage>()
     listThreadPage.mockReturnValueOnce(heldPreload.promise)
     currentState().preloadInboxSplits(['preset:calendar', 'preset:newsletters'])
-    expect(listThreadPage).toHaveBeenLastCalledWith('inbox', undefined, 'preset:calendar')
+    expect(listThreadPage).toHaveBeenLastCalledWith('inbox', undefined, 'preset:calendar', false)
     const requestsBeforeUnmount = listThreadPage.mock.calls.length
     await act(async () => {
       root.unmount()
@@ -511,7 +511,7 @@ describe('useMailData mailbox refreshes', () => {
       root.render(createElement(Harness))
       await Promise.resolve()
     })
-    expect(listThreadPage).toHaveBeenCalledWith('inbox', undefined, undefined)
+    expect(listThreadPage).toHaveBeenCalledWith('inbox', undefined, undefined, false)
 
     activeViewRef.current = 'allMail'
     await act(async () => {
@@ -628,7 +628,7 @@ describe('useMailData mailbox refreshes', () => {
       })
 
       expect(targetIndex).toBe(THREAD_PAGE_SIZE)
-      expect(listThreadPage).toHaveBeenLastCalledWith('inbox', firstPageCursor, undefined)
+      expect(listThreadPage).toHaveBeenLastCalledWith('inbox', firstPageCursor, undefined, false)
       expect(currentState().realThreads).toHaveLength(THREAD_PAGE_SIZE + 1)
       expect(currentState().realThreads?.at(-1)?.id).toBe(target.id)
       await act(async () => {
@@ -710,7 +710,7 @@ describe('useMailData mailbox refreshes', () => {
       await Promise.resolve()
     })
 
-    expect(listThreadPage).toHaveBeenCalledWith('inbox', undefined, 'preset:github')
+    expect(listThreadPage).toHaveBeenCalledWith('inbox', undefined, 'preset:github', false)
     expect(results.at(-1)?.realThreads).toBeNull()
     expect(results.at(-1)?.loadedInboxSplitId).toBeNull()
   })

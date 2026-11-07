@@ -74,6 +74,9 @@ A 190-pixel sidebar contains mailboxes and user labels. A persistent control and
 The content area switches between the conversation list and a focused reader. New mail uses a full-window composer. Replies and forwards use an inline composer under the source conversation.
 
 The top bar shows account controls and pending mail activity without an unread-progress meter. It leaves native window controls unobstructed. The mailbox title sits above the Inbox splits without enclosing header borders. The top-bar controls start at the expanded sidebar boundary and stay there when the sidebar closes. Write stays in the top bar outside the sidebar. The sidebar and keyboard-hint toggles sit together. The hint footer uses the page background and boxed keycaps without a contrasting panel. A columns icon directly after the last visible split opens the split-rule manager, before the overflow menu. Tab labels keep the same font weight and do not show hover tooltips. Each tab fits its label and visible unread count. Zero unread counts reserve no space; tabs resize when counts change. Settings are available from the account menu and command palette. `Mod+Shift+S` opens split rules.
+
+An icon-only unread-envelope toggle sits beside the mailbox title. Its tooltip shows the action and `Shift+U` shortcut. It filters conversations locally before pagination and stays enabled across mailbox and split changes. Inbox, Starred, Sent, All Mail, Snoozed, Spam, Trash, and user labels support the filter. Drafts and Outbox omit it. `Shift+U` and the command palette offer the same toggle in supported mailbox lists. It starts off when the account view mounts. Opening a conversation keeps the reader stable after auto-read; returning to the list removes read conversations. An empty filtered list shows "No unread conversations" without the Inbox zero scene.
+
 Reader and new-message headers use one clickable `Esc` close control. Settings uses one Back to mail control with an `Esc` keycap.
 Icon hints appear after 120 milliseconds on hover and immediately on keyboard focus. They include assigned shortcuts.
 
@@ -961,6 +964,7 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
 | `Enter` | Open conversation |
 | `Tab` / `Shift+Tab` | Next / previous Inbox split, wrapping at both ends; `Tab` returns to Inbox from another mailbox |
 | `←` / `→` | Previous / next Inbox split aliases |
+| `Shift+U` | Toggle the unread filter in the current mailbox list |
 | `X` | Select conversation (`Shift+J/K` or `Shift+↑/↓` extends) |
 | `G` then `I` | Go to Inbox |
 | `G` then `A` | Go to All Mail |

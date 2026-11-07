@@ -10,6 +10,7 @@ import { InboxOverlays } from './InboxOverlays'
 import { InboxZero } from './InboxZero'
 import { MailFooter } from './MailFooter'
 import { MailHeader } from './MailHeader'
+import { MailIcon } from './MailIcon'
 import { MailSidebar } from './MailSidebar'
 import { OutboxList } from './OutboxList'
 import { QuickTooltip } from './QuickTooltip'
@@ -203,9 +204,32 @@ function MailboxTop({ controller: c }: { controller: InboxController }): React.J
         />
       ) : (
         <div data-testid="mail-view-header" className="app-inbox-header flex-none">
-          <h1 data-testid="mailbox-title" className="text-ink">
-            <span data-testid="view-title">{c.activeViewTitle}</span>
-          </h1>
+          <div className="flex min-w-0 items-center gap-3">
+            <h1 data-testid="mailbox-title" className="text-ink">
+              <span data-testid="view-title">{c.activeViewTitle}</span>
+            </h1>
+            {c.view !== 'drafts' && c.view !== 'outbox' && (
+              <button
+                type="button"
+                data-testid="mail-unread-filter"
+                aria-label={c.unreadOnly ? 'Show all conversations' : 'Show unread conversations'}
+                aria-keyshortcuts="Shift+U"
+                aria-pressed={c.unreadOnly}
+                data-tooltip={`${c.unreadOnly ? 'Show all conversations' : 'Show unread conversations'} (⇧U)`}
+                onClick={(event) => {
+                  c.toggleUnreadOnly()
+                  event.currentTarget.blur()
+                }}
+                className={`app-no-drag flex size-7 flex-none cursor-pointer items-center justify-center rounded-md border transition-colors ${
+                  c.unreadOnly
+                    ? 'border-accent/40 bg-accent/10 text-accent'
+                    : 'border-transparent text-ink-dim hover:bg-active hover:text-ink'
+                }`}
+              >
+                <MailIcon name="unread" />
+              </button>
+            )}
+          </div>
           {c.view === 'inbox' && c.splits.state && (
             <SplitStrip
               splits={c.splits.state.splits}
@@ -289,6 +313,7 @@ function MailboxBody({ controller: c }: { controller: InboxController }): React.
       ) : (
         <ThreadList
           threads={c.threads}
+          emptyText={!c.searchOpen && c.unreadOnly ? 'No unread conversations' : undefined}
           view={c.searchOpen ? 'search' : threadListKind(c.view)}
           hasMore={!c.searchOpen && c.activePageState?.nextCursor !== null && c.activePageState !== undefined}
           loadingMore={!c.searchOpen && (c.activePageState?.loadingMore ?? false)}

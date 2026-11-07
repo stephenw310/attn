@@ -21,6 +21,7 @@ interface RowId {
 }
 
 interface Options {
+  unreadOnly?: boolean
   view: MailView
   /** The synchronous half of `view`; `applyView` is the only writer of both. */
   viewRef: React.RefObject<MailView>
@@ -232,7 +233,8 @@ export function useViewNavigation(options: Options): ViewNavigation {
     (activePageState?.nextCursor ?? null) as ThreadPageCursor | null,
     view === 'inbox' ? splits.activeSplitId : null,
     view === 'inbox' ? inboxSplitRevision : undefined,
-    mailRevision
+    mailRevision,
+    options.unreadOnly ?? false
   )
 
   // Restore the returning view's selection and scroll once its rows are in

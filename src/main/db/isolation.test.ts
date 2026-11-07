@@ -128,10 +128,28 @@ describe('two-account read isolation', () => {
     }
   })
 
+  it('scopes unread mailbox, label, and snoozed pages to their account', async () => {
+    const db = await twoAccountStore()
+    try {
+      db.prepare('UPDATE threads SET is_unread = 1').run()
+      db.prepare(
+        "UPDATE messages SET labels_json = json_insert(labels_json, '$[#]', 'UNREAD') WHERE labels_json IS NOT NULL"
+      ).run()
+      for (const view of ['allMail', 'sent', 'starred', 'spam', 'trash'] as const) {
+        onlyAlpha(queries.listMailboxThreads(db, A, view, THREAD_LIST_LIMIT, null, undefined, true))
+      }
+      onlyAlpha(queries.listLabelThreads(db, A, 'alpha-label', THREAD_LIST_LIMIT, null, undefined, true))
+      onlyAlpha(queries.listSnoozedThreads(db, A, THREAD_LIST_LIMIT, null, undefined, true))
+    } finally {
+      db.close()
+    }
+  })
+
   it('scopes every list, count, conversation, contact, and search read to its account', async () => {
     const db = await twoAccountStore()
 
     onlyAlpha(queries.listInboxThreads(db, A))
+    onlyAlpha(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, undefined, undefined, true))
     ensureSplitSetup(db, A)
     onlyAlpha(queries.listInboxThreads(db, A, THREAD_LIST_LIMIT, null, IMPORTANT_SPLIT_ID))
     for (const view of ['allMail', 'sent', 'starred', 'spam', 'trash'] as const) {

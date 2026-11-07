@@ -144,8 +144,14 @@ test('shows inspectable recipients and collapses plain-text signatures and quote
   await expect(details).toContainText('daniel@example.com')
   await expect(details).toContainText('maya+roadmap@example.com')
   await expect(details).toContainText('Date')
+  const messageAt = await page.evaluate(async () => {
+    const conversation = await window.attn.mail.getConversation('t-roadmap', false, 'normal')
+    const message = conversation?.messages.find((message) => message.id === 'm-roadmap-1')
+    if (!message) throw new Error('Seeded roadmap message is missing')
+    return message.at
+  })
   const timezone = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
-    .formatToParts(new Date(1_754_800_000_000))
+    .formatToParts(new Date(messageAt))
     .find((part) => part.type === 'timeZoneName')?.value
   expect(timezone).toBeTruthy()
   await expect(details).toContainText(timezone ?? '')

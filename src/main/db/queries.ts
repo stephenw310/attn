@@ -139,7 +139,8 @@ export function listMailboxThreads(
   view: LabelMailboxView,
   limit = THREAD_LIST_LIMIT,
   cursor: ThreadPageCursor | null = null,
-  threadId?: string
+  threadId?: string,
+  unreadOnly = false
 ): ThreadRow[] {
   const wrap = (visibleSql: string): string =>
     `WITH visible AS (${visibleSql})
@@ -159,6 +160,7 @@ export function listMailboxThreads(
               FROM thread_mailboxes mailbox ${threadId ? '' : 'INDEXED BY idx_thread_mailboxes_recent'}
               JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
               WHERE mailbox.account_id = ? AND mailbox.view = 'allMail'
+                ${unreadOnly ? 'AND t.is_unread = 1' : ''}
                 ${threadId ? 'AND mailbox.thread_id = ?' : ''}
                 ${descendingCursorSql(sortExpression, cursor)}
               ORDER BY mailbox_last_msg_at DESC, t.id
@@ -254,6 +256,7 @@ export function listMailboxThreads(
              ON latest.account_id = summary.account_id AND latest.thread_id = summary.thread_id
             AND latest.mailbox_rank = 1
            WHERE 1 = 1 ${descendingCursorSql(sortExpression, cursor)}
+             ${unreadOnly ? 'AND (CASE WHEN summary.has_legacy_labels = 1 THEN t.is_unread ELSE summary.is_unread END) = 1' : ''}
            ORDER BY summary.mailbox_last_msg_at DESC, t.id
            LIMIT ?
          )
@@ -277,6 +280,7 @@ export function listMailboxThreads(
               JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
               WHERE mailbox.account_id = ? AND mailbox.label_id = ?
                 AND (${labeledMailboxMembershipSql()})
+                ${unreadOnly ? 'AND t.is_unread = 1' : ''}
                 ${threadId ? 'AND t.id = ?' : ''}
                 ${descendingCursorSql(sortExpression, cursor)}
               ORDER BY mailbox_last_msg_at DESC, t.id
@@ -304,7 +308,8 @@ export function listLabelThreads(
   labelId: string,
   limit = THREAD_LIST_LIMIT,
   cursor: ThreadPageCursor | null = null,
-  threadId?: string
+  threadId?: string,
+  unreadOnly = false
 ): ThreadRow[] {
   const sortExpression = 'COALESCE(t.last_msg_at, 0)'
   const rows = db
@@ -317,6 +322,7 @@ export function listLabelThreads(
          JOIN threads t ON t.account_id = mailbox.account_id AND t.id = mailbox.thread_id
          WHERE catalog.account_id = ? AND catalog.id = ? AND lower(catalog.type) = 'user'
            AND (${labeledMailboxMembershipSql()})
+                ${unreadOnly ? 'AND t.is_unread = 1' : ''}
            ${threadId ? 'AND t.id = ?' : ''}
            ${descendingCursorSql(sortExpression, cursor)}
          ORDER BY mailbox_last_msg_at DESC, t.id
@@ -343,7 +349,8 @@ export function listInboxThreads(
   limit = THREAD_LIST_LIMIT,
   cursor: ThreadPageCursor | null = null,
   splitId?: string,
-  threadId?: string
+  threadId?: string,
+  unreadOnly = false
 ): ThreadRow[] {
   const assignment = splitId ? splitAssignmentForAccount(db, accountId) : null
   const splitFilter = assignment ? `AND (${assignment.sql}) = ?` : ''
@@ -364,6 +371,7 @@ export function listInboxThreads(
          ${recent ? 'CROSS JOIN' : 'JOIN'} thread_labels inbox
            ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
          WHERE t.account_id = ? AND t.is_inbox_visible = 1
+           ${unreadOnly ? 'AND t.is_unread = 1' : ''}
            ${recent ? 'AND t.last_msg_at > 0' : ''}
            ${undatedTail ? 'AND (t.last_msg_at IS NULL OR t.last_msg_at <= 0)' : ''}
            ${splitFilter}
@@ -393,7 +401,7 @@ export function listInboxThreads(
   // there so pagination never duplicates or skips a row.
   const tierPhase = !threadId && (!cursor || cursor.tier === 'followUp')
   const tier = tierPhase
-    ? readFollowUpTier(db, accountId, assignment ? { assignment, splitId } : null, limit, cursor)
+    ? readFollowUpTier(db, accountId, assignment ? { assignment, splitId } : null, limit, cursor, unreadOnly)
     : []
   const mailCursor = tierPhase ? null : cursor
   const mailLimit = Math.max(0, limit - tier.length)
@@ -425,7 +433,8 @@ function readFollowUpTier(
   accountId: string,
   split: { assignment: { sql: string; params: unknown[] }; splitId: string | undefined } | null,
   limit: number,
-  cursor: ThreadPageCursor | null
+  cursor: ThreadPageCursor | null,
+  unreadOnly: boolean
 ): ThreadRow[] {
   if (limit <= 0) return []
   const rows = db
@@ -438,6 +447,7 @@ function readFollowUpTier(
            ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
          WHERE fr.account_id = ? AND fr.kind = 'follow_up' AND fr.state = 'returned'
            AND t.is_inbox_visible = 1
+           ${unreadOnly ? 'AND t.is_unread = 1' : ''}
            ${split ? `AND (${split.assignment.sql}) = ?` : ''}
            ${descendingCursorSql('fr.due_at', cursor)}
          ORDER BY fr.due_at DESC, t.id
@@ -471,7 +481,8 @@ export function listSnoozedThreads(
   accountId: string,
   limit = THREAD_LIST_LIMIT,
   cursor: ThreadPageCursor | null = null,
-  threadId?: string
+  threadId?: string,
+  unreadOnly = false
 ): SnoozedThreadRow[] {
   const rows = db
     .prepare(
@@ -496,6 +507,7 @@ export function listSnoozedThreads(
          FROM live
          JOIN threads t ON t.account_id = live.account_id AND t.id = live.thread_id
          WHERE 1 = 1
+           ${unreadOnly ? 'AND t.is_unread = 1' : ''}
            ${threadId ? 'AND t.id = ?' : ''}
            ${ascendingCursorSql('live.due_at', cursor)}
          ORDER BY live.due_at ASC, t.id
