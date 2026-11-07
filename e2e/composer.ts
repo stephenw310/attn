@@ -78,6 +78,12 @@ export class ComposerPage {
     return this.recipientField(field).getByTestId('recipient-chip')
   }
 
+  recipientChip(email: string, field: RecipientField = 'to'): Locator {
+    return this.chips(field).filter({
+      has: this.page.getByRole('button', { name: `Select ${email}`, exact: true })
+    })
+  }
+
   async expandRecipients(): Promise<void> {
     await expect(this.root).toBeVisible()
     const summary = this.page.getByTestId('composer-recipient-summary')
