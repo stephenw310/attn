@@ -171,6 +171,8 @@ export const COMMAND_SPECS = {
     allowInComposer: true
   },
   'settings.menuBarIcon': { title: 'Toggle macOS menu-bar icon', context: 'global' },
+  'notifications.account.enable': { title: 'Enable notifications for this account', context: 'global' },
+  'notifications.account.disable': { title: 'Disable notifications for this account', context: 'global' },
   'notifications.pauseHour': {
     title: 'Pause notifications for 1 hour',
     context: 'global',

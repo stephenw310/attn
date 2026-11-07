@@ -53,6 +53,7 @@ const SETTINGS_PAGES = [
   { id: 'ai', title: 'AI writing', scope: 'app' },
   { id: 'snippets', title: 'Snippets', scope: 'app' },
   { id: 'about', title: 'About', scope: 'app' },
+  { id: 'accountNotifications', title: 'Notifications', scope: 'account' },
   { id: 'sync', title: 'Sync & storage', scope: 'account' },
   { id: 'compose', title: 'Signature', scope: 'account' },
   { id: 'accounts', title: 'Accounts', scope: 'connections' }
@@ -523,6 +524,43 @@ export function SettingsView({
                 </p>
               </section>
 
+              <section
+                hidden={page !== 'accountNotifications'}
+                data-testid="settings-account-notifications"
+                aria-label="Account notifications"
+              >
+                <SectionTitle>Notifications</SectionTitle>
+                <p className="mb-5 text-xs leading-[1.65] text-ink-dim">
+                  These controls apply only to {activeEmail}.
+                </p>
+                <label className={`mt-2 ${ROW}`}>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-sm text-ink">Desktop notifications</span>
+                    <span className={NOTE}>Show new-mail notifications for this account.</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    data-testid="settings-account-notifications-enabled"
+                    aria-label="Desktop notifications for this account"
+                    disabled={!accountSettings}
+                    checked={accountSettings?.notificationsEnabled ?? true}
+                    onChange={(event) => onUpdateAccountSetting('notificationsEnabled', event.target.checked)}
+                    className="app-pref-toggle"
+                  />
+                </label>
+                <p className="mt-[21px] text-[11px] leading-[1.6] text-ink-dim">
+                  Unread badges and background sync keep working when desktop notifications are off. Pausing
+                  notifications for all accounts also silences this account.
+                </p>
+                <h4 className="mb-2 mt-[29px] text-[15px] font-medium text-ink">Notification sources</h4>
+                <p className="mb-3 text-xs leading-[1.65] text-ink-dim">
+                  Choose which Inbox splits send notifications when desktop notifications are on.
+                </p>
+                <button type="button" onClick={onOpenSplits} className="py-2 text-xs text-accent">
+                  Split rules for {activeEmail} ↗
+                </button>
+              </section>
+
               <section hidden={page !== 'compose'} data-testid="settings-compose" aria-label="Compose">
                 <SectionTitle>Signature</SectionTitle>
                 <label className={`mt-2 ${ROW}`}>
@@ -664,7 +702,7 @@ export function SettingsView({
                     <span className={NOTE}>
                       {paused
                         ? `Paused until ${formatSnoozeDate(pausedUntil)} across every account.`
-                        : 'Notifications are active across every account.'}
+                        : 'Notifications are active for accounts with desktop notifications enabled.'}
                     </span>
                   </span>
                   <span className="flex flex-none items-center gap-1.5">
@@ -698,12 +736,12 @@ export function SettingsView({
                     )}
                   </span>
                 </div>
-                <h4 className="mb-2 mt-[29px] text-[15px] font-medium text-ink">Notification sources</h4>
-                <p className="mb-3 text-xs leading-[1.65] text-ink-dim">
-                  Each account chooses which Inbox splits send notifications.
-                </p>
-                <button type="button" onClick={onOpenSplits} className="py-2 text-xs text-accent">
-                  Split rules for {activeEmail} ↗
+                <button
+                  type="button"
+                  onClick={() => setPage('accountNotifications')}
+                  className="mt-[21px] py-2 text-xs text-accent"
+                >
+                  Notifications for {activeEmail} ↗
                 </button>
               </section>
 

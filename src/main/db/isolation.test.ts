@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { IMPORTANT_SPLIT_ID } from '../../shared/splits'
+import { readAccountSettings } from '../appSettings'
 import { loadSeed } from '../dev/seed'
+import { candidatesFor } from '../service/notificationQueries'
+import { deleteAccountSetting, writeAccountSetting } from '../settings'
 import { ensureSplitSetup, judgmentHash, saveSplit } from '../splits'
 import { runFtsBackfill } from '../sync/ftsBackfill'
 import { THREAD_LIST_LIMIT } from '../sync/tuning'
@@ -105,6 +108,30 @@ function onlyAlpha(rows: readonly { id: string }[]): void {
 }
 
 describe('two-account read isolation', () => {
+  it('silences only the account with desktop notifications disabled, without changing unread counts', async () => {
+    const db = await twoAccountStore()
+    try {
+      const mailA = [{ threadId: 'alpha-t1', messageId: 'm-alpha-t1' }]
+      const mailB = [{ threadId: 'beta-t1', messageId: 'm-beta-t1' }]
+      expect(readAccountSettings(db, A).notificationsEnabled).toBe(true)
+      expect(readAccountSettings(db, B).notificationsEnabled).toBe(true)
+      expect(candidatesFor(db, A, mailA)).toHaveLength(1)
+      expect(candidatesFor(db, B, mailB)).toHaveLength(1)
+
+      writeAccountSetting(db, A, 'notificationsEnabled', 'false')
+      expect(readAccountSettings(db, A).notificationsEnabled).toBe(false)
+      expect(candidatesFor(db, A, mailA)).toEqual([])
+      expect(readAccountSettings(db, B).notificationsEnabled).toBe(true)
+      expect(candidatesFor(db, B, mailB)).toHaveLength(1)
+      expect(queries.countInboxUnread(db, A)).toBe(1)
+
+      deleteAccountSetting(db, A, 'notificationsEnabled')
+      expect(candidatesFor(db, A, mailA)).toHaveLength(1)
+    } finally {
+      db.close()
+    }
+  })
+
   it('keeps snooze deadlines scoped to the account in mailbox and search rows', async () => {
     const db = await twoAccountStore()
     try {

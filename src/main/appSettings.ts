@@ -16,7 +16,14 @@ import { normalizePalette } from '../shared/theme'
 import type { Db } from './db'
 import { undoSendDelayMs } from './outbox/queue'
 import { attnSignatureEnabled } from './outbox/sendAs'
-import { deleteSetting, readSetting, settingEnabled, typedSetting, writeSetting } from './settings'
+import {
+  deleteSetting,
+  readAccountSetting,
+  readSetting,
+  settingEnabled,
+  typedSetting,
+  writeSetting
+} from './settings'
 import { storedLifetimeThreadCap } from './sync/lifetimeCap'
 
 /**
@@ -59,9 +66,15 @@ export function setRemoteImagesBlocked(db: Db, blocked: boolean): void {
   remoteImagesBlockedSetting.write(db, blocked)
 }
 
+/** An absent override preserves desktop notifications for existing and new accounts. */
+export function accountNotificationsEnabled(db: Db, accountId: string): boolean {
+  return readAccountSetting(db, accountId, 'notificationsEnabled') !== 'false'
+}
+
 /** The account-scoped snapshot for the owning account (F18 rule 9). */
 export function readAccountSettings(db: Db, accountId: string): AccountSettings {
   return {
+    notificationsEnabled: accountNotificationsEnabled(db, accountId),
     lifetimeThreadCap: storedLifetimeThreadCap(db, accountId),
     attnSignatureEnabled: attnSignatureEnabled(db, accountId)
   }

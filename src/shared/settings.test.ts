@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ALLOWED_UNDO_SEND_SECONDS } from './outboxTuning'
-import { validateAppSettingUpdate } from './settings'
+import { validateAccountSettingUpdate, validateAppSettingUpdate } from './settings'
 
 describe('validateAppSettingUpdate', () => {
   it('accepts every allowed undo-send delay and nothing else', () => {
@@ -71,4 +71,18 @@ describe('validateAppSettingUpdate', () => {
     expect(() => validateAppSettingUpdate('seedAccountIds', '[]')).toThrow('unknown setting')
     expect(() => validateAppSettingUpdate(42, true)).toThrow('unknown setting')
   })
+})
+
+it('requires a boolean for account notification enablement', () => {
+  for (const value of [true, false]) {
+    expect(validateAccountSettingUpdate('notificationsEnabled', value)).toEqual({
+      key: 'notificationsEnabled',
+      value
+    })
+  }
+  for (const value of ['false', 0, null, undefined]) {
+    expect(() => validateAccountSettingUpdate('notificationsEnabled', value)).toThrow(
+      'invalid notificationsEnabled value'
+    )
+  }
 })

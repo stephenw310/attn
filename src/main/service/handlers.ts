@@ -477,6 +477,9 @@ export function createServiceHandlers(context: ServiceHandlerContext): ServiceHa
     if (update.key === 'lifetimeThreadCap') {
       const syncController = context.activeSession()?.syncController ?? null
       applyLifetimeCapChange(context.db, syncController, account, update.value)
+    } else if (update.key === 'notificationsEnabled') {
+      if (update.value) deleteAccountSetting(context.db, account, update.key)
+      else writeAccountSetting(context.db, account, update.key, 'false')
     } else if (update.key === 'attnSignatureEnabled') {
       // Absent means on (F6). Keep an explicit false row for an opt-out; when
       // enabled again, remove the override so the account follows the default.

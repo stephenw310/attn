@@ -1,4 +1,5 @@
 import { NOTIFICATION_SUMMARY_THRESHOLD } from '../../shared/notifications'
+import { accountNotificationsEnabled } from '../appSettings'
 import type { Db } from '../db'
 import { notificationEnabledSplitIds, splitAssignmentForAccount } from '../splits'
 import type { NewMail } from '../sync/poller'
@@ -14,6 +15,7 @@ export function candidatesFor(
   accountId: string,
   newMail: readonly NewMail[]
 ): NotificationCandidate[] {
+  if (!accountNotificationsEnabled(db, accountId)) return []
   const distinct = new Map<string, NewMail>()
   for (const mail of newMail) distinct.set(mail.threadId, mail)
   if (distinct.size === 0) return []
