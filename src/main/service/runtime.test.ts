@@ -765,6 +765,32 @@ describe('ServiceRuntime with several accounts', () => {
     expect(notificationEvents(events)).toEqual([{ subjects: ['Alpha roadmap'], messageIds: ['m-alpha-2'] }])
   })
 
+  it('checks account notification enablement after a pending split judgment completes', async () => {
+    const manual = new ManualRuntimeTimers()
+    const input = makeInput()
+    const { runtime, events } = await createRuntime(input, manual.time)
+    await armTriage(runtime, { probability: 0.95 })
+    appendReply(input.dbPath)
+    historyEvents.emit('newMail', 'primary@attn.test', ARRIVAL)
+
+    await runtime.invoke(IPC_CHANNELS.settingsSetAccount, [
+      'primary@attn.test',
+      'notificationsEnabled',
+      false
+    ])
+    await runtime.internal('test', [TEST_CHANNELS.runTriagePass])
+    await flushMicrotasks()
+    expect(notificationEvents(events).flatMap((event) => event.messageIds)).toEqual([])
+
+    historyEvents.emit('newMail', 'second@attn.test', [{ threadId: 't-beta', messageId: 'm-beta' }])
+    const second = events.filter((event) => event.kind === 'notification-candidates').at(-1)
+    expect(second).toMatchObject({
+      kind: 'notification-candidates',
+      accountId: 'second@attn.test',
+      candidates: [expect.objectContaining({ threadId: 't-beta' })]
+    })
+  })
+
   it('surfaces notification candidates for inactive accounts, roster members only', async () => {
     const input = makeInput()
     const { runtime, events } = await createRuntime(input)

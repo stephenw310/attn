@@ -647,7 +647,11 @@ The inbox is divided into **splits** — tabs above the list, each an independen
   splits (i.e., the number that matters, not all mail), summed across every signed-in account (F18). An
   app-wide setting, also available from the palette, can hide either OS badge without changing notification
   delivery, split settings, or background sync.
-- **Multi-account (F18):** notifications cover every signed-in account, not just the active one. With more than one account signed in, the notification names the owning account; batching applies per account per poll cycle; and clicking a notification switches to that account before opening its thread (or its inbox, for summaries).
+- **Per-account control:** each account has a **Desktop notifications** switch, enabled by default.
+  Turning it off suppresses all desktop notifications for that account, including summaries and notifications
+  deferred for split classification. Other accounts retain their own choices. The choice persists across
+  restarts and account switches. Unread badges, split preferences, and background sync remain unchanged.
+- **Multi-account (F18):** notifications cover every enabled signed-in account, including inactive accounts. With more than one account signed in, the notification names the owning account; batching applies per account per poll cycle; and clicking a notification switches to that account before opening its thread (or its inbox, for summaries).
 - Pause notifications for one hour or until tomorrow, or resume, from settings and the palette on either
   OS. The existing tray actions use the same app-wide deadline. Pausing suppresses notifications for all
   accounts without changing their split settings, unread badges, or background sync.
@@ -687,7 +691,7 @@ normalization that `mailSurface.ts` applies today, with a per-message "View orig
 
 ### F15 — Settings
 
-Settings uses a left navigation list and one content panel. All accounts groups app-wide preferences. Current account identifies the owning email and groups Sync & storage and Signature. Connections contains Accounts. Existing palette commands open the relevant panel. Settings and split rules hide mail controls while retaining status and the profile menu. Appearance offers palette swatches. The profile menu does not repeat the palette picker. Snippets remain in Settings, with search, message previews, and an inline editor.
+Settings uses a left navigation list and one content panel. All accounts groups app-wide preferences. Current account identifies the owning email and groups Notifications, Sync & storage, and Signature. Connections contains Accounts. Existing palette commands open the relevant panel. Settings and split rules hide mail controls while retaining status and the profile menu. Appearance offers palette swatches. The profile menu does not repeat the palette picker. Snippets remain in Settings, with search, message previews, and an inline editor.
 
 Settings and the palette expose:
 
@@ -699,8 +703,9 @@ Settings and the palette expose:
 - Compose: per-account **Include "Sent with Attn"**, on by default, with a preview and a note that the
   choice affects new drafts only (F6). The palette offers the same enable/disable action.
 - Notifications: one app-wide pause/resume deadline and an app-wide unread-badge toggle for the macOS
-  Dock / Windows taskbar. Per-account split notification controls live in the Inbox header's split-rule
-  manager.
+  Dock / Windows taskbar. Current account > Notifications provides the account's **Desktop notifications**
+  switch and a link to its split-rule manager. The palette can enable or disable notifications for the
+  current account.
 - Snippet manager and theme. The split-rule manager opens from its columns icon beside the Inbox splits.
 - Background behavior: launch at login, the macOS menu-bar icon while the window is open, and the default
   email app for `mailto:` links (F16).
@@ -886,7 +891,8 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   active rather than swapping the surface. The guard is symmetric: while a switch is settling (it can wait
   on a retiring session for a few seconds), every composer open is inert, so no draft can appear only to be
   torn down when the switch lands.
-- **Scoping:** threads, labels, splits and their notification settings, contacts and recipient autocomplete ranking,
+- **Scoping:** threads, labels, splits and their notification settings, desktop notification enablement,
+  contacts and recipient autocomplete ranking,
   local and server search, snooze and follow-up reminders, drafts, outbox rows, the session undo stack,
   historical sync limit, Attn signature footer preference, and command usage all key off the owning
   account. App-level preferences stay global: theme, launch at login/tray, undo-send delay, auto-advance,
@@ -900,7 +906,7 @@ There is no unified inbox in v1 (§2) and no view ever mixes two accounts' rows.
   (lifetime sweep → attachment flags → FTS backfill) runs for one account at a time, active account first,
   so a newly added account's backfill never competes with every other account at once — and never with
   interactive work (F2's priority rules apply per account and across accounts).
-- **Notifications & badge:** per F12 — all accounts notify, clicks switch accounts before focusing, and the
+- **Notifications & badge:** per F12 — enabled accounts notify, clicks switch accounts before focusing, and the
   badge sums across accounts.
 - **Auth failure is per account:** an account whose token refresh fails pauses only itself. The account menu
   marks it *Reconnect*, the account chip carries an attention mark while any account needs reauth, and the

@@ -85,6 +85,8 @@ export const ATTN_SIGNATURE_LINE = 'Sent with Attn'
 export const ATTN_SIGNATURE_URL = 'https://useattn.com'
 
 export interface AccountSettings {
+  /** Allow desktop notifications for this account (F12). Default on. */
+  notificationsEnabled: boolean
   /**
    * Historical sync limit override (F2): conversations of additional
    * historical header fetching to allow. `null` means the compile-time
@@ -117,8 +119,9 @@ export function validateAccountSettingUpdate(key: unknown, value: unknown): Acco
       }
       return { key, value }
     }
+    case 'notificationsEnabled':
     case 'attnSignatureEnabled': {
-      if (typeof value !== 'boolean') throw new Error('invalid attnSignatureEnabled value')
+      if (typeof value !== 'boolean') throw new Error(`invalid ${key} value`)
       return { key, value }
     }
     default:

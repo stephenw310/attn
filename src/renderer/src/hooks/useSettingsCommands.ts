@@ -81,6 +81,12 @@ export function useSettingsCommands(options: Options): void {
               )
             ]
           : []),
+        createCommand('notifications.account.enable', () =>
+          updateAccountSetting('notificationsEnabled', true)
+        ),
+        createCommand('notifications.account.disable', () =>
+          updateAccountSetting('notificationsEnabled', false)
+        ),
         createCommand('notifications.pauseHour', () =>
           updateAppSetting('notificationsPausedUntil', oneHourFrom())
         ),

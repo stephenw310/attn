@@ -86,6 +86,10 @@ test('deep links open the surface on their control and direct commands act at on
     expect(harness.appWrites.at(-1)).toEqual(['remoteImagesBlocked', true])
     await harness.run('compose.attnFooter.disable')
     expect(harness.accountWrites.at(-1)).toEqual(['attnSignatureEnabled', false])
+    await harness.run('notifications.account.disable')
+    expect(harness.accountWrites.at(-1)).toEqual(['notificationsEnabled', false])
+    await harness.run('notifications.account.enable')
+    expect(harness.accountWrites.at(-1)).toEqual(['notificationsEnabled', true])
     await harness.run('composer.aiDraft')
     expect(harness.aiDraft).toHaveBeenCalledTimes(1)
 

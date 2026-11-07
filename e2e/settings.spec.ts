@@ -608,6 +608,162 @@ test.describe('historical sync limit', () => {
   })
 })
 
+test.describe('account notifications', () => {
+  test.use({ seed: 'fixtures/seed-two-accounts.json' })
+
+  test('silences new-mail batches for one account while another still notifies', async ({
+    app,
+    page,
+    mainLog
+  }) => {
+    await expect(page.getByTestId('account-menu')).toContainText('primary@attn.test')
+    await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-accountNotifications').click()
+    await page.getByTestId('settings-account-notifications-enabled').uncheck()
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.attn.settings
+            .getAccount('primary@attn.test')
+            .then((settings) => settings.notificationsEnabled)
+        )
+      )
+      .toBe(false)
+
+    async function deliver(accountId: string, count: number): Promise<void> {
+      const threads = Array.from({ length: count }, (_, index) => {
+        const thread = oldThread(`arrival-${index}`, accountId, 2026, ['INBOX', 'UNREAD', 'IMPORTANT'])
+        const messages = thread.messages
+        if (!messages?.length) throw new Error('Expected an arrival message')
+        messages[0].internalDate = String(Date.now())
+        return { ...thread, messages }
+      })
+      await emitSeam(app, TEST_CHANNELS.runHistoryCycle, {
+        announce: true,
+        records: [
+          {
+            id: '2',
+            messagesAdded: threads.map((thread) => ({
+              message: {
+                id: thread.messages[0].id,
+                threadId: thread.id,
+                labelIds: ['INBOX', 'UNREAD', 'IMPORTANT']
+              }
+            }))
+          }
+        ],
+        threads
+      })
+    }
+
+    await deliver('primary@attn.test', 4)
+    await expect.poll(() => mainLog()).toMatch(/\[notify] decision \d+ primary@attn\.test \(none\)/)
+    await page.getByTestId('settings-back').click()
+    await expect(page.getByTestId('settings-view')).toHaveCount(0)
+    await page.getByTestId('account-menu').getByRole('button').first().click()
+    await page.getByTestId('account-switch').filter({ hasText: 'second@attn.test' }).click()
+    await expect(page.getByTestId('account-menu')).toContainText('second@attn.test')
+    await app.evaluate(({ BrowserWindow }) => {
+      for (const win of BrowserWindow.getAllWindows()) win.blur()
+    })
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((win) => win.isFocused()))
+      )
+      .toBe(false)
+    await deliver('second@attn.test', 1)
+    await expect
+      .poll(() => mainLog())
+      .toMatch(/\[notify] decision \d+ second@attn\.test arrival-0 → (shown 1|suppressed)/)
+  })
+
+  test('keeps notification choices separate across switches and restart', async ({
+    boot,
+    page
+  }, testInfo) => {
+    const primary = 'primary@attn.test'
+    const secondary = 'second@attn.test'
+    const toggle = 'settings-account-notifications-enabled'
+    async function expectStored(currentPage: Page, accountId: string, enabled: boolean): Promise<void> {
+      await expect
+        .poll(() =>
+          currentPage.evaluate(
+            (id) => window.attn.settings.getAccount(id).then((settings) => settings.notificationsEnabled),
+            accountId
+          )
+        )
+        .toBe(enabled)
+    }
+
+    await expect(page.getByTestId('account-menu')).toContainText(primary)
+    await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-accountNotifications').click()
+    await expect(page.getByTestId('settings-account-notifications')).toContainText(primary)
+    await expect(page.getByTestId(toggle)).toBeChecked()
+    await page.getByTestId(toggle).uncheck()
+    await expectStored(page, primary, false)
+
+    mkdirSync(artifactDirectory, { recursive: true })
+    for (const palette of ['Matcha', 'Mist', 'Linen', 'Dusk']) {
+      await runPaletteCommand(page, `Use ${palette} color palette`)
+      await expect(page.locator('html')).toHaveAttribute('data-palette', palette.toLowerCase())
+      for (const colorScheme of ['dark', 'light'] as const) {
+        await page.emulateMedia({ colorScheme })
+        await expect(page.locator('html')).toHaveAttribute('data-theme', `dispatch-${colorScheme}`)
+        for (const scope of ['accountNotifications', 'notifications']) {
+          await page.getByTestId(`settings-nav-${scope}`).click()
+          const name = `settings-${scope}-${palette.toLowerCase()}-${colorScheme}`
+          const path = join(artifactDirectory, `${name}.png`)
+          await page.screenshot({ path })
+          await testInfo.attach(name, { path, contentType: 'image/png' })
+        }
+      }
+    }
+
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('ControlOrMeta+2')
+    await expect(page.getByTestId('account-menu')).toContainText(secondary)
+    await page.keyboard.press('ControlOrMeta+,')
+    await page.getByTestId('settings-nav-accountNotifications').click()
+    await expect(page.getByTestId('settings-account-notifications')).toContainText(secondary)
+    await expect(page.getByTestId(toggle)).toBeChecked()
+    await expectStored(page, secondary, true)
+    // A write addressed to the old account must be rejected after switching.
+    expect(
+      await page.evaluate(async (id) => {
+        try {
+          await window.attn.settings.setAccount(id, 'notificationsEnabled', true)
+          return 'accepted'
+        } catch {
+          return 'rejected'
+        }
+      }, primary)
+    ).toBe('rejected')
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('ControlOrMeta+1')
+    await expect(page.getByTestId('account-menu')).toContainText(primary)
+
+    const { page: relaunched } = await boot.relaunch()
+    await expect(relaunched.getByTestId('account-menu')).toContainText(primary)
+    await relaunched.keyboard.press('ControlOrMeta+,')
+    await relaunched.getByTestId('settings-nav-accountNotifications').click()
+    await expect(relaunched.getByTestId(toggle)).not.toBeChecked()
+    await expectStored(relaunched, primary, false)
+    await runPaletteCommand(relaunched, 'Enable notifications for this account')
+    await expect(relaunched.getByTestId(toggle)).toBeChecked()
+    await expectStored(relaunched, primary, true)
+    await runPaletteCommand(relaunched, 'Disable notifications for this account')
+    await expect(relaunched.getByTestId(toggle)).not.toBeChecked()
+    await expectStored(relaunched, primary, false)
+    await relaunched.getByTestId('settings-nav-notifications').click()
+    await expect(relaunched.getByTestId('settings-unread-badge')).toBeChecked()
+    await relaunched.getByTestId('settings-pause-hour').click()
+    await relaunched.getByTestId('settings-pause-resume').click()
+    await relaunched.getByTestId('settings-nav-accountNotifications').click()
+    await expect(relaunched.getByTestId(toggle)).not.toBeChecked()
+  })
+})
+
 test.describe('"Sent with Attn" footer', () => {
   test.use({ seed: 'fixtures/seed-two-accounts.json' })
 
